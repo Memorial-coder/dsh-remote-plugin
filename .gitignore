@@ -1,23 +1,21 @@
-# 依赖
 node_modules/
-
-# 构建中间产物 / 临时文件
-*.tmp
 lib/.client.tmp.js
 
-# 日志
-*.log
-
-# 运行态（配套核心在插件目录外，本仓库不含；这里兜底）
+# ?????(???)
 browserctl_state.json
-browserctl_secrets.json
 browserctl_sessions.json
-browserctl_blacklist.json
-browserctl_events.json
 browserctl_devices.json
+browserctl_events.json
+browserctl_blacklist.json
+browserctl_notifications.json
+browserctl_pushwin_state.json
+browserctl_secrets.json
 browserctl_admin_token
+browserctl_frpc.toml
+browserctl_*.log
+.ssh_known_hosts
+*.tmp
 
-# 系统文件
+# ????
 .DS_Store
 Thumbs.db
-desktop.ini
