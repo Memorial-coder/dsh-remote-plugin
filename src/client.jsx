@@ -10,8 +10,8 @@ const VERSION = '0.2.0'
 // 「关于」面板三个外部链接,集中一处管理,日后发布一次改齐
 const ABOUT_LINKS = {
   website: 'https://remote.ymzcc.com/dsh-remote/',
-  github: 'https://github.com/your-name/dshremote',        // TODO: 发布后替换为真实仓库地址
-  app: 'https://github.com/your-name/dshremote/releases/latest', // TODO: 发布后替换为真实 Release 下载地址
+  github: 'https://github.com/Memorial-coder/dsh-remote-plugin',
+  app: 'https://github.com/Memorial-coder/dsh-remote-plugin/releases/latest',
 }
 
 // ---------- 用户协议 / 隐私政策(「关于」面板内点击展开,参照桃源乡 legalDocuments 结构) ----------
