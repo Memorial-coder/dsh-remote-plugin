@@ -682,18 +682,30 @@ export function apply(ctx, config = {}) {
           if (!(host === 'remote.ymzcc.com' || host.endsWith('.ymzcc.com'))) {
             sendJson(res, 400, { ok: false, error: '不允许打开该地址' }); return
           }
-          try {
-            const child = spawn('cmd', ['/c', 'start', '', target.toString()], {
-              cwd: path.dirname(SCRIPT_PATH),
-              stdio: 'ignore',
-              detached: true,
-              windowsHide: true,
-            })
-            child.unref()
-            sendJson(res, 200, { ok: true })
-          } catch (e) {
-            sendJson(res, 500, { ok: false, error: String((e && e.message) || e) })
+          const href = target.toString()
+          // 多方法打开默认浏览器:cmd start → rundll32 → explorer,任一 spawn 成功即可。
+          // 即便全部失败,client 的授权页链接也能让用户手动打开,这里只上报。
+          const candidates = [
+            ['cmd', ['/c', 'start', '', href]],
+            ['rundll32', ['url.dll,FileProtocolHandler', href]],
+            ['explorer', [href]],
+          ]
+          let launched = false
+          for (const [bin, args] of candidates) {
+            try {
+              const child = spawn(bin, args, {
+                cwd: path.dirname(SCRIPT_PATH),
+                stdio: 'ignore',
+                detached: true,
+                windowsHide: true,
+              })
+              child.on('error', () => {}) // 失败静默,由 client 链接兜底
+              child.unref()
+              launched = true
+            } catch { /* 尝试下一个方法 */ }
           }
+          if (!launched) { sendJson(res, 500, { ok: false, error: '无法打开浏览器,请用下方链接手动打开' }); return }
+          sendJson(res, 200, { ok: true })
           return
         }
         if (route === '/browserctl/api/server/oauth/poll') {

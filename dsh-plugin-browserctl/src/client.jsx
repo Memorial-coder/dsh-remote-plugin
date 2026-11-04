@@ -2955,6 +2955,7 @@ function OfficialAccountCard({ t, onSaved }) {
   const [msg, setMsg] = useState('')
   const [pending, setPending] = useState(null)  // {deviceCode, userCode, verificationUri, interval}
   const pollTimer = useRef(null)
+  const [copiedOauth, setCopiedOauth] = useState(false)
 
   const loadAcct = async () => {
     try {
@@ -2990,12 +2991,28 @@ function OfficialAccountCard({ t, onSaved }) {
   }
 
   const openAuthPage = async (url) => {
-    if (!url) return
+    if (!url) return false
     try {
-      await fetch('/browserctl/api/server/oauth/open?url=' + encodeURIComponent(url), { method: 'POST', cache: 'no-store' })
+      const r = await fetch('/browserctl/api/server/oauth/open?url=' + encodeURIComponent(url), { method: 'POST', cache: 'no-store' })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok || !j.ok) {
+        setErr((j && j.error) || t('configAcctOauthOpenFail'))
+        return false
+      }
+      setErr('')
+      return true
     } catch (e) {
-      // 打开浏览器失败不影响轮询(用户可手动访问)
+      setErr(t('configAcctOauthOpenFail'))
+      return false
     }
+  }
+
+  const copyOauthUrl = (url) => {
+    if (!url) return
+    navigator.clipboard?.writeText(url).then(() => {
+      setCopiedOauth(true)
+      setTimeout(() => setCopiedOauth(false), 1600)
+    }).catch(() => {})
   }
 
   const poll = async () => {
@@ -3110,16 +3127,24 @@ function OfficialAccountCard({ t, onSaved }) {
         </label>
         <p className="dshBrowserCtlCfgNote">{t('configAcctOauthOpenBrowser')}</p>
         <div className="dshBrowserCtlCfgOauthCode">{pending.userCode}</div>
-        {msg && <p className="dshBrowserCtlCfgNote">{msg}</p>}
-        {err && <p className="dshBrowserCtlCfgErr">{err}</p>}
+        <p className="dshBrowserCtlCfgNote">
+          <a href={pending.verificationUri} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--dsw-alias-accent-strong,#4da3ff)', wordBreak: 'break-all' }}>
+            {pending.verificationUri}
+          </a>
+        </p>
         <div className="dshBrowserCtlCfgFieldRow">
           <Button variant="secondary" size="sm" onClick={() => openAuthPage(pending.verificationUri)}>
             {t('configAcctOauthOpenAgain')}
+          </Button>
+          <Button variant="secondary" size="sm" onClick={() => copyOauthUrl(pending.verificationUri)}>
+            {copiedOauth ? t('configAcctCopied') : t('configAcctCopy')}
           </Button>
           <Button variant="secondary" size="sm" onClick={cancelOAuth}>
             {t('configAcctOauthCancel')}
           </Button>
         </div>
+        {msg && <p className="dshBrowserCtlCfgNote">{msg}</p>}
+        {err && <p className="dshBrowserCtlCfgErr">{err}</p>}
       </div>
     )
   }
@@ -3582,6 +3607,9 @@ export function apply(ctx) {
       configAcctOauthWait: '等待授权…',
       configAcctOauthOpenBrowser: '已打开浏览器:请在官网页面登录账号并点「确认授权」。若未自动打开,请点下方按钮重试。',
       configAcctOauthOpenAgain: '重新打开授权页',
+      configAcctOauthOpenFail: '自动打开浏览器失败:请点下方链接手动打开授权页。',
+      configAcctCopy: '复制链接',
+      configAcctCopied: '已复制',
       configAcctOauthCancel: '取消',
       configAcctOauthExpired: '授权已过期,请重新发起。',
       configAcctOauthFail: '授权失败:',
@@ -3766,6 +3794,9 @@ export function apply(ctx) {
       configAcctOauthWait: 'Waiting for approval…',
       configAcctOauthOpenBrowser: 'Browser opened: sign in to your account on the site and click "Approve". If it did not open, use the button below.',
       configAcctOauthOpenAgain: 'Reopen approval page',
+      configAcctOauthOpenFail: 'Could not open your browser automatically — open the approval page via the link below.',
+      configAcctCopy: 'Copy link',
+      configAcctCopied: 'Copied',
       configAcctOauthCancel: 'Cancel',
       configAcctOauthExpired: 'Authorization expired, please start again.',
       configAcctOauthFail: 'Authorization failed:',

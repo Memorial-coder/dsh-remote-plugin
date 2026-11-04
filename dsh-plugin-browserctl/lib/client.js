@@ -2834,6 +2834,7 @@ function OfficialAccountCard({ t, onSaved }) {
   const [msg, setMsg] = (0, import_react.useState)("");
   const [pending, setPending] = (0, import_react.useState)(null);
   const pollTimer = (0, import_react.useRef)(null);
+  const [copiedOauth, setCopiedOauth] = (0, import_react.useState)(false);
   const loadAcct = async () => {
     try {
       const r = await fetch("/browserctl/api/server/me", { cache: "no-store" });
@@ -2870,11 +2871,28 @@ function OfficialAccountCard({ t, onSaved }) {
     }
   };
   const openAuthPage = async (url) => {
-    if (!url) return;
+    if (!url) return false;
     try {
-      await fetch("/browserctl/api/server/oauth/open?url=" + encodeURIComponent(url), { method: "POST", cache: "no-store" });
+      const r = await fetch("/browserctl/api/server/oauth/open?url=" + encodeURIComponent(url), { method: "POST", cache: "no-store" });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j.ok) {
+        setErr(j && j.error || t("configAcctOauthOpenFail"));
+        return false;
+      }
+      setErr("");
+      return true;
     } catch (e) {
+      setErr(t("configAcctOauthOpenFail"));
+      return false;
     }
+  };
+  const copyOauthUrl = (url) => {
+    if (!url) return;
+    navigator.clipboard?.writeText(url).then(() => {
+      setCopiedOauth(true);
+      setTimeout(() => setCopiedOauth(false), 1600);
+    }).catch(() => {
+    });
   };
   const poll = async () => {
     if (!pending) return;
@@ -2983,12 +3001,14 @@ function OfficialAccountCard({ t, onSaved }) {
       ] }),
       /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dshBrowserCtlCfgNote", children: t("configAcctOauthOpenBrowser") }),
       /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlCfgOauthCode", children: pending.userCode }),
-      msg && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dshBrowserCtlCfgNote", children: msg }),
-      err && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dshBrowserCtlCfgErr", children: err }),
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dshBrowserCtlCfgNote", children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("a", { href: pending.verificationUri, target: "_blank", rel: "noopener noreferrer", style: { color: "var(--dsw-alias-accent-strong,#4da3ff)", wordBreak: "break-all" }, children: pending.verificationUri }) }),
       /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlCfgFieldRow", children: [
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "secondary", size: "sm", onClick: () => openAuthPage(pending.verificationUri), children: t("configAcctOauthOpenAgain") }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "secondary", size: "sm", onClick: () => copyOauthUrl(pending.verificationUri), children: copiedOauth ? t("configAcctCopied") : t("configAcctCopy") }),
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "secondary", size: "sm", onClick: cancelOAuth, children: t("configAcctOauthCancel") })
-      ] })
+      ] }),
+      msg && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dshBrowserCtlCfgNote", children: msg }),
+      err && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dshBrowserCtlCfgErr", children: err })
     ] });
   }
   return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlCfgFields", children: [
@@ -3424,6 +3444,9 @@ function apply(ctx) {
       configAcctOauthWait: "\u7B49\u5F85\u6388\u6743\u2026",
       configAcctOauthOpenBrowser: "\u5DF2\u6253\u5F00\u6D4F\u89C8\u5668:\u8BF7\u5728\u5B98\u7F51\u9875\u9762\u767B\u5F55\u8D26\u53F7\u5E76\u70B9\u300C\u786E\u8BA4\u6388\u6743\u300D\u3002\u82E5\u672A\u81EA\u52A8\u6253\u5F00,\u8BF7\u70B9\u4E0B\u65B9\u6309\u94AE\u91CD\u8BD5\u3002",
       configAcctOauthOpenAgain: "\u91CD\u65B0\u6253\u5F00\u6388\u6743\u9875",
+      configAcctOauthOpenFail: "\u81EA\u52A8\u6253\u5F00\u6D4F\u89C8\u5668\u5931\u8D25:\u8BF7\u70B9\u4E0B\u65B9\u94FE\u63A5\u624B\u52A8\u6253\u5F00\u6388\u6743\u9875\u3002",
+      configAcctCopy: "\u590D\u5236\u94FE\u63A5",
+      configAcctCopied: "\u5DF2\u590D\u5236",
       configAcctOauthCancel: "\u53D6\u6D88",
       configAcctOauthExpired: "\u6388\u6743\u5DF2\u8FC7\u671F,\u8BF7\u91CD\u65B0\u53D1\u8D77\u3002",
       configAcctOauthFail: "\u6388\u6743\u5931\u8D25:",
@@ -3608,6 +3631,9 @@ function apply(ctx) {
       configAcctOauthWait: "Waiting for approval\u2026",
       configAcctOauthOpenBrowser: 'Browser opened: sign in to your account on the site and click "Approve". If it did not open, use the button below.',
       configAcctOauthOpenAgain: "Reopen approval page",
+      configAcctOauthOpenFail: "Could not open your browser automatically \u2014 open the approval page via the link below.",
+      configAcctCopy: "Copy link",
+      configAcctCopied: "Copied",
       configAcctOauthCancel: "Cancel",
       configAcctOauthExpired: "Authorization expired, please start again.",
       configAcctOauthFail: "Authorization failed:",

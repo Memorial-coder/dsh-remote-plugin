@@ -612,18 +612,33 @@ function apply(ctx, config = {}) {
           sendJson(res, 400, { ok: false, error: "\u4E0D\u5141\u8BB8\u6253\u5F00\u8BE5\u5730\u5740" });
           return;
         }
-        try {
-          const child = spawn("cmd", ["/c", "start", "", target.toString()], {
-            cwd: path.dirname(SCRIPT_PATH),
-            stdio: "ignore",
-            detached: true,
-            windowsHide: true
-          });
-          child.unref();
-          sendJson(res, 200, { ok: true });
-        } catch (e) {
-          sendJson(res, 500, { ok: false, error: String(e && e.message || e) });
+        const href = target.toString();
+        const candidates = [
+          ["cmd", ["/c", "start", "", href]],
+          ["rundll32", ["url.dll,FileProtocolHandler", href]],
+          ["explorer", [href]]
+        ];
+        let launched = false;
+        for (const [bin, args] of candidates) {
+          try {
+            const child = spawn(bin, args, {
+              cwd: path.dirname(SCRIPT_PATH),
+              stdio: "ignore",
+              detached: true,
+              windowsHide: true
+            });
+            child.on("error", () => {
+            });
+            child.unref();
+            launched = true;
+          } catch {
+          }
         }
+        if (!launched) {
+          sendJson(res, 500, { ok: false, error: "\u65E0\u6CD5\u6253\u5F00\u6D4F\u89C8\u5668,\u8BF7\u7528\u4E0B\u65B9\u94FE\u63A5\u624B\u52A8\u6253\u5F00" });
+          return;
+        }
+        sendJson(res, 200, { ok: true });
         return;
       }
       if (route === "/browserctl/api/server/oauth/poll") {
