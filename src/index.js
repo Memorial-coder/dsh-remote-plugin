@@ -45,6 +45,18 @@ function adminHeaders() {
 // 插件/面板版本号(「关于」面板与 /api/config 共用)
 const VERSION = '0.2.0'
 
+// 语义化版本比较:相等 0、a>b 正、a<b 负(容忍 'v' 前缀,按数字段逐段比)
+function cmpVersion(a, b) {
+  const pa = String(a || '').replace(/^v/i, '').split('.').map(x => Number(x) || 0)
+  const pb = String(b || '').replace(/^v/i, '').split('.').map(x => Number(x) || 0)
+  const n = Math.max(pa.length, pb.length)
+  for (let i = 0; i < n; i++) {
+    const d = (pa[i] || 0) - (pb[i] || 0)
+    if (d !== 0) return d
+  }
+  return 0
+}
+
 // 官方多用户服务(注册/登录/端口分配):登录后 secrets 记 server_uid/server_token/
 // server_link_secret/frp_remote_port,闸机 state.link_secret 换成服务器签发的 per-user 密钥。
 const OFFICIAL_API_BASE = 'https://remote.ymzcc.com/dsh-remote'
@@ -772,17 +784,17 @@ export function apply(ctx, config = {}) {
           return
         }
         if (route === '/browserctl/api/update-check') {
-          // 「检查更新」:App 版本信息已迁到管理后台(dsh-remote-server),
-          // 公开接口 /dsh-remote/api/app/version 返回手机 App 检查更新用的同款 JSON。
+          // 「检查更新」:拉官网部署的插件版本清单 version.json(UPDATE_MANIFEST_URL)。
+          // (2026-11-04 修复)此前误接 App 发布接口 /api/app/version,App 未配置发布时
+          // latest 为空串,面板会渲染出「最新版本 v」;现在改回插件自己的清单,
+          // 缺 version 字段时回退到当前版本,绝不会再显示光秃秃的 "v"。
           let j = null
           try {
             const ctrl = new AbortController()
             const timer = setTimeout(() => ctrl.abort(), 5000)
             let r
             try {
-              r = await fetch('https://remote.ymzcc.com/dsh-remote/api/app/version', {
-                signal: ctrl.signal,
-              })
+              r = await fetch(UPDATE_MANIFEST_URL, { signal: ctrl.signal, cache: 'no-store' })
             } finally {
               clearTimeout(timer)
             }
@@ -795,30 +807,15 @@ export function apply(ctx, config = {}) {
             sendJson(res, 200, { ok: false, error: '无法连接更新服务器:' + String((e && e.message) || e) })
             return
           }
-          if (!j || !j.ok) {
-            sendJson(res, 200, { ok: false, error: '更新服务器返回数据异常' })
-            return
-          }
-          const latestCode = Math.max(0, Number(j.latest_version_code) || 0)
-          const latestName = String(j.latest_version_name || '').trim()
-          if (latestCode > 0) {
-            let downloadUrl = String(j.download_url || '')
-            if (downloadUrl && downloadUrl.startsWith('/')) {
-              downloadUrl = 'https://remote.ymzcc.com' + downloadUrl
-            }
-            sendJson(res, 200, {
-              ok: true,
-              current: VERSION,
-              latest: latestName,
-              hasUpdate: true,
-              downloadUrl,
-              notes: j.release_notes ? [j.release_notes] : [],
-              versionCode: latestCode,
-              versionName: latestName,
-            })
-          } else {
-            sendJson(res, 200, { ok: true, current: VERSION, latest: latestName, hasUpdate: false })
-          }
+          const latest = String((j && j.version) || '').trim() || VERSION
+          sendJson(res, 200, {
+            ok: true,
+            current: VERSION,
+            latest,
+            hasUpdate: cmpVersion(latest, VERSION) > 0,
+            downloadUrl: (j && j.downloadUrl) || '',
+            notes: Array.isArray(j && j.notes) ? j.notes : [],
+          })
           return
         }
         sendJson(res, 404, { error: 'unknown route' })
