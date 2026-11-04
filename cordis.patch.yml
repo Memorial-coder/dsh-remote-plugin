@@ -1,0 +1,6 @@
+# 插件注册补丁。browserctl.py 的路径由 src/index.js 相对 __dirname 解析
+# (不再写死作者本机绝对路径,仓库克隆到任何位置都能跑),因此这里不再携带 script 配置。
+- insert:
+    - id: browserctl
+      name: dsh-plugin-browserctl
+      config: {}

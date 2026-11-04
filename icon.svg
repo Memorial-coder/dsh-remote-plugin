@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- 浏览器/电脑窗口 -->
+  <rect x="5" y="9" width="42" height="32" rx="6" fill="none" stroke="#4a80cc" stroke-width="3.5"/>
+  <path d="M5 19h42" stroke="#4a80cc" stroke-width="3"/>
+  <circle cx="11.5" cy="14" r="1.7" fill="#4a80cc"/>
+  <circle cx="17" cy="14" r="1.7" fill="#4a80cc"/>
+  <!-- 窗口内的链环(远程连接) -->
+  <path d="M15 33.5l5.5-5.5M20.5 39l5.5-5.5" stroke="#4a80cc" stroke-width="3.2" stroke-linecap="round" fill="none"/>
+  <path d="M20.5 39a4.6 4.6 0 0 1-6.5 0 4.6 4.6 0 0 1 0-6.5" stroke="#4a80cc" stroke-width="3.2" stroke-linecap="round" fill="none"/>
+  <!-- 连接线 -->
+  <path d="M47 36c5 1 8 4.5 8 9v1" stroke="#4a80cc" stroke-width="3" stroke-linecap="round" fill="none"/>
+  <!-- 手机 -->
+  <rect x="43" y="28" width="16" height="28" rx="4.5" fill="none" stroke="#4a80cc" stroke-width="3.5"/>
+  <path d="M48.5 51.5h5" stroke="#4a80cc" stroke-width="2.6" stroke-linecap="round"/>
+</svg>

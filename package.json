@@ -1,0 +1,53 @@
+{
+  "name": "dsh-plugin-browserctl",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "DSH 远程助手(DshRemote): 把 DeepSeek 助手 Web 面板安全穿透到手机与外网, 侧边栏一键开启",
+  "license": "MIT",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/client.js",
+    "cordis.patch.yml",
+    "locale/en.json",
+    "locale/zh.json",
+    "icon.svg",
+    "README.md"
+  ],
+  "dsh": {
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-primitives",
+        "@deepseek-ai/dsh-client-ui-slots"
+      ],
+      "platform": "web"
+    },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0",
+    "dsh": ">=0.2.1-rc.3"
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node test/smoke.cjs"
+  },
+  "devDependencies": {
+    "esbuild": "0.27.2"
+  },
+  "dependencies": {
+    "qrcode": "^1.5.4"
+  }
+}
