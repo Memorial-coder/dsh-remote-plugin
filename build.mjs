@@ -30,11 +30,36 @@ const EXTERNALS = [
   '@deepseek-ai/dsh-client-store',
 ]
 
-// esbuild 的 bin shim(可移植;内部 execFileSync + stdio:"inherit")
+// esbuild 的 bin 入口。Windows 上 node_modules/esbuild/bin/esbuild 是 JS shim(用 node 执行);
+// 非 Windows 上 esbuild 的 postinstall 会把该文件硬链成原生二进制(直接执行), 若仍用 node 去跑
+// 会报 `SyntaxError: Invalid or unexpected token`(GitHub Actions Linux 踩过)。
+// 这里按文件头 magic 判断: ELF/Mach-O/PE = 原生二进制直接执行, 否则 JS shim 走 node。
 const ESBUILD_SHIM = join(process.cwd(), 'node_modules', 'esbuild', 'bin', 'esbuild')
 
+function isNativeBinary(file) {
+  try {
+    const b = readFileSync(file)
+    if (b.length < 4) return false
+    // ELF(linux): 0x7F 'E' 'L' 'F'
+    if (b[0] === 0x7f && b[1] === 0x45 && b[2] === 0x4c && b[3] === 0x46) return true
+    // Mach-O(macos) 64bit LE/32bit LE / BE
+    if (b[0] === 0xcf && b[1] === 0xfa && b[2] === 0xed && b[3] === 0xfe) return true
+    if (b[0] === 0xce && b[1] === 0xfa && b[2] === 0xed && b[3] === 0xfe) return true
+    if (b[0] === 0xfe && b[1] === 0xed && b[2] === 0xfa && b[3] === 0xcf) return true
+    // PE(windows): 'MZ'
+    if (b[0] === 0x4d && b[1] === 0x5a) return true
+    return false
+  } catch {
+    return false
+  }
+}
+
+const esbuildIsNative = isNativeBinary(ESBUILD_SHIM)
+
 function run(args) {
-  const r = spawnSync(process.execPath, [ESBUILD_SHIM, ...args], { stdio: 'inherit' })
+  const cmd = esbuildIsNative ? ESBUILD_SHIM : process.execPath
+  const execArgs = esbuildIsNative ? args : [ESBUILD_SHIM, ...args]
+  const r = spawnSync(cmd, execArgs, { stdio: 'inherit' })
   if (r.error) throw r.error
   if (r.status !== 0) process.exit(r.status || 1)
 }
