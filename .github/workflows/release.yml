@@ -1,0 +1,64 @@
+name: Release
+
+# 公开镜像仓库:打 v* 标签时自动构建、冒烟、打包插件并发布 GitHub Release。
+# 发布后「关于」面板的下载地址 github.com/Memorial-coder/dsh-remote-plugin/releases/latest 即真实可用。
+# 注意:官网「检查更新」用的 version.json(remote.ymzcc.com/dsh-remote/version.json)
+# 是独立部署的,发版时需另行更新并部署,不归本 workflow 管。
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Build
+        run: node build.mjs
+
+      - name: Smoke test
+        run: node test/smoke.cjs
+
+      # 手动触发(workflow_dispatch)时没有标签,从 package.json 取版本号
+      - name: Resolve version
+        id: ver
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=v$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+          fi
+
+      # 只留运行时依赖(qrcode),剔除 esbuild(devDep),让产物解压即用
+      - name: Prune dev deps
+        run: npm prune --omit=dev
+
+      - name: Package plugin
+        run: |
+          set -e
+          mkdir -p dist/pkg
+          cp -r lib src locale node_modules build.mjs package.json package-lock.json README.md LICENSE icon.svg cordis.patch.yml dist/pkg/
+          rm -f dist/pkg/lib/.client.tmp.js
+          (cd dist && zip -r "dsh-remote-plugin-${{ steps.ver.outputs.tag }}.zip" pkg)
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.ver.outputs.tag }}" \
+            dist/dsh-remote-plugin-*.zip \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "dsh-remote-plugin ${{ steps.ver.outputs.tag }}" \
+            --generate-notes

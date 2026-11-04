@@ -1,0 +1,23 @@
+name: CI
+
+# 公开镜像仓库:push/PR 自动构建 + 冒烟,防止 src 改坏打包
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: node build.mjs
+      - run: node test/smoke.cjs
