@@ -16,6 +16,10 @@ browserctl_*.log
 .ssh_known_hosts
 *.tmp
 
-# ????
+# 操作系统
 .DS_Store
 Thumbs.db
+
+# Python 缓存
+__pycache__/
+*.pyc
