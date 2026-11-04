@@ -18,6 +18,10 @@ jobs:
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: dsh-plugin-browserctl/package-lock.json
       - run: npm ci
+        working-directory: dsh-plugin-browserctl
       - run: node build.mjs
+        working-directory: dsh-plugin-browserctl
       - run: node test/smoke.cjs
+        working-directory: dsh-plugin-browserctl

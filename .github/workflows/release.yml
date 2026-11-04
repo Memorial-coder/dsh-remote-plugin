@@ -21,14 +21,18 @@ jobs:
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: dsh-plugin-browserctl/package-lock.json
 
       - name: Install deps
+        working-directory: dsh-plugin-browserctl
         run: npm ci
 
       - name: Build
+        working-directory: dsh-plugin-browserctl
         run: node build.mjs
 
       - name: Smoke test
+        working-directory: dsh-plugin-browserctl
         run: node test/smoke.cjs
 
       # 手动触发(workflow_dispatch)时没有标签,从 package.json 取版本号
@@ -43,13 +47,18 @@ jobs:
 
       # 只留运行时依赖(qrcode),剔除 esbuild(devDep),让产物解压即用
       - name: Prune dev deps
+        working-directory: dsh-plugin-browserctl
         run: npm prune --omit=dev
 
       - name: Package plugin
         run: |
           set -e
           mkdir -p dist/pkg
-          cp -r lib src locale node_modules build.mjs package.json package-lock.json README.md LICENSE icon.svg cordis.patch.yml dist/pkg/
+          cp -r dsh-plugin-browserctl/lib dsh-plugin-browserctl/src dsh-plugin-browserctl/locale \
+                dsh-plugin-browserctl/node_modules dsh-plugin-browserctl/build.mjs \
+                dsh-plugin-browserctl/package.json dsh-plugin-browserctl/package-lock.json \
+                dsh-plugin-browserctl/README.md dsh-plugin-browserctl/LICENSE \
+                dsh-plugin-browserctl/icon.svg dsh-plugin-browserctl/cordis.patch.yml dist/pkg/
           rm -f dist/pkg/lib/.client.tmp.js
           (cd dist && zip -r "dsh-remote-plugin-${{ steps.ver.outputs.tag }}.zip" pkg)
 
