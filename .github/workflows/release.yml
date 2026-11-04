@@ -57,8 +57,9 @@ jobs:
           cp -r dsh-plugin-browserctl/lib dsh-plugin-browserctl/src dsh-plugin-browserctl/locale \
                 dsh-plugin-browserctl/node_modules dsh-plugin-browserctl/build.mjs \
                 dsh-plugin-browserctl/package.json dsh-plugin-browserctl/package-lock.json \
-                dsh-plugin-browserctl/README.md dsh-plugin-browserctl/LICENSE \
+                dsh-plugin-browserctl/README.md \
                 dsh-plugin-browserctl/icon.svg dsh-plugin-browserctl/cordis.patch.yml dist/pkg/
+          cp LICENSE dist/pkg/
           rm -f dist/pkg/lib/.client.tmp.js
           (cd dist && zip -r "dsh-remote-plugin-${{ steps.ver.outputs.tag }}.zip" pkg)
 
