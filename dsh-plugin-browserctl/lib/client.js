@@ -2834,6 +2834,7 @@ function OfficialAccountCard({ t, onSaved }) {
   const [msg, setMsg] = (0, import_react.useState)("");
   const [pending, setPending] = (0, import_react.useState)(null);
   const pollTimer = (0, import_react.useRef)(null);
+  const pendingRef = (0, import_react.useRef)(null);
   const [copiedOauth, setCopiedOauth] = (0, import_react.useState)(false);
   const loadAcct = async () => {
     try {
@@ -2858,6 +2859,7 @@ function OfficialAccountCard({ t, onSaved }) {
       clearTimeout(pollTimer.current);
       pollTimer.current = null;
     }
+    pendingRef.current = null;
   };
   (0, import_react.useEffect)(() => () => clearPoll(), []);
   const restartTunnel = async () => {
@@ -2895,13 +2897,15 @@ function OfficialAccountCard({ t, onSaved }) {
     });
   };
   const poll = async () => {
-    if (!pending) return;
+    const pd = pendingRef.current;
+    if (!pd) return;
     try {
-      const r = await fetch("/browserctl/api/server/oauth/poll?device_code=" + encodeURIComponent(pending.deviceCode), { method: "POST", cache: "no-store" });
+      const r = await fetch("/browserctl/api/server/oauth/poll?device_code=" + encodeURIComponent(pd.deviceCode), { method: "POST", cache: "no-store" });
       const j = await r.json().catch(() => ({}));
       if (j && j.ok) {
         clearPoll();
         setPending(null);
+        pendingRef.current = null;
         setAcct({ email: j.email, remotePort: j.remotePort });
         setMsg(t("configAcctOauthDone"));
         onSaved();
@@ -2948,6 +2952,7 @@ function OfficialAccountCard({ t, onSaved }) {
         verificationUri: j.verificationUri,
         interval: Math.max(3, Number(j.interval) || 5)
       });
+      pendingRef.current = { deviceCode: j.deviceCode, userCode: j.userCode, verificationUri: j.verificationUri };
       setBusy("polling");
       await openAuthPage(j.verificationUri);
       pollTimer.current = setTimeout(poll, 1500);
@@ -2959,6 +2964,7 @@ function OfficialAccountCard({ t, onSaved }) {
   const cancelOAuth = () => {
     clearPoll();
     setPending(null);
+    pendingRef.current = null;
     setBusy("");
   };
   const logout = async () => {
