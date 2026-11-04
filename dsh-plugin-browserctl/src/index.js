@@ -61,6 +61,10 @@ function cmpVersion(a, b) {
 // server_link_secret/frp_remote_port,闸机 state.link_secret 换成服务器签发的 per-user 密钥。
 const OFFICIAL_API_BASE = 'https://remote.ymzcc.com/dsh-remote'
 
+// 设备授权流(RFC 8628)客户端标识:插件「官方账号」登录/注册不再内嵌账号密码表单,
+// 改由浏览器打开官网授权页,用户在网页登录/注册并确认后,插件轮询换 token(见 /server/oauth/*)。
+const OAUTH_CLIENT_ID = 'dsh-plugin-desktop'
+
 // 官方服务器默认地址(自建服务器模式下「面板链接」自适应为 https://<host>/p/<remotePort>/)
 const PANEL_URL = 'https://remote.ymzcc.com/p/17901/'
 
@@ -126,6 +130,31 @@ function readSecrets() {
 
 function writeSecrets(sec) {
   atomicWrite(SECRETS_PATH, JSON.stringify(sec, null, 2))
+}
+
+// 官方登录/设备授权成功 → 落 per-user 密钥与分配端口(secrets/state)。
+// 闸机每次请求都现读 state,热切换立即生效;frp_remote_port 由 client 触发
+// stop+start 重建隧道后生效。绝不把 token 明文返回给前端。
+function applyOfficialSession(j) {
+  const sec = readSecrets()
+  sec.server_mode = 'official'
+  sec.server_uid = j.uid
+  sec.server_email = j.email || ''
+  sec.server_token = j.access_token || j.token
+  sec.server_link_secret = j.linkSecret || ''
+  sec.server_panel_url = j.panelUrl || ''
+  if (Number(j.remotePort) > 0) sec.frp_remote_port = Number(j.remotePort)
+  // 官方 frps token 由服务器下发(不进插件源码);服务器没配则保留现值
+  if (j.frpToken) sec.frp_token = j.frpToken
+  writeSecrets(sec)
+  try {
+    const st = readState()
+    if (j.linkSecret) st.link_secret = j.linkSecret
+    if (Number(j.remotePort) > 0) st.remote_port = Number(j.remotePort)
+    writeState(st)
+  } catch (e) {
+    // state 写失败(ACL/占用)不算失败,下次重启闸机后 secrets 仍会生效
+  }
 }
 
 // 面板链接自适应:自建模式 = https://<host>/p/<remotePort>/;
@@ -612,69 +641,94 @@ export function apply(ctx, config = {}) {
           sendJson(res, 200, { ok: true, blacklist: readBlacklist() })
           return
         }
-        // ---- 官方多用户账号(注册/验证/登录/退出)----
-        // 密码只走本机回环 URL → 插件内 fetch 以 JSON body 转发到官方服务(HTTPS)。
-        if (route === '/browserctl/api/server/register') {
+        // ---- 官方多用户账号(设备授权流:登录/注册走浏览器官网授权页,轮询换 token)----
+        // 流程:client → /server/oauth/begin 拿 device_code → /server/oauth/open 打开
+        // 浏览器授权页 → 用户在网页登录/注册并确认 → client 轮询 /server/oauth/poll
+        // 拿 access token → applyOfficialSession 落 per-user 密钥与分配端口。
+        if (route === '/browserctl/api/server/oauth/begin') {
           if (req.method !== 'POST') { sendJson(res, 405, { ok: false, error: 'POST only' }); return }
-          const email = (url.searchParams.get('email') || '').trim()
-          const password = url.searchParams.get('password') || ''
-          if (!email || !password) { sendJson(res, 400, { ok: false, error: '缺少 email/password 参数' }); return }
           try {
-            const r = await fetch(OFFICIAL_API_BASE + '/api/register', {
+            const r = await fetch(OFFICIAL_API_BASE + '/api/oauth/device', {
               method: 'POST',
               headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({ email, password }),
+              body: JSON.stringify({ client_id: OAUTH_CLIENT_ID }),
               signal: AbortSignal.timeout(10000),
             })
             const j = await r.json().catch(() => ({}))
-            sendJson(res, r.status, { ok: !!j.ok, needVerify: !!j.needVerify, devLink: j.devLink || null, error: j.error || null })
+            if (!r.ok || !j.ok) {
+              sendJson(res, r.ok ? 400 : r.status, { ok: false, error: j.error || ('官方服务器 HTTP ' + r.status) })
+              return
+            }
+            sendJson(res, 200, {
+              ok: true,
+              deviceCode: j.device_code,
+              userCode: j.user_code,
+              verificationUri: j.verification_uri_complete || j.verification_uri,
+              expiresIn: Number(j.expires_in) || 900,
+              interval: Math.max(3, Number(j.interval) || 5),
+            })
           } catch (e) {
             sendJson(res, 502, { ok: false, error: '无法连接官方服务器:' + String((e && e.message) || e) })
           }
           return
         }
-        if (route === '/browserctl/api/server/login') {
+        if (route === '/browserctl/api/server/oauth/open') {
+          // 打开用户默认浏览器到官网授权页。只放行官方域名,防止被当任意 URL 打开器。
           if (req.method !== 'POST') { sendJson(res, 405, { ok: false, error: 'POST only' }); return }
-          const email = (url.searchParams.get('email') || '').trim()
-          const password = url.searchParams.get('password') || ''
-          if (!email || !password) { sendJson(res, 400, { ok: false, error: '缺少 email/password 参数' }); return }
+          const raw = (url.searchParams.get('url') || '').trim()
+          let target
+          try { target = new URL(raw) } catch { sendJson(res, 400, { ok: false, error: 'url 参数无效' }); return }
+          const host = target.hostname.toLowerCase()
+          if (!(host === 'remote.ymzcc.com' || host.endsWith('.ymzcc.com'))) {
+            sendJson(res, 400, { ok: false, error: '不允许打开该地址' }); return
+          }
           try {
-            const r = await fetch(OFFICIAL_API_BASE + '/api/login', {
+            const child = spawn('cmd', ['/c', 'start', '', target.toString()], {
+              cwd: path.dirname(SCRIPT_PATH),
+              stdio: 'ignore',
+              detached: true,
+              windowsHide: true,
+            })
+            child.unref()
+            sendJson(res, 200, { ok: true })
+          } catch (e) {
+            sendJson(res, 500, { ok: false, error: String((e && e.message) || e) })
+          }
+          return
+        }
+        if (route === '/browserctl/api/server/oauth/poll') {
+          if (req.method !== 'POST') { sendJson(res, 405, { ok: false, error: 'POST only' }); return }
+          const deviceCode = (url.searchParams.get('device_code') || '').trim()
+          if (!deviceCode) { sendJson(res, 400, { ok: false, error: '缺少 device_code 参数' }); return }
+          try {
+            const r = await fetch(OFFICIAL_API_BASE + '/api/oauth/token', {
               method: 'POST',
               headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({ email, password }),
+              body: JSON.stringify({
+                grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
+                device_code: deviceCode,
+                client_id: OAUTH_CLIENT_ID,
+              }),
               signal: AbortSignal.timeout(10000),
             })
             const j = await r.json().catch(() => ({}))
             if (!r.ok || !j.ok) {
-              sendJson(res, r.ok ? 401 : r.status, { ok: false, error: j.error || ('官方服务器 HTTP ' + r.status) })
+              const code = j.code || ''
+              if (code === 'authorization_pending' || code === 'slow_down') {
+                sendJson(res, 200, { ok: false, pending: true, interval: Math.max(3, Number(j.interval) || 5), error: j.error || '等待授权' })
+                return
+              }
+              sendJson(res, 200, { ok: false, pending: false, error: j.error || ('官方服务器 HTTP ' + r.status), code })
               return
             }
-            // 应用身份:secrets 存服务器侧凭据;state.link_secret 换成服务器签发的
-            // per-user 密钥(闸机每次请求都现读 state,热切换立即生效,无需重启);
-            // frp_remote_port 写入分配端口,随后由 client 触发 stop+start 重建隧道。
-            const sec = readSecrets()
-            sec.server_mode = 'official'
-            sec.server_uid = j.uid
-            sec.server_email = j.email || email
-            sec.server_token = j.token
-            sec.server_link_secret = j.linkSecret || ''
-            sec.server_panel_url = j.panelUrl || ''
-            if (Number(j.remotePort) > 0) sec.frp_remote_port = Number(j.remotePort)
-            // 官方 frps token 由服务器下发(不进插件源码);服务器没配则保留现值
-            if (j.frpToken) sec.frp_token = j.frpToken
-            writeSecrets(sec)
-            try {
-              const st = readState()
-              if (j.linkSecret) st.link_secret = j.linkSecret
-              if (Number(j.remotePort) > 0) st.remote_port = Number(j.remotePort)
-              writeState(st)
-            } catch (e) {
-              // state 写失败(ACL/占用)不算登录失败,下次重启闸机后 secrets 仍会生效
-            }
+            // 成功:落身份与端口(与旧 /server/login 相同),由 client 触发 stop+start 重建隧道
+            applyOfficialSession(j)
             sendJson(res, 200, {
-              ok: true, email: sec.server_email, uid: j.uid,
-              remotePort: Number(j.remotePort) || null, panelUrl: j.panelUrl || null,
+              ok: true,
+              email: j.email || '',
+              uid: j.uid,
+              remotePort: Number(j.remotePort) || null,
+              panelUrl: j.panelUrl || null,
             })
           } catch (e) {
             sendJson(res, 502, { ok: false, error: '无法连接官方服务器:' + String((e && e.message) || e) })

@@ -10,8 +10,8 @@ const VERSION = '0.2.0'
 // 「关于」面板三个外部链接,集中一处管理,日后发布一次改齐
 const ABOUT_LINKS = {
   website: 'https://remote.ymzcc.com/dsh-remote/',
-  github: 'https://github.com/your-name/dshremote',        // TODO: 发布后替换为真实仓库地址
-  app: 'https://github.com/your-name/dshremote/releases/latest', // TODO: 发布后替换为真实 Release 下载地址
+  github: 'https://github.com/Memorial-coder/dsh-remote-plugin',
+  app: 'https://github.com/Memorial-coder/dsh-remote-plugin/releases/latest',
 }
 
 // ---------- 用户协议 / 隐私政策(「关于」面板内点击展开,参照桃源乡 legalDocuments 结构) ----------
@@ -906,6 +906,40 @@ div[data-slot='sidebar.footer.action'] > * {
 .dshBrowserCtlAboutLink > span:first-child {
   color: var(--dsw-alias-label-tertiary, #8b8f98);
 }
+/* 顶栏「账号登录」按钮 */
+.dshBrowserCtlHeaderAcct {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 150px;
+}
+.dshBrowserCtlHeaderAcctLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 96px;
+}
+/* 未登录时启动远程的提示弹窗 */
+.dshBrowserCtlLoginPrompt .dshBrowserCtlPanel {
+  width: min(380px, 94vw);
+}
+.dshBrowserCtlLoginPromptBody {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 4px 2px 2px;
+}
+.dshBrowserCtlLoginPromptText {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--dsw-alias-label-primary, inherit);
+}
+.dshBrowserCtlLoginPromptActions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
 /* 检查更新:42px 三态按钮 + 版本对比 + 下载 + 更新说明 */
 .dshBrowserCtlAboutUpdate {
   display: flex;
@@ -1127,6 +1161,18 @@ div[data-slot='sidebar.footer.action'] > * {
   font-size: 12px;
   line-height: 17px;
   color: var(--dsw-alias-state-error-primary, #e5655c);
+}
+.dshBrowserCtlCfgOauthCode {
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  font-family: ui-monospace, Consolas, Menlo, monospace;
+  text-align: center;
+  padding: 12px 8px;
+  border: 1px dashed var(--dsw-alias-border-l2, #2a2c33);
+  border-radius: 10px;
+  color: var(--dsw-alias-state-info-primary, #4da3ff);
+  background: var(--dsw-alias-bg-layer-1, rgba(255,255,255,0.03));
 }
 .dshBrowserCtlCfgActions {
   display: flex;
@@ -1452,6 +1498,9 @@ const Svg = {
   ),
   download: (
     <svg {...svgProps}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+  ),
+  person: (
+    <svg {...svgProps} style={{ ...svgProps.style, marginRight: 0 }}><circle cx="12" cy="7.5" r="3.5" /><path d="M4.5 20a7.5 7.5 0 0 1 15 0" /></svg>
   ),
 }
 
@@ -2850,10 +2899,7 @@ function ConfigPanel({ t, onClose, onSaved }) {
           </label>
         </div>
         {mode === 'official' ? (
-          <>
-            <p className="dshBrowserCtlCfgOfficialNote">{t('configOfficialNote')}</p>
-            <OfficialAccountCard t={t} onSaved={onSaved} />
-          </>
+          <p className="dshBrowserCtlCfgOfficialNote">{t('configOfficialNote')}</p>
         ) : (
           <div className="dshBrowserCtlCfgFields">
             <label className="dshBrowserCtlCfgField">
@@ -2898,15 +2944,17 @@ function ConfigPanel({ t, onClose, onSaved }) {
   )
 }
 
-// 官方多用户账号卡:登录/注册/退出。登录成功 = secrets 落 per-user 密钥与分配端口
-// (host 半完成),这里负责重启隧道(stop+ensure)让 frpc 用新端口重新拨号。
+// 官方多用户账号卡:设备授权流(RFC 8628)登录/注册/退出。
+// 点「登录」→ host 拿 device_code → 打开浏览器跳官网授权页 → 用户在网页登录/注册并
+// 确认 → 这里轮询 /server/oauth/poll 换 token(host 落 per-user 密钥与端口),随后
+// 重启隧道(stop+ensure)让 frpc 用新端口重新拨号。账号密码不在插件内出现。
 function OfficialAccountCard({ t, onSaved }) {
   const [acct, setAcct] = useState(null)        // /server/me 或 config.account 的合并视图
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [busy, setBusy] = useState('')          // '' | 'login' | 'register' | 'logout'
+  const [busy, setBusy] = useState('')          // '' | 'begin' | 'logout'
   const [err, setErr] = useState('')
   const [msg, setMsg] = useState('')
+  const [pending, setPending] = useState(null)  // {deviceCode, userCode, verificationUri, interval}
+  const pollTimer = useRef(null)
 
   const loadAcct = async () => {
     try {
@@ -2925,6 +2973,11 @@ function OfficialAccountCard({ t, onSaved }) {
   }
   useEffect(() => { loadAcct() }, [])
 
+  const clearPoll = () => {
+    if (pollTimer.current) { clearTimeout(pollTimer.current); pollTimer.current = null }
+  }
+  useEffect(() => () => clearPoll(), [])
+
   const restartTunnel = async () => {
     try {
       await fetch('/browserctl/api/stop', { method: 'POST', cache: 'no-store' })
@@ -2936,57 +2989,78 @@ function OfficialAccountCard({ t, onSaved }) {
     }
   }
 
-  const login = async () => {
+  const openAuthPage = async (url) => {
+    if (!url) return
+    try {
+      await fetch('/browserctl/api/server/oauth/open?url=' + encodeURIComponent(url), { method: 'POST', cache: 'no-store' })
+    } catch (e) {
+      // 打开浏览器失败不影响轮询(用户可手动访问)
+    }
+  }
+
+  const poll = async () => {
+    if (!pending) return
+    try {
+      const r = await fetch('/browserctl/api/server/oauth/poll?device_code=' + encodeURIComponent(pending.deviceCode), { method: 'POST', cache: 'no-store' })
+      const j = await r.json().catch(() => ({}))
+      if (j && j.ok) {
+        clearPoll()
+        setPending(null)
+        setAcct({ email: j.email, remotePort: j.remotePort })
+        setMsg(t('configAcctOauthDone'))
+        onSaved()
+        const okRestart = await restartTunnel()
+        if (!okRestart) { setErr(t('configAcctRestartFail')); setMsg('') }
+        setBusy('')
+        return
+      }
+      if (j && j.pending) {
+        const interval = Math.max(3, Number(j.interval) || 5) * 1000
+        pollTimer.current = setTimeout(poll, interval)
+        return
+      }
+      // 失败/过期/拒绝
+      clearPoll()
+      setPending(null); setBusy('')
+      setErr(j && j.error ? (t('configAcctOauthFail') + ' ' + j.error) : t('configAcctOauthExpired'))
+    } catch (e) {
+      clearPoll()
+      setPending(null); setBusy('')
+      setErr(t('configAcctOauthNetwork'))
+    }
+  }
+
+  const startOAuth = async () => {
     if (busy) return
     setErr(''); setMsg('')
-    const em = email.trim()
-    if (!em || !password) { setErr(t('configAcctNeedVerify') === '' ? '' : t('configAcctEmail') + ' / ' + t('configAcctPassword')); return }
-    setBusy('login')
+    setBusy('begin')
     try {
-      const params = new URLSearchParams({ email: em, password })
-      const r = await fetch('/browserctl/api/server/login?' + params.toString(), { method: 'POST', cache: 'no-store' })
+      const r = await fetch('/browserctl/api/server/oauth/begin', { method: 'POST', cache: 'no-store' })
       const j = await r.json().catch(() => ({}))
       if (!r.ok || !j.ok) {
         setErr(j.error || ('HTTP ' + r.status))
         setBusy('')
         return
       }
-      setAcct({ email: j.email, remotePort: j.remotePort })
-      setMsg(t('configAcctLoginOk'))
-      setPassword('')
-      onSaved()
-      const okRestart = await restartTunnel()
-      if (!okRestart) { setErr(t('configAcctRestartFail')); setMsg('') }
-      setBusy('')
+      setPending({
+        deviceCode: j.deviceCode,
+        userCode: j.userCode,
+        verificationUri: j.verificationUri,
+        interval: Math.max(3, Number(j.interval) || 5),
+      })
+      setBusy('polling')
+      await openAuthPage(j.verificationUri)
+      pollTimer.current = setTimeout(poll, 1500)
     } catch (e) {
-      setErr(t('configAcctLoadFail'))
+      setErr(t('configAcctOauthNetwork'))
       setBusy('')
     }
   }
 
-  const register = async () => {
-    if (busy) return
-    setErr(''); setMsg('')
-    const em = email.trim()
-    if (!em || password.length < 8) {
-      setErr(t('configAcctPassword'))
-      return
-    }
-    setBusy('register')
-    try {
-      const params = new URLSearchParams({ email: em, password })
-      const r = await fetch('/browserctl/api/server/register?' + params.toString(), { method: 'POST', cache: 'no-store' })
-      const j = await r.json().catch(() => ({}))
-      if (!r.ok || !j.ok) {
-        setErr(j.error || ('HTTP ' + r.status))
-      } else {
-        setMsg(t('configAcctVerifySent'))
-      }
-      setBusy('')
-    } catch (e) {
-      setErr(t('configAcctLoadFail'))
-      setBusy('')
-    }
+  const cancelOAuth = () => {
+    clearPoll()
+    setPending(null)
+    setBusy('')
   }
 
   const logout = async () => {
@@ -3027,38 +3101,61 @@ function OfficialAccountCard({ t, onSaved }) {
     )
   }
 
+  if (pending) {
+    return (
+      <div className="dshBrowserCtlCfgFields">
+        <label className="dshBrowserCtlCfgField">
+          <span>{t('configAcctTitle')}</span>
+          <span className="dshBrowserCtlCfgAcctLine">{t('configAcctOauthWait')}</span>
+        </label>
+        <p className="dshBrowserCtlCfgNote">{t('configAcctOauthOpenBrowser')}</p>
+        <div className="dshBrowserCtlCfgOauthCode">{pending.userCode}</div>
+        {msg && <p className="dshBrowserCtlCfgNote">{msg}</p>}
+        {err && <p className="dshBrowserCtlCfgErr">{err}</p>}
+        <div className="dshBrowserCtlCfgFieldRow">
+          <Button variant="secondary" size="sm" onClick={() => openAuthPage(pending.verificationUri)}>
+            {t('configAcctOauthOpenAgain')}
+          </Button>
+          <Button variant="secondary" size="sm" onClick={cancelOAuth}>
+            {t('configAcctOauthCancel')}
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="dshBrowserCtlCfgFields">
       <label className="dshBrowserCtlCfgField">
         <span>{t('configAcctTitle')}</span>
-        <input
-          type="email"
-          value={email}
-          onChange={e => setEmail(e.target.value)}
-          placeholder={t('configAcctEmailPh')}
-          autoComplete="username"
-          spellCheck={false}
-        />
-      </label>
-      <label className="dshBrowserCtlCfgField">
-        <span>{t('configAcctPassword')}</span>
-        <input
-          type="password"
-          value={password}
-          onChange={e => setPassword(e.target.value)}
-          autoComplete="new-password"
-        />
+        <span className="dshBrowserCtlCfgAcctLine">{t('configAcctOauthHint')}</span>
       </label>
       {msg && <p className="dshBrowserCtlCfgNote">{msg}</p>}
       {err && <p className="dshBrowserCtlCfgErr">{err}</p>}
-      <div className="dshBrowserCtlCfgFieldRow">
-        <Button variant="secondary" size="sm" disabled={working} onClick={register}>
-          {busy === 'register' ? t('configAcctWorking') : t('configAcctRegister')}
-        </Button>
-        <Button variant="primary" size="sm" disabled={working} onClick={login}>
-          {busy === 'login' ? t('configAcctWorking') : t('configAcctLogin')}
-        </Button>
-      </div>
+      <Button variant="primary" size="sm" disabled={working} onClick={startOAuth}>
+        {busy === 'begin' ? t('configAcctOauthOpening') : t('configAcctOauthBtn')}
+      </Button>
+    </div>
+  )
+}
+
+/* ---------- 账号登录弹窗(顶栏「账号登录」按钮打开,复用 OfficialAccountCard) ---------- */
+function AccountLoginModal({ t, onClose, onSaved }) {
+  return (
+    <div className="dshBrowserCtlOverlay" role="dialog" aria-modal="true" aria-label={t('configAcctTitle')}>
+      <button className="dshBrowserCtlOverlayMask" type="button" aria-label={t('close')} onClick={onClose} />
+      <section className="dshBrowserCtlPanel dshBrowserCtlPanelNested dshBrowserCtlPanelCfg">
+        <header className="dshBrowserCtlHeader">
+          <div>
+            <h1>{t('configAcctTitle')}</h1>
+            <p>{t('configOfficialHint')}</p>
+          </div>
+          <Tooltip label={t('close')}>
+            <Button variant="ghost" size="sm" aria-label={t('close')} icon={<IconCloseOutlineRegular />} onClick={onClose} />
+          </Tooltip>
+        </header>
+        <OfficialAccountCard t={t} onSaved={onSaved} />
+      </section>
     </div>
   )
 }
@@ -3076,6 +3173,11 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
   // 头部小浮层:关于 / 配置(点击头部图标按钮打开)
   const [aboutOpen, setAboutOpen] = useState(false)
   const [configOpen, setConfigOpen] = useState(false)
+  // 顶栏「账号登录」弹窗 + 未登录启动远程时的提示
+  const [accountOpen, setAccountOpen] = useState(false)
+  const [loginPrompt, setLoginPrompt] = useState(false)
+  // 顶栏账号按钮的登录态(登录后显示邮箱)
+  const [acctMe, setAcctMe] = useState(null)
   const panel = useRef(null)
   const { data, error, expiresAt, status, refresh } = useQr(open, reloadToken, uses)
   const left = useCountdown(expiresAt)
@@ -3088,11 +3190,29 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
     await new Promise(r => setTimeout(r, 60))
     setReloadToken(x => x + 1)
   })
-  const startChain = () => run('start', async () => {
-    try { await fetch('/browserctl/api/ensure', { cache: 'no-store' }) } catch {}
-    await new Promise(r => setTimeout(r, 600))
-    setReloadToken(x => x + 1)
-  })
+  const loadAcctMe = async () => {
+    try {
+      const r = await fetch('/browserctl/api/server/me', { cache: 'no-store' })
+      const j = await r.json().catch(() => ({}))
+      setAcctMe(j && j.loggedIn ? j : null)
+    } catch { setAcctMe(null) }
+  }
+  useEffect(() => { if (open) loadAcctMe() }, [open, reloadToken])
+  const startChain = async () => {
+    // 官方模式且未登录 → 弹提示先去登录,不直接启动
+    try {
+      const c = await fetch('/browserctl/api/config', { cache: 'no-store' }).then(r => r.json()).catch(() => ({}))
+      if (c && c.mode === 'official') {
+        const m = await fetch('/browserctl/api/server/me', { cache: 'no-store' }).then(r => r.json()).catch(() => ({}))
+        if (!(m && m.loggedIn)) { setLoginPrompt(true); return }
+      }
+    } catch {}
+    run('start', async () => {
+      try { await fetch('/browserctl/api/ensure', { cache: 'no-store' }) } catch {}
+      await new Promise(r => setTimeout(r, 600))
+      setReloadToken(x => x + 1)
+    })
+  }
   const stopChain = () => run('stop', async () => {
     // 停止浏览器控制:关闭整个穿透隧道(fwd/frpc/watchdog 全部结束),
     // 公网面板 URL 立即不可访问。
@@ -3120,6 +3240,8 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
     panel.current?.querySelector('button')?.focus()
     const onKeyDown = (event) => {
       if (event.key !== 'Escape') return
+      if (loginPrompt) { setLoginPrompt(false); return }
+      if (accountOpen) { setAccountOpen(false); return }
       if (aboutOpen) { setAboutOpen(false); return }
       if (configOpen) { setConfigOpen(false); return }
       if (document.querySelectorAll('[role="dialog"]').length > 1) return
@@ -3127,7 +3249,7 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
     }
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
-  }, [actions, open, aboutOpen, configOpen])
+  }, [actions, open, aboutOpen, configOpen, accountOpen, loginPrompt])
 
   // 心跳保活:面板一打开(任意页签)就每 2 分钟向闸机报一次活动,
   // "在线设备"卡片据此判断谁还在线;关闭面板即停止上报,10 分钟后自动转为历史设备。
@@ -3171,6 +3293,21 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
               {busy === 'start' ? t('starting') : busy === 'stop' ? t('stopping') : t('refresh') + '…'}
             </span>
           )}
+          <Tooltip label={acctMe ? (acctMe.email || t('configAcctTitle')) : t('aboutAccount')}>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="dshBrowserCtlHeaderAcct"
+              aria-label={t('configAcctTitle')}
+              data-logged-in={acctMe ? 'true' : 'false'}
+              onClick={() => setAccountOpen(true)}
+            >
+              <span aria-hidden="true">{Svg.person}</span>
+              <span className="dshBrowserCtlHeaderAcctLabel">
+                {acctMe ? (acctMe.email || t('aboutAccountLogged')) : t('aboutAccount')}
+              </span>
+            </Button>
+          </Tooltip>
           <Tooltip label={t('about')}>
             <Button variant="ghost" size="sm" aria-label={t('about')} icon={Svg.info} onClick={() => setAboutOpen(true)} />
           </Tooltip>
@@ -3317,6 +3454,35 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
       </section>
       {aboutOpen && <AboutPanel t={t} onClose={() => setAboutOpen(false)} />}
       {configOpen && <ConfigPanel t={t} onClose={() => setConfigOpen(false)} onSaved={refreshAll} />}
+      {accountOpen && (
+        <AccountLoginModal t={t} onClose={() => setAccountOpen(false)} onSaved={refreshAll} />
+      )}
+      {loginPrompt && (
+        <div className="dshBrowserCtlOverlay dshBrowserCtlLoginPrompt" role="dialog" aria-modal="true" aria-label={t('loginRequired')}>
+          <button className="dshBrowserCtlOverlayMask" type="button" aria-label={t('close')} onClick={() => setLoginPrompt(false)} />
+          <section className="dshBrowserCtlPanel">
+            <header className="dshBrowserCtlHeader">
+              <div>
+                <h1>{t('loginRequired')}</h1>
+              </div>
+              <Tooltip label={t('close')}>
+                <Button variant="ghost" size="sm" aria-label={t('close')} icon={<IconCloseOutlineRegular />} onClick={() => setLoginPrompt(false)} />
+              </Tooltip>
+            </header>
+            <div className="dshBrowserCtlLoginPromptBody">
+              <p className="dshBrowserCtlLoginPromptText">{t('loginRequiredDesc')}</p>
+              <div className="dshBrowserCtlLoginPromptActions">
+                <Button variant="secondary" size="sm" onClick={() => setLoginPrompt(false)}>
+                  {t('cancel')}
+                </Button>
+                <Button variant="primary" size="sm" onClick={() => { setLoginPrompt(false); setAccountOpen(true) }}>
+                  {t('aboutAccount')}
+                </Button>
+              </div>
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   )
 }
@@ -3378,6 +3544,10 @@ export function apply(ctx) {
       subtitle: '手机扫码或复制链接,直接打开本机助手面板',
       about: '关于',
       config: '配置',
+      aboutAccount: '账号登录',
+      aboutAccountLogged: '已登录',
+      loginRequired: '需要先登录',
+      loginRequiredDesc: '使用官方服务器需要先登录账号,登录后才会分配专属入口。点击下方按钮前往登录。',
       aboutDesc: '把本机 DeepSeek 助手 Web 面板安全穿透到手机或外网浏览器,随时随地远程控制。',
       aboutWebsite: '官网',
       aboutGithub: 'GitHub',
@@ -3406,15 +3576,17 @@ export function apply(ctx) {
       configAcctLogout: '退出登录',
       configAcctLoggingOut: '退出中…',
       configAcctLoggedOut: '已退出(隧道将断开,重新登录可恢复)',
-      configAcctEmail: '邮箱',
-      configAcctEmailPh: 'you@example.com',
-      configAcctPassword: '密码(至少 8 位)',
-      configAcctRegister: '注册',
-      configAcctLogin: '登录',
-      configAcctWorking: '处理中…',
-      configAcctVerifySent: '验证邮件已发送,请查收邮箱并点击验证链接;完成后回到这里点「登录」。',
-      configAcctLoginOk: '登录成功,专属端口已应用,正在重启隧道…',
-      configAcctNeedVerify: '请先完成邮箱验证(查收验证邮件),再登录。',
+      configAcctOauthBtn: '登录 / 注册官方账号',
+      configAcctOauthHint: '将打开浏览器跳转官网,在网页完成登录/注册后自动回调',
+      configAcctOauthOpening: '正在打开浏览器…',
+      configAcctOauthWait: '等待授权…',
+      configAcctOauthOpenBrowser: '已打开浏览器:请在官网页面登录账号并点「确认授权」。若未自动打开,请点下方按钮重试。',
+      configAcctOauthOpenAgain: '重新打开授权页',
+      configAcctOauthCancel: '取消',
+      configAcctOauthExpired: '授权已过期,请重新发起。',
+      configAcctOauthFail: '授权失败:',
+      configAcctOauthNetwork: '官方服务器暂时不可达,请稍后再试。',
+      configAcctOauthDone: '授权成功,正在应用账号与专属端口…',
       configAcctRestartFail: '登录成功,但隧道重启失败:请点「开始控制」手动启动。',
       configAcctLoadFail: '官方服务器暂时不可达,请稍后再试。',
       configSelfhost: '自建服务器',
@@ -3556,6 +3728,10 @@ export function apply(ctx) {
       subtitle: 'Scan or copy the link to open this panel from any device',
       about: 'About',
       config: 'Settings',
+      aboutAccount: 'Sign in',
+      aboutAccountLogged: 'Signed in',
+      loginRequired: 'Sign in required',
+      loginRequiredDesc: 'Using the official server requires signing in first; a dedicated entry is assigned after login. Tap below to sign in.',
       aboutDesc: 'Securely tunnel this DeepSeek assistant web panel to your phone or any browser for remote control, anywhere.',
       aboutWebsite: 'Website',
       aboutGithub: 'GitHub',
@@ -3584,15 +3760,17 @@ export function apply(ctx) {
       configAcctLogout: 'Sign out',
       configAcctLoggingOut: 'Signing out…',
       configAcctLoggedOut: 'Signed out (tunnel will disconnect; sign in again to restore)',
-      configAcctEmail: 'Email',
-      configAcctEmailPh: 'you@example.com',
-      configAcctPassword: 'Password (min 8 chars)',
-      configAcctRegister: 'Register',
-      configAcctLogin: 'Sign in',
-      configAcctWorking: 'Working…',
-      configAcctVerifySent: 'Verification email sent. Open the link in your inbox, then come back and sign in.',
-      configAcctLoginOk: 'Signed in — dedicated port applied, restarting tunnel…',
-      configAcctNeedVerify: 'Please verify your email first (check your inbox), then sign in.',
+      configAcctOauthBtn: 'Sign in / Register',
+      configAcctOauthHint: 'Your browser will open the official site to sign in / register, then come back automatically',
+      configAcctOauthOpening: 'Opening browser…',
+      configAcctOauthWait: 'Waiting for approval…',
+      configAcctOauthOpenBrowser: 'Browser opened: sign in to your account on the site and click "Approve". If it did not open, use the button below.',
+      configAcctOauthOpenAgain: 'Reopen approval page',
+      configAcctOauthCancel: 'Cancel',
+      configAcctOauthExpired: 'Authorization expired, please start again.',
+      configAcctOauthFail: 'Authorization failed:',
+      configAcctOauthNetwork: 'Official server unreachable, please try again later.',
+      configAcctOauthDone: 'Authorized — applying your account and dedicated port…',
       configAcctRestartFail: 'Signed in, but tunnel restart failed: press "Start" to launch it manually.',
       configAcctLoadFail: 'Official server unreachable, please try again later.',
       configSelfhost: 'Self-hosted server',

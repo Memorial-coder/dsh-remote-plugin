@@ -35,10 +35,8 @@ var STYLE_ID = "browserctl/styles";
 var VERSION = "0.2.0";
 var ABOUT_LINKS = {
   website: "https://remote.ymzcc.com/dsh-remote/",
-  github: "https://github.com/your-name/dshremote",
-  // TODO: 发布后替换为真实仓库地址
-  app: "https://github.com/your-name/dshremote/releases/latest"
-  // TODO: 发布后替换为真实 Release 下载地址
+  github: "https://github.com/Memorial-coder/dsh-remote-plugin",
+  app: "https://github.com/Memorial-coder/dsh-remote-plugin/releases/latest"
 };
 var LEGAL_VERSION = "2026-11-01";
 var LEGAL_EFFECTIVE = "2026\u5E7411\u67081\u65E5";
@@ -928,6 +926,40 @@ div[data-slot='sidebar.footer.action'] > * {
 .dshBrowserCtlAboutLink > span:first-child {
   color: var(--dsw-alias-label-tertiary, #8b8f98);
 }
+/* \u9876\u680F\u300C\u8D26\u53F7\u767B\u5F55\u300D\u6309\u94AE */
+.dshBrowserCtlHeaderAcct {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 150px;
+}
+.dshBrowserCtlHeaderAcctLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 96px;
+}
+/* \u672A\u767B\u5F55\u65F6\u542F\u52A8\u8FDC\u7A0B\u7684\u63D0\u793A\u5F39\u7A97 */
+.dshBrowserCtlLoginPrompt .dshBrowserCtlPanel {
+  width: min(380px, 94vw);
+}
+.dshBrowserCtlLoginPromptBody {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 4px 2px 2px;
+}
+.dshBrowserCtlLoginPromptText {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--dsw-alias-label-primary, inherit);
+}
+.dshBrowserCtlLoginPromptActions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
 /* \u68C0\u67E5\u66F4\u65B0:42px \u4E09\u6001\u6309\u94AE + \u7248\u672C\u5BF9\u6BD4 + \u4E0B\u8F7D + \u66F4\u65B0\u8BF4\u660E */
 .dshBrowserCtlAboutUpdate {
   display: flex;
@@ -1149,6 +1181,18 @@ div[data-slot='sidebar.footer.action'] > * {
   font-size: 12px;
   line-height: 17px;
   color: var(--dsw-alias-state-error-primary, #e5655c);
+}
+.dshBrowserCtlCfgOauthCode {
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  font-family: ui-monospace, Consolas, Menlo, monospace;
+  text-align: center;
+  padding: 12px 8px;
+  border: 1px dashed var(--dsw-alias-border-l2, #2a2c33);
+  border-radius: 10px;
+  color: var(--dsw-alias-state-info-primary, #4da3ff);
+  background: var(--dsw-alias-bg-layer-1, rgba(255,255,255,0.03));
 }
 .dshBrowserCtlCfgActions {
   display: flex;
@@ -1517,6 +1561,10 @@ var Svg = {
     /* @__PURE__ */ (0, import_jsx_runtime.jsx)("path", { d: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" }),
     /* @__PURE__ */ (0, import_jsx_runtime.jsx)("polyline", { points: "7 10 12 15 17 10" }),
     /* @__PURE__ */ (0, import_jsx_runtime.jsx)("line", { x1: "12", y1: "15", x2: "12", y2: "3" })
+  ] }),
+  person: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("svg", { ...svgProps, style: { ...svgProps.style, marginRight: 0 }, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("circle", { cx: "12", cy: "7.5", r: "3.5" }),
+    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("path", { d: "M4.5 20a7.5 7.5 0 0 1 15 0" })
   ] })
 };
 function fmtPlatform(ua) {
@@ -2737,10 +2785,7 @@ function ConfigPanel({ t, onClose, onSaved }) {
           ] })
         ] })
       ] }),
-      mode === "official" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dshBrowserCtlCfgOfficialNote", children: t("configOfficialNote") }),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(OfficialAccountCard, { t, onSaved })
-      ] }) : /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlCfgFields", children: [
+      mode === "official" ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dshBrowserCtlCfgOfficialNote", children: t("configOfficialNote") }) : /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlCfgFields", children: [
         /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", { className: "dshBrowserCtlCfgField", children: [
           /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: t("configHost") }),
           /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", { value: host, onChange: (e) => setHost(e.target.value), placeholder: t("configHostPh"), spellCheck: false })
@@ -2784,11 +2829,11 @@ function ConfigPanel({ t, onClose, onSaved }) {
 }
 function OfficialAccountCard({ t, onSaved }) {
   const [acct, setAcct] = (0, import_react.useState)(null);
-  const [email, setEmail] = (0, import_react.useState)("");
-  const [password, setPassword] = (0, import_react.useState)("");
   const [busy, setBusy] = (0, import_react.useState)("");
   const [err, setErr] = (0, import_react.useState)("");
   const [msg, setMsg] = (0, import_react.useState)("");
+  const [pending, setPending] = (0, import_react.useState)(null);
+  const pollTimer = (0, import_react.useRef)(null);
   const loadAcct = async () => {
     try {
       const r = await fetch("/browserctl/api/server/me", { cache: "no-store" });
@@ -2807,6 +2852,13 @@ function OfficialAccountCard({ t, onSaved }) {
   (0, import_react.useEffect)(() => {
     loadAcct();
   }, []);
+  const clearPoll = () => {
+    if (pollTimer.current) {
+      clearTimeout(pollTimer.current);
+      pollTimer.current = null;
+    }
+  };
+  (0, import_react.useEffect)(() => () => clearPoll(), []);
   const restartTunnel = async () => {
     try {
       await fetch("/browserctl/api/stop", { method: "POST", cache: "no-store" });
@@ -2817,64 +2869,79 @@ function OfficialAccountCard({ t, onSaved }) {
       return false;
     }
   };
-  const login = async () => {
+  const openAuthPage = async (url) => {
+    if (!url) return;
+    try {
+      await fetch("/browserctl/api/server/oauth/open?url=" + encodeURIComponent(url), { method: "POST", cache: "no-store" });
+    } catch (e) {
+    }
+  };
+  const poll = async () => {
+    if (!pending) return;
+    try {
+      const r = await fetch("/browserctl/api/server/oauth/poll?device_code=" + encodeURIComponent(pending.deviceCode), { method: "POST", cache: "no-store" });
+      const j = await r.json().catch(() => ({}));
+      if (j && j.ok) {
+        clearPoll();
+        setPending(null);
+        setAcct({ email: j.email, remotePort: j.remotePort });
+        setMsg(t("configAcctOauthDone"));
+        onSaved();
+        const okRestart = await restartTunnel();
+        if (!okRestart) {
+          setErr(t("configAcctRestartFail"));
+          setMsg("");
+        }
+        setBusy("");
+        return;
+      }
+      if (j && j.pending) {
+        const interval = Math.max(3, Number(j.interval) || 5) * 1e3;
+        pollTimer.current = setTimeout(poll, interval);
+        return;
+      }
+      clearPoll();
+      setPending(null);
+      setBusy("");
+      setErr(j && j.error ? t("configAcctOauthFail") + " " + j.error : t("configAcctOauthExpired"));
+    } catch (e) {
+      clearPoll();
+      setPending(null);
+      setBusy("");
+      setErr(t("configAcctOauthNetwork"));
+    }
+  };
+  const startOAuth = async () => {
     if (busy) return;
     setErr("");
     setMsg("");
-    const em = email.trim();
-    if (!em || !password) {
-      setErr(t("configAcctNeedVerify") === "" ? "" : t("configAcctEmail") + " / " + t("configAcctPassword"));
-      return;
-    }
-    setBusy("login");
+    setBusy("begin");
     try {
-      const params = new URLSearchParams({ email: em, password });
-      const r = await fetch("/browserctl/api/server/login?" + params.toString(), { method: "POST", cache: "no-store" });
+      const r = await fetch("/browserctl/api/server/oauth/begin", { method: "POST", cache: "no-store" });
       const j = await r.json().catch(() => ({}));
       if (!r.ok || !j.ok) {
         setErr(j.error || "HTTP " + r.status);
         setBusy("");
         return;
       }
-      setAcct({ email: j.email, remotePort: j.remotePort });
-      setMsg(t("configAcctLoginOk"));
-      setPassword("");
-      onSaved();
-      const okRestart = await restartTunnel();
-      if (!okRestart) {
-        setErr(t("configAcctRestartFail"));
-        setMsg("");
-      }
-      setBusy("");
+      setPending({
+        deviceCode: j.deviceCode,
+        userCode: j.userCode,
+        verificationUri: j.verificationUri,
+        interval: Math.max(3, Number(j.interval) || 5)
+      });
+      setBusy("polling");
+      await openAuthPage(j.verificationUri);
+      pollTimer.current = setTimeout(poll, 1500);
     } catch (e) {
-      setErr(t("configAcctLoadFail"));
+      setErr(t("configAcctOauthNetwork"));
       setBusy("");
     }
   };
-  const register = async () => {
-    if (busy) return;
-    setErr("");
-    setMsg("");
-    const em = email.trim();
-    if (!em || password.length < 8) {
-      setErr(t("configAcctPassword"));
-      return;
-    }
-    setBusy("register");
-    try {
-      const params = new URLSearchParams({ email: em, password });
-      const r = await fetch("/browserctl/api/server/register?" + params.toString(), { method: "POST", cache: "no-store" });
-      const j = await r.json().catch(() => ({}));
-      if (!r.ok || !j.ok) {
-        setErr(j.error || "HTTP " + r.status);
-      } else {
-        setMsg(t("configAcctVerifySent"));
-      }
-      setBusy("");
-    } catch (e) {
-      setErr(t("configAcctLoadFail"));
-      setBusy("");
-    }
+  const cancelOAuth = () => {
+    clearPoll();
+    setPending(null);
+    setBusy("");
   };
   const logout = async () => {
     if (busy) return;
@@ -2908,38 +2975,44 @@ function OfficialAccountCard({ t, onSaved }) {
       /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "secondary", size: "sm", disabled: working, onClick: logout, children: busy === "logout" ? t("configAcctLoggingOut") : t("configAcctLogout") })
     ] });
   }
+  if (pending) {
+    return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlCfgFields", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", { className: "dshBrowserCtlCfgField", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: t("configAcctTitle") }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlCfgAcctLine", children: t("configAcctOauthWait") })
+      ] }),
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dshBrowserCtlCfgNote", children: t("configAcctOauthOpenBrowser") }),
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlCfgOauthCode", children: pending.userCode }),
+      msg && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dshBrowserCtlCfgNote", children: msg }),
+      err && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dshBrowserCtlCfgErr", children: err }),
+      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlCfgFieldRow", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "secondary", size: "sm", onClick: () => openAuthPage(pending.verificationUri), children: t("configAcctOauthOpenAgain") }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "secondary", size: "sm", onClick: cancelOAuth, children: t("configAcctOauthCancel") })
+      ] })
+    ] });
+  }
   return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlCfgFields", children: [
     /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", { className: "dshBrowserCtlCfgField", children: [
       /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: t("configAcctTitle") }),
-      /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-        "input",
-        {
-          type: "email",
-          value: email,
-          onChange: (e) => setEmail(e.target.value),
-          placeholder: t("configAcctEmailPh"),
-          autoComplete: "username",
-          spellCheck: false
-        }
-      )
-    ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", { className: "dshBrowserCtlCfgField", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: t("configAcctPassword") }),
-      /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-        "input",
-        {
-          type: "password",
-          value: password,
-          onChange: (e) => setPassword(e.target.value),
-          autoComplete: "new-password"
-        }
-      )
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlCfgAcctLine", children: t("configAcctOauthHint") })
     ] }),
     msg && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dshBrowserCtlCfgNote", children: msg }),
     err && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dshBrowserCtlCfgErr", children: err }),
-    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlCfgFieldRow", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "secondary", size: "sm", disabled: working, onClick: register, children: busy === "register" ? t("configAcctWorking") : t("configAcctRegister") }),
-      /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "primary", size: "sm", disabled: working, onClick: login, children: busy === "login" ? t("configAcctWorking") : t("configAcctLogin") })
+    /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "primary", size: "sm", disabled: working, onClick: startOAuth, children: busy === "begin" ? t("configAcctOauthOpening") : t("configAcctOauthBtn") })
+  ] });
+}
+function AccountLoginModal({ t, onClose, onSaved }) {
+  return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlOverlay", role: "dialog", "aria-modal": "true", "aria-label": t("configAcctTitle"), children: [
+    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { className: "dshBrowserCtlOverlayMask", type: "button", "aria-label": t("close"), onClick: onClose }),
+    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", { className: "dshBrowserCtlPanel dshBrowserCtlPanelNested dshBrowserCtlPanelCfg", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("header", { className: "dshBrowserCtlHeader", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("h1", { children: t("configAcctTitle") }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { children: t("configOfficialHint") })
+        ] }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Tooltip, { label: t("close"), children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "ghost", size: "sm", "aria-label": t("close"), icon: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.IconCloseOutlineRegular, {}), onClick: onClose }) })
+      ] }),
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)(OfficialAccountCard, { t, onSaved })
     ] })
   ] });
 }
@@ -2952,6 +3025,9 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
   const [uses, setUses] = (0, import_react.useState)(1);
   const [aboutOpen, setAboutOpen] = (0, import_react.useState)(false);
   const [configOpen, setConfigOpen] = (0, import_react.useState)(false);
+  const [accountOpen, setAccountOpen] = (0, import_react.useState)(false);
+  const [loginPrompt, setLoginPrompt] = (0, import_react.useState)(false);
+  const [acctMe, setAcctMe] = (0, import_react.useState)(null);
   const panel = (0, import_react.useRef)(null);
   const { data, error, expiresAt, status, refresh } = useQr(open, reloadToken, uses);
   const left = useCountdown(expiresAt);
@@ -2968,14 +3044,39 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
     await new Promise((r) => setTimeout(r, 60));
     setReloadToken((x) => x + 1);
   });
-  const startChain = () => run("start", async () => {
+  const loadAcctMe = async () => {
     try {
-      await fetch("/browserctl/api/ensure", { cache: "no-store" });
+      const r = await fetch("/browserctl/api/server/me", { cache: "no-store" });
+      const j = await r.json().catch(() => ({}));
+      setAcctMe(j && j.loggedIn ? j : null);
+    } catch {
+      setAcctMe(null);
+    }
+  };
+  (0, import_react.useEffect)(() => {
+    if (open) loadAcctMe();
+  }, [open, reloadToken]);
+  const startChain = async () => {
+    try {
+      const c = await fetch("/browserctl/api/config", { cache: "no-store" }).then((r) => r.json()).catch(() => ({}));
+      if (c && c.mode === "official") {
+        const m = await fetch("/browserctl/api/server/me", { cache: "no-store" }).then((r) => r.json()).catch(() => ({}));
+        if (!(m && m.loggedIn)) {
+          setLoginPrompt(true);
+          return;
+        }
+      }
     } catch {
     }
-    await new Promise((r) => setTimeout(r, 600));
-    setReloadToken((x) => x + 1);
-  });
+    run("start", async () => {
+      try {
+        await fetch("/browserctl/api/ensure", { cache: "no-store" });
+      } catch {
+      }
+      await new Promise((r) => setTimeout(r, 600));
+      setReloadToken((x) => x + 1);
+    });
+  };
   const stopChain = () => run("stop", async () => {
     try {
       await fetch("/browserctl/api/stop", { cache: "no-store" });
@@ -3003,6 +3104,14 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
     panel.current?.querySelector("button")?.focus();
     const onKeyDown = (event) => {
       if (event.key !== "Escape") return;
+      if (loginPrompt) {
+        setLoginPrompt(false);
+        return;
+      }
+      if (accountOpen) {
+        setAccountOpen(false);
+        return;
+      }
       if (aboutOpen) {
         setAboutOpen(false);
         return;
@@ -3016,7 +3125,7 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [actions, open, aboutOpen, configOpen]);
+  }, [actions, open, aboutOpen, configOpen, accountOpen, loginPrompt]);
   (0, import_react.useEffect)(() => {
     if (!open) return;
     let alive = true;
@@ -3056,6 +3165,21 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
           /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { children: t("subtitle") })
         ] }),
         busy && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: { fontSize: 11.5, color: "var(--dsw-alias-label-tertiary,#8b8f98)", whiteSpace: "nowrap" }, children: busy === "start" ? t("starting") : busy === "stop" ? t("stopping") : t("refresh") + "\u2026" }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Tooltip, { label: acctMe ? acctMe.email || t("configAcctTitle") : t("aboutAccount"), children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(
+          import_dsh_client_ui_primitives.Button,
+          {
+            variant: "ghost",
+            size: "sm",
+            className: "dshBrowserCtlHeaderAcct",
+            "aria-label": t("configAcctTitle"),
+            "data-logged-in": acctMe ? "true" : "false",
+            onClick: () => setAccountOpen(true),
+            children: [
+              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { "aria-hidden": "true", children: Svg.person }),
+              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlHeaderAcctLabel", children: acctMe ? acctMe.email || t("aboutAccountLogged") : t("aboutAccount") })
+            ]
+          }
+        ) }),
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Tooltip, { label: t("about"), children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "ghost", size: "sm", "aria-label": t("about"), icon: Svg.info, onClick: () => setAboutOpen(true) }) }),
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Tooltip, { label: t("config"), children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "ghost", size: "sm", "aria-label": t("config"), icon: Svg.gear, onClick: () => setConfigOpen(true) }) }),
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Tooltip, { label: t("close"), children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
@@ -3183,7 +3307,27 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
       ] })
     ] }),
     aboutOpen && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(AboutPanel, { t, onClose: () => setAboutOpen(false) }),
-    configOpen && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(ConfigPanel, { t, onClose: () => setConfigOpen(false), onSaved: refreshAll })
+    configOpen && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(ConfigPanel, { t, onClose: () => setConfigOpen(false), onSaved: refreshAll }),
+    accountOpen && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(AccountLoginModal, { t, onClose: () => setAccountOpen(false), onSaved: refreshAll }),
+    loginPrompt && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlOverlay dshBrowserCtlLoginPrompt", role: "dialog", "aria-modal": "true", "aria-label": t("loginRequired"), children: [
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { className: "dshBrowserCtlOverlayMask", type: "button", "aria-label": t("close"), onClick: () => setLoginPrompt(false) }),
+      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", { className: "dshBrowserCtlPanel", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("header", { className: "dshBrowserCtlHeader", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("h1", { children: t("loginRequired") }) }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Tooltip, { label: t("close"), children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "ghost", size: "sm", "aria-label": t("close"), icon: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.IconCloseOutlineRegular, {}), onClick: () => setLoginPrompt(false) }) })
+        ] }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlLoginPromptBody", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dshBrowserCtlLoginPromptText", children: t("loginRequiredDesc") }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlLoginPromptActions", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "secondary", size: "sm", onClick: () => setLoginPrompt(false), children: t("cancel") }),
+            /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "primary", size: "sm", onClick: () => {
+              setLoginPrompt(false);
+              setAccountOpen(true);
+            }, children: t("aboutAccount") })
+          ] })
+        ] })
+      ] })
+    ] })
   ] });
 }
 function BrowserCtlButton({ wide, useStore, actions, t }) {
@@ -3242,6 +3386,10 @@ function apply(ctx) {
       subtitle: "\u624B\u673A\u626B\u7801\u6216\u590D\u5236\u94FE\u63A5,\u76F4\u63A5\u6253\u5F00\u672C\u673A\u52A9\u624B\u9762\u677F",
       about: "\u5173\u4E8E",
       config: "\u914D\u7F6E",
+      aboutAccount: "\u8D26\u53F7\u767B\u5F55",
+      aboutAccountLogged: "\u5DF2\u767B\u5F55",
+      loginRequired: "\u9700\u8981\u5148\u767B\u5F55",
+      loginRequiredDesc: "\u4F7F\u7528\u5B98\u65B9\u670D\u52A1\u5668\u9700\u8981\u5148\u767B\u5F55\u8D26\u53F7,\u767B\u5F55\u540E\u624D\u4F1A\u5206\u914D\u4E13\u5C5E\u5165\u53E3\u3002\u70B9\u51FB\u4E0B\u65B9\u6309\u94AE\u524D\u5F80\u767B\u5F55\u3002",
       aboutDesc: "\u628A\u672C\u673A DeepSeek \u52A9\u624B Web \u9762\u677F\u5B89\u5168\u7A7F\u900F\u5230\u624B\u673A\u6216\u5916\u7F51\u6D4F\u89C8\u5668,\u968F\u65F6\u968F\u5730\u8FDC\u7A0B\u63A7\u5236\u3002",
       aboutWebsite: "\u5B98\u7F51",
       aboutGithub: "GitHub",
@@ -3270,15 +3418,17 @@ function apply(ctx) {
       configAcctLogout: "\u9000\u51FA\u767B\u5F55",
       configAcctLoggingOut: "\u9000\u51FA\u4E2D\u2026",
       configAcctLoggedOut: "\u5DF2\u9000\u51FA(\u96A7\u9053\u5C06\u65AD\u5F00,\u91CD\u65B0\u767B\u5F55\u53EF\u6062\u590D)",
-      configAcctEmail: "\u90AE\u7BB1",
-      configAcctEmailPh: "you@example.com",
-      configAcctPassword: "\u5BC6\u7801(\u81F3\u5C11 8 \u4F4D)",
-      configAcctRegister: "\u6CE8\u518C",
-      configAcctLogin: "\u767B\u5F55",
-      configAcctWorking: "\u5904\u7406\u4E2D\u2026",
-      configAcctVerifySent: "\u9A8C\u8BC1\u90AE\u4EF6\u5DF2\u53D1\u9001,\u8BF7\u67E5\u6536\u90AE\u7BB1\u5E76\u70B9\u51FB\u9A8C\u8BC1\u94FE\u63A5;\u5B8C\u6210\u540E\u56DE\u5230\u8FD9\u91CC\u70B9\u300C\u767B\u5F55\u300D\u3002",
-      configAcctLoginOk: "\u767B\u5F55\u6210\u529F,\u4E13\u5C5E\u7AEF\u53E3\u5DF2\u5E94\u7528,\u6B63\u5728\u91CD\u542F\u96A7\u9053\u2026",
-      configAcctNeedVerify: "\u8BF7\u5148\u5B8C\u6210\u90AE\u7BB1\u9A8C\u8BC1(\u67E5\u6536\u9A8C\u8BC1\u90AE\u4EF6),\u518D\u767B\u5F55\u3002",
+      configAcctOauthBtn: "\u767B\u5F55 / \u6CE8\u518C\u5B98\u65B9\u8D26\u53F7",
+      configAcctOauthHint: "\u5C06\u6253\u5F00\u6D4F\u89C8\u5668\u8DF3\u8F6C\u5B98\u7F51,\u5728\u7F51\u9875\u5B8C\u6210\u767B\u5F55/\u6CE8\u518C\u540E\u81EA\u52A8\u56DE\u8C03",
+      configAcctOauthOpening: "\u6B63\u5728\u6253\u5F00\u6D4F\u89C8\u5668\u2026",
+      configAcctOauthWait: "\u7B49\u5F85\u6388\u6743\u2026",
+      configAcctOauthOpenBrowser: "\u5DF2\u6253\u5F00\u6D4F\u89C8\u5668:\u8BF7\u5728\u5B98\u7F51\u9875\u9762\u767B\u5F55\u8D26\u53F7\u5E76\u70B9\u300C\u786E\u8BA4\u6388\u6743\u300D\u3002\u82E5\u672A\u81EA\u52A8\u6253\u5F00,\u8BF7\u70B9\u4E0B\u65B9\u6309\u94AE\u91CD\u8BD5\u3002",
+      configAcctOauthOpenAgain: "\u91CD\u65B0\u6253\u5F00\u6388\u6743\u9875",
+      configAcctOauthCancel: "\u53D6\u6D88",
+      configAcctOauthExpired: "\u6388\u6743\u5DF2\u8FC7\u671F,\u8BF7\u91CD\u65B0\u53D1\u8D77\u3002",
+      configAcctOauthFail: "\u6388\u6743\u5931\u8D25:",
+      configAcctOauthNetwork: "\u5B98\u65B9\u670D\u52A1\u5668\u6682\u65F6\u4E0D\u53EF\u8FBE,\u8BF7\u7A0D\u540E\u518D\u8BD5\u3002",
+      configAcctOauthDone: "\u6388\u6743\u6210\u529F,\u6B63\u5728\u5E94\u7528\u8D26\u53F7\u4E0E\u4E13\u5C5E\u7AEF\u53E3\u2026",
       configAcctRestartFail: "\u767B\u5F55\u6210\u529F,\u4F46\u96A7\u9053\u91CD\u542F\u5931\u8D25:\u8BF7\u70B9\u300C\u5F00\u59CB\u63A7\u5236\u300D\u624B\u52A8\u542F\u52A8\u3002",
       configAcctLoadFail: "\u5B98\u65B9\u670D\u52A1\u5668\u6682\u65F6\u4E0D\u53EF\u8FBE,\u8BF7\u7A0D\u540E\u518D\u8BD5\u3002",
       configSelfhost: "\u81EA\u5EFA\u670D\u52A1\u5668",
@@ -3420,6 +3570,10 @@ function apply(ctx) {
       subtitle: "Scan or copy the link to open this panel from any device",
       about: "About",
       config: "Settings",
+      aboutAccount: "Sign in",
+      aboutAccountLogged: "Signed in",
+      loginRequired: "Sign in required",
+      loginRequiredDesc: "Using the official server requires signing in first; a dedicated entry is assigned after login. Tap below to sign in.",
       aboutDesc: "Securely tunnel this DeepSeek assistant web panel to your phone or any browser for remote control, anywhere.",
       aboutWebsite: "Website",
       aboutGithub: "GitHub",
@@ -3448,15 +3602,17 @@ function apply(ctx) {
       configAcctLogout: "Sign out",
       configAcctLoggingOut: "Signing out\u2026",
       configAcctLoggedOut: "Signed out (tunnel will disconnect; sign in again to restore)",
-      configAcctEmail: "Email",
-      configAcctEmailPh: "you@example.com",
-      configAcctPassword: "Password (min 8 chars)",
-      configAcctRegister: "Register",
-      configAcctLogin: "Sign in",
-      configAcctWorking: "Working\u2026",
-      configAcctVerifySent: "Verification email sent. Open the link in your inbox, then come back and sign in.",
-      configAcctLoginOk: "Signed in \u2014 dedicated port applied, restarting tunnel\u2026",
-      configAcctNeedVerify: "Please verify your email first (check your inbox), then sign in.",
+      configAcctOauthBtn: "Sign in / Register",
+      configAcctOauthHint: "Your browser will open the official site to sign in / register, then come back automatically",
+      configAcctOauthOpening: "Opening browser\u2026",
+      configAcctOauthWait: "Waiting for approval\u2026",
+      configAcctOauthOpenBrowser: 'Browser opened: sign in to your account on the site and click "Approve". If it did not open, use the button below.',
+      configAcctOauthOpenAgain: "Reopen approval page",
+      configAcctOauthCancel: "Cancel",
+      configAcctOauthExpired: "Authorization expired, please start again.",
+      configAcctOauthFail: "Authorization failed:",
+      configAcctOauthNetwork: "Official server unreachable, please try again later.",
+      configAcctOauthDone: "Authorized \u2014 applying your account and dedicated port\u2026",
       configAcctRestartFail: 'Signed in, but tunnel restart failed: press "Start" to launch it manually.',
       configAcctLoadFail: "Official server unreachable, please try again later.",
       configSelfhost: "Self-hosted server",

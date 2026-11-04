@@ -38,6 +38,7 @@ function cmpVersion(a, b) {
   return 0;
 }
 var OFFICIAL_API_BASE = "https://remote.ymzcc.com/dsh-remote";
+var OAUTH_CLIENT_ID = "dsh-plugin-desktop";
 var PANEL_URL = "https://remote.ymzcc.com/p/17901/";
 var UPDATE_MANIFEST_URL = "https://remote.ymzcc.com/dsh-remote/version.json";
 function atomicWrite(file, data) {
@@ -92,6 +93,25 @@ function readSecrets() {
 }
 function writeSecrets(sec) {
   atomicWrite(SECRETS_PATH, JSON.stringify(sec, null, 2));
+}
+function applyOfficialSession(j) {
+  const sec = readSecrets();
+  sec.server_mode = "official";
+  sec.server_uid = j.uid;
+  sec.server_email = j.email || "";
+  sec.server_token = j.access_token || j.token;
+  sec.server_link_secret = j.linkSecret || "";
+  sec.server_panel_url = j.panelUrl || "";
+  if (Number(j.remotePort) > 0) sec.frp_remote_port = Number(j.remotePort);
+  if (j.frpToken) sec.frp_token = j.frpToken;
+  writeSecrets(sec);
+  try {
+    const st = readState();
+    if (j.linkSecret) st.link_secret = j.linkSecret;
+    if (Number(j.remotePort) > 0) st.remote_port = Number(j.remotePort);
+    writeState(st);
+  } catch (e) {
+  }
 }
 function effectivePanelUrl() {
   try {
@@ -544,74 +564,103 @@ function apply(ctx, config = {}) {
         sendJson(res, 200, { ok: true, blacklist: readBlacklist() });
         return;
       }
-      if (route === "/browserctl/api/server/register") {
+      if (route === "/browserctl/api/server/oauth/begin") {
         if (req.method !== "POST") {
           sendJson(res, 405, { ok: false, error: "POST only" });
           return;
         }
-        const email = (url.searchParams.get("email") || "").trim();
-        const password = url.searchParams.get("password") || "";
-        if (!email || !password) {
-          sendJson(res, 400, { ok: false, error: "\u7F3A\u5C11 email/password \u53C2\u6570" });
-          return;
-        }
         try {
-          const r = await fetch(OFFICIAL_API_BASE + "/api/register", {
+          const r = await fetch(OFFICIAL_API_BASE + "/api/oauth/device", {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ email, password }),
+            body: JSON.stringify({ client_id: OAUTH_CLIENT_ID }),
             signal: AbortSignal.timeout(1e4)
           });
           const j = await r.json().catch(() => ({}));
-          sendJson(res, r.status, { ok: !!j.ok, needVerify: !!j.needVerify, devLink: j.devLink || null, error: j.error || null });
+          if (!r.ok || !j.ok) {
+            sendJson(res, r.ok ? 400 : r.status, { ok: false, error: j.error || "\u5B98\u65B9\u670D\u52A1\u5668 HTTP " + r.status });
+            return;
+          }
+          sendJson(res, 200, {
+            ok: true,
+            deviceCode: j.device_code,
+            userCode: j.user_code,
+            verificationUri: j.verification_uri_complete || j.verification_uri,
+            expiresIn: Number(j.expires_in) || 900,
+            interval: Math.max(3, Number(j.interval) || 5)
+          });
         } catch (e) {
           sendJson(res, 502, { ok: false, error: "\u65E0\u6CD5\u8FDE\u63A5\u5B98\u65B9\u670D\u52A1\u5668:" + String(e && e.message || e) });
         }
         return;
       }
-      if (route === "/browserctl/api/server/login") {
+      if (route === "/browserctl/api/server/oauth/open") {
         if (req.method !== "POST") {
           sendJson(res, 405, { ok: false, error: "POST only" });
           return;
         }
-        const email = (url.searchParams.get("email") || "").trim();
-        const password = url.searchParams.get("password") || "";
-        if (!email || !password) {
-          sendJson(res, 400, { ok: false, error: "\u7F3A\u5C11 email/password \u53C2\u6570" });
+        const raw = (url.searchParams.get("url") || "").trim();
+        let target;
+        try {
+          target = new URL(raw);
+        } catch {
+          sendJson(res, 400, { ok: false, error: "url \u53C2\u6570\u65E0\u6548" });
+          return;
+        }
+        const host = target.hostname.toLowerCase();
+        if (!(host === "remote.ymzcc.com" || host.endsWith(".ymzcc.com"))) {
+          sendJson(res, 400, { ok: false, error: "\u4E0D\u5141\u8BB8\u6253\u5F00\u8BE5\u5730\u5740" });
           return;
         }
         try {
-          const r = await fetch(OFFICIAL_API_BASE + "/api/login", {
+          const child = spawn("cmd", ["/c", "start", "", target.toString()], {
+            cwd: path.dirname(SCRIPT_PATH),
+            stdio: "ignore",
+            detached: true,
+            windowsHide: true
+          });
+          child.unref();
+          sendJson(res, 200, { ok: true });
+        } catch (e) {
+          sendJson(res, 500, { ok: false, error: String(e && e.message || e) });
+        }
+        return;
+      }
+      if (route === "/browserctl/api/server/oauth/poll") {
+        if (req.method !== "POST") {
+          sendJson(res, 405, { ok: false, error: "POST only" });
+          return;
+        }
+        const deviceCode = (url.searchParams.get("device_code") || "").trim();
+        if (!deviceCode) {
+          sendJson(res, 400, { ok: false, error: "\u7F3A\u5C11 device_code \u53C2\u6570" });
+          return;
+        }
+        try {
+          const r = await fetch(OFFICIAL_API_BASE + "/api/oauth/token", {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ email, password }),
+            body: JSON.stringify({
+              grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+              device_code: deviceCode,
+              client_id: OAUTH_CLIENT_ID
+            }),
             signal: AbortSignal.timeout(1e4)
           });
           const j = await r.json().catch(() => ({}));
           if (!r.ok || !j.ok) {
-            sendJson(res, r.ok ? 401 : r.status, { ok: false, error: j.error || "\u5B98\u65B9\u670D\u52A1\u5668 HTTP " + r.status });
+            const code = j.code || "";
+            if (code === "authorization_pending" || code === "slow_down") {
+              sendJson(res, 200, { ok: false, pending: true, interval: Math.max(3, Number(j.interval) || 5), error: j.error || "\u7B49\u5F85\u6388\u6743" });
+              return;
+            }
+            sendJson(res, 200, { ok: false, pending: false, error: j.error || "\u5B98\u65B9\u670D\u52A1\u5668 HTTP " + r.status, code });
             return;
           }
-          const sec = readSecrets();
-          sec.server_mode = "official";
-          sec.server_uid = j.uid;
-          sec.server_email = j.email || email;
-          sec.server_token = j.token;
-          sec.server_link_secret = j.linkSecret || "";
-          sec.server_panel_url = j.panelUrl || "";
-          if (Number(j.remotePort) > 0) sec.frp_remote_port = Number(j.remotePort);
-          if (j.frpToken) sec.frp_token = j.frpToken;
-          writeSecrets(sec);
-          try {
-            const st = readState();
-            if (j.linkSecret) st.link_secret = j.linkSecret;
-            if (Number(j.remotePort) > 0) st.remote_port = Number(j.remotePort);
-            writeState(st);
-          } catch (e) {
-          }
+          applyOfficialSession(j);
           sendJson(res, 200, {
             ok: true,
-            email: sec.server_email,
+            email: j.email || "",
             uid: j.uid,
             remotePort: Number(j.remotePort) || null,
             panelUrl: j.panelUrl || null
