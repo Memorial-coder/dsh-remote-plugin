@@ -596,13 +596,14 @@ function apply(ctx, config = {}) {
             sendJson(res, r.ok ? 502 : 503, { error: j && j.error || "\u95F8\u673A HTTP " + r.status });
             return;
           }
+          const uidUrl = toUidUrl(j.url);
           let svg = "";
           try {
-            svg = await qrSvg(j.url);
+            svg = await qrSvg(uidUrl);
           } catch (e) {
             svg = "";
           }
-          sendJson(res, 200, { ok: true, url: j.url, svg, long: true, ttl: j.ttl || 0, panel: effectivePanelUrl(), kind: j.kind || "long_pair" });
+          sendJson(res, 200, { ok: true, url: uidUrl, svg, long: true, ttl: j.ttl || 0, panel: effectivePanelUrl(), kind: j.kind || "long_pair" });
         } catch (e) {
           sendJson(res, 503, { error: "\u65E0\u6CD5\u8FDE\u63A5\u6D4F\u89C8\u5668\u63A7\u5236\u95F8\u673A:" + String(e && e.message || e) + ' (\u5148\u70B9"\u5F00\u59CB\u63A7\u5236"\u542F\u52A8\u96A7\u9053)' });
         }

@@ -716,9 +716,12 @@ export function apply(ctx, config = {}) {
               sendJson(res, r.ok ? 502 : 503, { error: (j && j.error) || ('闸机 HTTP ' + r.status) })
               return
             }
+            // 与 /api/pair、/api/qr、/api/link 一致:转成 uid 稳定形态(/dsh-remote/p/<uid>/...)。
+            // official 模式下端口每次重启都变,App 长期配对必须存 uid 形态才能换端口后仍连回。
+            const uidUrl = toUidUrl(j.url)
             let svg = ''
-            try { svg = await qrSvg(j.url) } catch (e) { svg = '' }
-            sendJson(res, 200, { ok: true, url: j.url, svg, long: true, ttl: j.ttl || 0, panel: effectivePanelUrl(), kind: j.kind || 'long_pair' })
+            try { svg = await qrSvg(uidUrl) } catch (e) { svg = '' }
+            sendJson(res, 200, { ok: true, url: uidUrl, svg, long: true, ttl: j.ttl || 0, panel: effectivePanelUrl(), kind: j.kind || 'long_pair' })
           } catch (e) {
             sendJson(res, 503, { error: '无法连接浏览器控制闸机:' + String((e && e.message) || e) + ' (先点"开始控制"启动隧道)' })
           }
