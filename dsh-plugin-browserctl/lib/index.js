@@ -26,7 +26,7 @@ function adminHeaders() {
   }
   return {};
 }
-var VERSION = "0.2.0";
+var VERSION = "1.0.0";
 var sessionTunnel = false;
 var ensureRunning = null;
 function cmpVersion(a, b) {

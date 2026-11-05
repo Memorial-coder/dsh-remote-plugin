@@ -43,7 +43,7 @@ function adminHeaders() {
 }
 
 // 插件/面板版本号(「关于」面板与 /api/config 共用)
-const VERSION = '0.2.0'
+const VERSION = '1.0.0'
 
 // 本 DSH 会话是否已建过隧道。首次 ensure(DSH 刚启动)必须重建:claim 全新随机端口,
 // 并清掉上次会话残留的分离 frpc/fwd(崩溃退出时 dispose 钩子不会跑)。会话内再次
