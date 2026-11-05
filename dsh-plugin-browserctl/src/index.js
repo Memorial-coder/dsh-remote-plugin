@@ -378,22 +378,20 @@ async function buildTunnel() {
   }
   const sec = readSecrets()
   if (sec.server_mode === 'official' && sec.server_token) {
-    // 官方模式:停旧隧道 / 释放旧端口 / 申请新端口三者互不依赖,并行执行。
-    // 总耗时 ≈ 最长一段(通常是 claim 的公网往返),启动明显更快。
-    const releaseTask = fetch(OFFICIAL_API_BASE + '/api/release-port', {
-      method: 'POST',
-      headers: { authorization: 'Bearer ' + sec.server_token },
-      signal: AbortSignal.timeout(5000),
-    }).then(() => ({ ok: true })).catch(() => ({ ok: false }))
+    // 官方模式:停旧隧道 + 申请新端口 并行执行,总耗时 ≈ 最长一段(通常是 claim 的公网往返)。
+    // 注意:绝不能在这里再并发发一个 /api/release-port —— claim-port 服务端内部已先释放
+    // 旧端口再分配全新端口(原子完成,见 dsh-remote-server/src/app.js)。若 release 请求晚于
+    // claim 到达服务端,会把刚 claim 到的新端口又从用户记录里删掉 → registry.json 缺该端口
+    // → nginx 边缘验签失败,公网打不开;且该端口被放回端口池可能被他人占走。
+    // 这正是 73e53d4 并行化后「有时能启动、有时开启隧道不成功、要重启 DSH 才好」的根因。
     const claimTask = fetch(OFFICIAL_API_BASE + '/api/claim-port', {
       method: 'POST',
       headers: { authorization: 'Bearer ' + sec.server_token },
       signal: AbortSignal.timeout(8000),
     }).then(async r => ({ ok: r.ok, status: r.status, j: await r.json().catch(() => ({})) }))
       .catch(e => ({ ok: false, status: 0, j: { error: String((e && e.message) || e) } }))
-    const [stopRes, , claimRes] = await Promise.all([
+    const [stopRes, claimRes] = await Promise.all([
       runBrowserctlAsync(['stop'], 8000),
-      releaseTask,
       claimTask,
     ])
     if (stopRes.error) console.error('[browserctl] stop 失败:', stopRes.error)

@@ -306,19 +306,13 @@ async function buildTunnel() {
   }
   const sec = readSecrets();
   if (sec.server_mode === "official" && sec.server_token) {
-    const releaseTask = fetch(OFFICIAL_API_BASE + "/api/release-port", {
-      method: "POST",
-      headers: { authorization: "Bearer " + sec.server_token },
-      signal: AbortSignal.timeout(5e3)
-    }).then(() => ({ ok: true })).catch(() => ({ ok: false }));
     const claimTask = fetch(OFFICIAL_API_BASE + "/api/claim-port", {
       method: "POST",
       headers: { authorization: "Bearer " + sec.server_token },
       signal: AbortSignal.timeout(8e3)
     }).then(async (r) => ({ ok: r.ok, status: r.status, j: await r.json().catch(() => ({})) })).catch((e) => ({ ok: false, status: 0, j: { error: String(e && e.message || e) } }));
-    const [stopRes, , claimRes] = await Promise.all([
+    const [stopRes, claimRes] = await Promise.all([
       runBrowserctlAsync(["stop"], 8e3),
-      releaseTask,
       claimTask
     ]);
     if (stopRes.error) console.error("[browserctl] stop \u5931\u8D25:", stopRes.error);
