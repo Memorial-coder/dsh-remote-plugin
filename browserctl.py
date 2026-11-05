@@ -3422,6 +3422,12 @@ color:#fff;text-decoration:none;font-size:14px}
             self._send_json(401, {"ok": False, "error": "动态码错误"})
             return
         brute_clear(ip)
+        # 时长余额拦截(阶段4):余额用尽时阻止新设备验证。
+        # 仅拦「新建会话」;30 天设备信任 Cookie 的签发不动(fail-open:异常放行)。
+        if not _gate_balance_allowed():
+            self._send_json(403, {"ok": False,
+                                  "error": "时长用尽，请前往 remote.ymzcc.com 个人中心签到获取更多时长"})
+            return
         # 复用已有设备标识(退出后重新扫码仍是同一台设备)
         dev = self._gate_cookie_dev()
         if dev and dev in _gate_kicked_set():
@@ -3861,10 +3867,92 @@ def _port_open(port, timeout=1.0):
         return False
 
 
+# ---- 闸机心跳（阶段4：时长计量，契约 docs/notes/签到与时长后台增强计划.md §2.5）----
+# 由看门狗每 5s 调一次：有活跃会话就累计秒数，每 60s 向服务器 POST 一次，
+# 服务器据此扣减该用户余额并记录设备明细。完全静默失败，绝不拖垮闸机主流程。
+_heartbeat_acc = 0.0
+_heartbeat_next = 0.0
+
+
+def _gate_heartbeat_tick():
+    global _heartbeat_acc, _heartbeat_next
+    try:
+        st = read_state()
+        port = int(st.get("remote_port") or 0)
+        secret = st.get("link_secret")
+        # 未配对 / 自建(selfhost)模式没有服务器签发的端口+密钥 → 跳过
+        if port <= 0 or not secret:
+            _heartbeat_acc = 0.0
+            _heartbeat_next = 0.0
+            return
+        now = time.time()
+        # 10 秒内有过请求的设备算「在用」
+        active = False
+        devices = []
+        with _gate_lock:
+            for dev, info in list(_sessions.items()):
+                ts = float(info.get("ts") or 0)
+                if now - ts <= 10:
+                    active = True
+                    devices.append({
+                        "name": str(info.get("name") or "")[:80],
+                        "ip": str(info.get("ip") or "")[:64],
+                        "ua": str(info.get("ua") or "")[:200],
+                    })
+        if active:
+            _heartbeat_acc += 5.0
+        if now < _heartbeat_next:
+            return
+        _heartbeat_next = now + 60
+        acc = int(_heartbeat_acc)
+        _heartbeat_acc = 0.0
+        if acc <= 0:
+            return
+        payload = json.dumps({
+            "port": port,
+            "secret": secret,
+            "activeSeconds": acc,
+            "devices": devices[:20],
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            "https://%s/dsh-remote/api/gate/heartbeat" % public_host(),
+            data=payload,
+            headers={"Content-Type": "application/json", "User-Agent": "browserctl-heartbeat/1"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=8) as r:
+            r.read()
+    except Exception:
+        pass
+
+
+def _gate_balance_allowed():
+    """查询服务器余额是否可用(fail-open:任何异常都放行,绝不拖垮闸机)。
+    仅在官方模式(有 remote_port+link_secret)下才真正查询;自建模式恒放行。"""
+    try:
+        st = read_state()
+        port = int(st.get("remote_port") or 0)
+        secret = st.get("link_secret")
+        if port <= 0 or not secret:
+            return True
+        q = urllib.parse.urlencode({"port": port, "secret": secret})
+        req = urllib.request.Request(
+            "https://%s/dsh-remote/api/gate/allow?%s" % (public_host(), q),
+            headers={"User-Agent": "browserctl-heartbeat/1"},
+            method="GET",
+        )
+        with urllib.request.urlopen(req, timeout=6) as r:
+            j = json.loads(r.read().decode("utf-8") or "{}")
+        return bool(j.get("allowed", True))
+    except Exception:
+        return True
+
+
 def cmd_watch():
     """看门狗:巡检闸机与 frpc,死了就拉起。由 start 以分离进程常驻。
     指数退避:连续拉起失败时 12s→30s→60s→5min→15min,防止崩溃风暴;
-    巡检一轮发现一切正常即复位。"""
+    巡检一轮发现一切正常即复位。
+    同时每 5s 累计在线秒数、每 60s 向服务器上报闸机心跳(阶段4 时长计量)。"""
     backoff = [12, 30, 60, 300, 900]
     failures = 0
     # 启动即自报 pid 到 state,避免 ensure_watchdog 因读到旧(已死)pid 反复拉起副本
@@ -3877,6 +3965,7 @@ def cmd_watch():
     while True:
         time.sleep(5)
         try:
+            _gate_heartbeat_tick()
             st = read_state()
             need = []
             if not _port_open(FWD_PORT):
