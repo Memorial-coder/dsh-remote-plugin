@@ -25,13 +25,16 @@
 
 ```
 手机/外网浏览器
-  → https://remote.ymzcc.com/p/17901/          (HTTPS 443)
+  → https://remote.ymzcc.com/dsh-remote/p/<uid>/    (官方托管: 每位用户专属入口, HTTPS 443)
   → OpenResty/Nginx (Lua Cookie 签名门禁)
   → frps (KCP/UDP)
   → frpc 隧道
   → 本机闸机 browserctl.py（2FA + 会话 + 看门狗）
   → DSH Web 面板
 ```
+
+> 说明：官方托管模式下每位用户登录后都有自己的专属入口 `/dsh-remote/p/<uid>/`（uid 稳定，换端口不断连）。
+> `/p/17901/` 仅作为作者机器的种子端口用于架构示意，普通用户请勿直接访问它。
 
 除了 DSH 插件侧边栏的远程控制 UI，本仓库还包含配套的闸机核心 browserctl.py，负责实际的隧道与安全控制。
 
