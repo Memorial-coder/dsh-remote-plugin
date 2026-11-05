@@ -27,6 +27,8 @@ function adminHeaders() {
   return {};
 }
 var VERSION = "0.2.0";
+var sessionTunnel = false;
+var ensureRunning = null;
 function cmpVersion(a, b) {
   const pa = String(a || "").replace(/^v/i, "").split(".").map((x) => Number(x) || 0);
   const pb = String(b || "").replace(/^v/i, "").split(".").map((x) => Number(x) || 0);
@@ -113,6 +115,16 @@ function applyOfficialSession(j) {
   } catch (e) {
   }
 }
+function uidPanelBase() {
+  try {
+    const sec = readSecrets();
+    if (sec && sec.server_mode === "official" && sec.server_uid) {
+      return "https://remote.ymzcc.com/dsh-remote/p/" + sec.server_uid + "/";
+    }
+  } catch {
+  }
+  return null;
+}
 function effectivePanelUrl() {
   try {
     const sec = readSecrets();
@@ -122,6 +134,8 @@ function effectivePanelUrl() {
       if (host) return "https://" + host + "/p/" + rp + "/";
     }
     if (sec && sec.server_mode === "official" && sec.server_uid) {
+      const uidBase = uidPanelBase();
+      if (uidBase) return uidBase;
       if (sec.server_panel_url) return String(sec.server_panel_url);
       const rp = Number(sec.frp_remote_port) || 0;
       if (rp > 0) return "https://remote.ymzcc.com/p/" + rp + "/";
@@ -129,6 +143,23 @@ function effectivePanelUrl() {
   } catch {
   }
   return PANEL_URL;
+}
+function toUidUrl(url) {
+  const base = uidPanelBase();
+  if (!base || !url) return url;
+  const s = String(url);
+  if (/^https:\/\/remote\.ymzcc\.com\/p\/\d{4,5}\//.test(s)) {
+    return s.replace(/^https:\/\/remote\.ymzcc\.com\/p\/\d{4,5}\//, base);
+  }
+  try {
+    const u = new URL(s);
+    if (u.hostname === "remote.ymzcc.com" && u.pathname === "/dsh-auth.html") {
+      const k = u.searchParams.get("k");
+      if (k) return base + "browserctl-gate/bootstrap?k=" + encodeURIComponent(k);
+    }
+  } catch {
+  }
+  return s;
 }
 function secretLink() {
   return null;
@@ -145,6 +176,44 @@ function runBrowserctl(args) {
   });
   child.unref();
   return { started: true };
+}
+function runBrowserctlAsync(args, timeoutMs = 8e3) {
+  return new Promise((resolve) => {
+    const script = SCRIPT_PATH;
+    if (!existsSync(script)) {
+      resolve({ started: false, error: "browserctl.py \u4E0D\u5B58\u5728: " + script });
+      return;
+    }
+    const creationflags = process.platform === "win32" ? 8 | 512 | 16777216 : 0;
+    let done = false;
+    const child = spawn("python", [script, ...args], {
+      cwd: path.dirname(script),
+      stdio: "ignore",
+      detached: true,
+      creationflags
+    });
+    const timer = setTimeout(() => {
+      if (done) return;
+      done = true;
+      try {
+        child.kill();
+      } catch {
+      }
+      resolve({ started: false, timedOut: true });
+    }, timeoutMs);
+    child.on("exit", () => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      resolve({ started: true });
+    });
+    child.on("error", (e) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      resolve({ started: false, error: String(e && e.message || e) });
+    });
+  });
 }
 function totpWrite(enabled, reset) {
   const st = readState();
@@ -229,6 +298,56 @@ function portOpen(port) {
       resolve(false);
     });
   });
+}
+async function buildTunnel() {
+  if (sessionTunnel) {
+    const fwd2 = await portOpen(3080);
+    if (fwd2) return { ok: true, alreadyRunning: true, forwarder: true };
+  }
+  const sec = readSecrets();
+  if (sec.server_mode === "official" && sec.server_token) {
+    const releaseTask = fetch(OFFICIAL_API_BASE + "/api/release-port", {
+      method: "POST",
+      headers: { authorization: "Bearer " + sec.server_token },
+      signal: AbortSignal.timeout(5e3)
+    }).then(() => ({ ok: true })).catch(() => ({ ok: false }));
+    const claimTask = fetch(OFFICIAL_API_BASE + "/api/claim-port", {
+      method: "POST",
+      headers: { authorization: "Bearer " + sec.server_token },
+      signal: AbortSignal.timeout(8e3)
+    }).then(async (r) => ({ ok: r.ok, status: r.status, j: await r.json().catch(() => ({})) })).catch((e) => ({ ok: false, status: 0, j: { error: String(e && e.message || e) } }));
+    const [stopRes, , claimRes] = await Promise.all([
+      runBrowserctlAsync(["stop"], 8e3),
+      releaseTask,
+      claimTask
+    ]);
+    if (stopRes.error) console.error("[browserctl] stop \u5931\u8D25:", stopRes.error);
+    const j = claimRes.j || {};
+    if (!claimRes.ok || !j.ok || !(Number(j.remotePort) > 0)) {
+      throw new Error("\u65E0\u6CD5\u83B7\u53D6\u7AEF\u53E3:" + (j.error || "HTTP " + claimRes.status));
+    }
+    const sec2 = readSecrets();
+    sec2.frp_remote_port = Number(j.remotePort);
+    if (j.linkSecret) sec2.server_link_secret = j.linkSecret;
+    writeSecrets(sec2);
+    try {
+      const st = readState();
+      st.remote_port = Number(j.remotePort);
+      if (j.linkSecret) st.link_secret = j.linkSecret;
+      writeState(st);
+    } catch (e) {
+    }
+  }
+  const result = runBrowserctl(["start"]);
+  let fwd = false;
+  const deadline = Date.now() + 15e3;
+  while (Date.now() < deadline) {
+    fwd = await portOpen(3080);
+    if (fwd) break;
+    await new Promise((r) => setTimeout(r, 400));
+  }
+  sessionTunnel = true;
+  return { ok: true, ...result, forwarder: fwd };
 }
 async function qrSvg(text) {
   return QRCode.toString(text, {
@@ -326,15 +445,22 @@ function apply(ctx, config = {}) {
       }
       const route = url.pathname.replace(/\/+$/, "") || url.pathname;
       if (route === "/browserctl/api/ensure") {
-        const result = runBrowserctl(["start"]);
-        let fwd = false;
-        const deadline = Date.now() + 15e3;
-        while (Date.now() < deadline) {
-          fwd = await portOpen(3080);
-          if (fwd) break;
-          await new Promise((r) => setTimeout(r, 400));
+        if (ensureRunning) {
+          sendJson(res, 200, { ok: true, pending: true, forwarder: await portOpen(3080), link: secretLink() });
+          return;
         }
-        sendJson(res, 200, { ...result, forwarder: fwd, link: secretLink() });
+        const inFlight = (async () => {
+          try {
+            const r = await buildTunnel();
+            sendJson(res, 200, { ...r, link: secretLink() });
+          } catch (e) {
+            console.error("[browserctl] ensure \u5F02\u5E38:", e);
+            sendJson(res, 503, { ok: false, error: "\u542F\u52A8\u5931\u8D25:" + String(e && e.message || e) });
+          } finally {
+            ensureRunning = null;
+          }
+        })();
+        ensureRunning = inFlight;
         return;
       }
       if (route === "/browserctl/api/status") {
@@ -343,6 +469,18 @@ function apply(ctx, config = {}) {
         return;
       }
       if (route === "/browserctl/api/stop") {
+        try {
+          const sec = readSecrets();
+          if (sec.server_mode === "official" && sec.server_token) {
+            await fetch(OFFICIAL_API_BASE + "/api/release-port", {
+              method: "POST",
+              headers: { authorization: "Bearer " + sec.server_token },
+              signal: AbortSignal.timeout(5e3)
+            });
+          }
+        } catch (e) {
+          console.error("[browserctl] release-port \u5F02\u5E38:", e);
+        }
         sendJson(res, 200, runBrowserctl(["stop"]));
         return;
       }
@@ -358,8 +496,9 @@ function apply(ctx, config = {}) {
             sendJson(res, 503, { error: j.error || "\u95F8\u673A\u672A\u5C31\u7EEA" });
             return;
           }
-          const svg = await qrSvg(j.url);
-          sendJson(res, 200, { url: j.url, svg, ttl: j.ttl, exp: j.exp, panel: effectivePanelUrl() });
+          const uidUrl = toUidUrl(j.url);
+          const svg = await qrSvg(uidUrl);
+          sendJson(res, 200, { url: uidUrl, svg, ttl: j.ttl, exp: j.exp, panel: effectivePanelUrl() });
         } catch (e) {
           sendJson(res, 503, { error: '\u95F8\u673A\u672A\u8FD0\u884C:\u5148\u70B9"\u5F00\u59CB\u63A7\u5236"\u542F\u52A8\u96A7\u9053(\u6216\u8FD0\u884C browserctl.py start)' });
         }
@@ -384,12 +523,13 @@ function apply(ctx, config = {}) {
             return;
           }
           let svg = "";
+          const uidUrl = toUidUrl(j.url);
           try {
-            svg = await qrSvg(j.url);
+            svg = await qrSvg(uidUrl);
           } catch (e) {
             svg = "";
           }
-          sendJson(res, 200, { url: j.url, svg, ttl: j.ttl, exp: j.exp, uses: j.uses, panel: effectivePanelUrl() });
+          sendJson(res, 200, { url: uidUrl, svg, ttl: j.ttl, exp: j.exp, uses: j.uses, panel: effectivePanelUrl() });
         } catch (e) {
           sendJson(res, 503, { error: '\u95F8\u673A\u672A\u8FD0\u884C:\u5148\u70B9"\u5F00\u59CB\u63A7\u5236"\u542F\u52A8\u96A7\u9053(\u6216\u8FD0\u884C browserctl.py start)' });
         }
@@ -408,9 +548,10 @@ function apply(ctx, config = {}) {
             sendJson(res, 502, { error: j.error || "\u95F8\u673A\u62D2\u7EDD\u521B\u5EFA\u914D\u5BF9" });
             return;
           }
-          const svg = await qrSvg(j.url);
+          const uidUrl = toUidUrl(j.url);
+          const svg = await qrSvg(uidUrl);
           sendJson(res, 200, {
-            url: j.url,
+            url: uidUrl,
             svg,
             ttl: j.ttl || 60,
             panel: effectivePanelUrl(),
@@ -883,6 +1024,63 @@ function apply(ctx, config = {}) {
       }
     }, "dshremote: win push");
   }
+  ctx.effect(() => {
+    let timer = null;
+    try {
+      const sec = readSecrets();
+      const st = readState();
+      const ready = sec.server_mode === "official" && sec.server_token || Number(sec.frp_remote_port) > 0 || Number(st.remote_port) > 0;
+      if (!ready) return void 0;
+      timer = setTimeout(() => {
+        if (ensureRunning) return;
+        ensureRunning = (async () => {
+          try {
+            for (let attempt = 1; attempt <= 4; attempt++) {
+              try {
+                const r = await buildTunnel();
+                if (r && r.forwarder) return r;
+              } catch (e) {
+              }
+              if (attempt < 4) await new Promise((res) => setTimeout(res, 5e3));
+            }
+          } catch (e) {
+            console.error("[browserctl] \u542F\u52A8\u81EA\u52A8\u5EFA\u96A7\u9053\u5931\u8D25:", e);
+          } finally {
+            ensureRunning = null;
+          }
+        })();
+      }, 4e3);
+    } catch (e) {
+    }
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
+  }, "dshremote: auto-start tunnel on DSH launch");
+  ctx.effect(() => {
+    return () => {
+      try {
+        const sec = readSecrets();
+        if (sec.server_mode === "official" && sec.server_token) {
+          fetch(OFFICIAL_API_BASE + "/api/release-port", {
+            method: "POST",
+            headers: { authorization: "Bearer " + sec.server_token },
+            signal: AbortSignal.timeout(2e3)
+          }).catch(() => {
+          });
+        }
+        try {
+          spawn("python", [SCRIPT_PATH, "stop"], {
+            cwd: path.dirname(SCRIPT_PATH),
+            stdio: "ignore",
+            detached: true,
+            windowsHide: true
+          }).unref();
+        } catch (e) {
+        }
+      } catch (e) {
+      }
+    };
+  }, "dshremote: release tunnel on DSH exit");
   ctx.logger.info("dshremote: host half ready (panel %s)", PANEL_URL);
 }
 export {

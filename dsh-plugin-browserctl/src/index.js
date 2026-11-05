@@ -45,6 +45,13 @@ function adminHeaders() {
 // 插件/面板版本号(「关于」面板与 /api/config 共用)
 const VERSION = '0.2.0'
 
+// 本 DSH 会话是否已建过隧道。首次 ensure(DSH 刚启动)必须重建:claim 全新随机端口,
+// 并清掉上次会话残留的分离 frpc/fwd(崩溃退出时 dispose 钩子不会跑)。会话内再次
+// ensure 只要隧道在跑就幂等返回 —— 开关插件面板绝不拆正在运行的隧道。
+let sessionTunnel = false
+// ensure 并发互斥:快速连点「开始控制」时只让一个真正执行,其余返回 pending
+let ensureRunning = null
+
 // 语义化版本比较:相等 0、a>b 正、a<b 负(容忍 'v' 前缀,按数字段逐段比)
 function cmpVersion(a, b) {
   const pa = String(a || '').replace(/^v/i, '').split('.').map(x => Number(x) || 0)
@@ -158,8 +165,19 @@ function applyOfficialSession(j) {
 }
 
 // 面板链接自适应:自建模式 = https://<host>/p/<remotePort>/;
-// 官方多用户(已登录)= 服务器下发的 panelUrl(按分配端口);
+// 官方多用户(已登录)= uid 稳定链接 /dsh-remote/p/<uid>/(端口变化也不失效,
+// 服务端按 uid 解析当前端口;App 长期配对存这个,重启换端口后仍能连回自己机器);
 // 都没有 = 官方默认(作者机器 17901,行为与历史完全一致)。
+function uidPanelBase() {
+  try {
+    const sec = readSecrets()
+    if (sec && sec.server_mode === 'official' && sec.server_uid) {
+      return 'https://remote.ymzcc.com/dsh-remote/p/' + sec.server_uid + '/'
+    }
+  } catch {}
+  return null
+}
+
 function effectivePanelUrl() {
   try {
     const sec = readSecrets()
@@ -169,12 +187,36 @@ function effectivePanelUrl() {
       if (host) return 'https://' + host + '/p/' + rp + '/'
     }
     if (sec && sec.server_mode === 'official' && sec.server_uid) {
+      const uidBase = uidPanelBase()
+      if (uidBase) return uidBase
       if (sec.server_panel_url) return String(sec.server_panel_url)
       const rp = Number(sec.frp_remote_port) || 0
       if (rp > 0) return 'https://remote.ymzcc.com/p/' + rp + '/'
     }
   } catch {}
   return PANEL_URL
+}
+
+// 把闸机生成的端口形态链接重写成 uid 稳定形态。App 扫码/配对拿到的一律是
+// uid 链接 —— 端口每次重启都变,uid 永不变。
+function toUidUrl(url) {
+  const base = uidPanelBase()
+  if (!base || !url) return url
+  const s = String(url)
+  // 形态一:配对 claim / 面板链接 https://host/p/<port>/<rest> → /dsh-remote/p/<uid>/<rest>
+  if (/^https:\/\/remote\.ymzcc\.com\/p\/\d{4,5}\//.test(s)) {
+    return s.replace(/^https:\/\/remote\.ymzcc\.com\/p\/\d{4,5}\//, base)
+  }
+  // 形态二:引导链接 https://host/dsh-auth.html?p=<port>&k=<token>
+  // p= 只给边缘 nginx Lua 路由用;uid 代理取代它 → 直连闸机 bootstrap,只要 k=
+  try {
+    const u = new URL(s)
+    if (u.hostname === 'remote.ymzcc.com' && u.pathname === '/dsh-auth.html') {
+      const k = u.searchParams.get('k')
+      if (k) return base + 'browserctl-gate/bootstrap?k=' + encodeURIComponent(k)
+    }
+  } catch {}
+  return s
 }
 
 function secretLink() {
@@ -197,6 +239,44 @@ function runBrowserctl(args) {
   })
   child.unref()
   return { started: true }
+}
+
+// 异步版 runBrowserctl:等待子进程退出(或超时),不阻塞事件循环。
+// 用于 ensure 里需要「等 stop 真正结束」的步骤——这样 stop 期间事件循环还能
+// 继续发 claim-port / release-port 的网络请求,三段并行压成一段,启动更快。
+function runBrowserctlAsync(args, timeoutMs = 8000) {
+  return new Promise((resolve) => {
+    const script = SCRIPT_PATH
+    if (!existsSync(script)) { resolve({ started: false, error: 'browserctl.py 不存在: ' + script }); return }
+    const creationflags = process.platform === 'win32'
+      ? (0x00000008 | 0x00000200 | 0x01000000)
+      : 0
+    let done = false
+    const child = spawn('python', [script, ...args], {
+      cwd: path.dirname(script),
+      stdio: 'ignore',
+      detached: true,
+      creationflags,
+    })
+    const timer = setTimeout(() => {
+      if (done) return
+      done = true
+      try { child.kill() } catch {}
+      resolve({ started: false, timedOut: true })
+    }, timeoutMs)
+    child.on('exit', () => {
+      if (done) return
+      done = true
+      clearTimeout(timer)
+      resolve({ started: true })
+    })
+    child.on('error', (e) => {
+      if (done) return
+      done = true
+      clearTimeout(timer)
+      resolve({ started: false, error: String((e && e.message) || e) })
+    })
+  })
 }
 
 function totpWrite(enabled, reset) {
@@ -285,6 +365,65 @@ function portOpen(port) {
     s.on('error', () => resolve(false))
     s.on('timeout', () => { s.destroy(); resolve(false) })
   })
+}
+
+// 幂等建隧道(/browserctl/api/ensure 路由与「DSH 启动自动建隧道」共用)。
+// 本会话已建过隧道且闸机在跑(3080 通)→ 直接返回,绝不拆正在运行的隧道、绝不换端口。
+// 否则重建:官方模式先停旧 → 释放旧端口 → claim 全新随机端口 → 持久化 → 启动。
+// claim 失败会 throw,由调用方(路由发 503 / 自动建隧道打日志)处理。
+async function buildTunnel() {
+  if (sessionTunnel) {
+    const fwd = await portOpen(3080)
+    if (fwd) return { ok: true, alreadyRunning: true, forwarder: true }
+  }
+  const sec = readSecrets()
+  if (sec.server_mode === 'official' && sec.server_token) {
+    // 官方模式:停旧隧道 / 释放旧端口 / 申请新端口三者互不依赖,并行执行。
+    // 总耗时 ≈ 最长一段(通常是 claim 的公网往返),启动明显更快。
+    const releaseTask = fetch(OFFICIAL_API_BASE + '/api/release-port', {
+      method: 'POST',
+      headers: { authorization: 'Bearer ' + sec.server_token },
+      signal: AbortSignal.timeout(5000),
+    }).then(() => ({ ok: true })).catch(() => ({ ok: false }))
+    const claimTask = fetch(OFFICIAL_API_BASE + '/api/claim-port', {
+      method: 'POST',
+      headers: { authorization: 'Bearer ' + sec.server_token },
+      signal: AbortSignal.timeout(8000),
+    }).then(async r => ({ ok: r.ok, status: r.status, j: await r.json().catch(() => ({})) }))
+      .catch(e => ({ ok: false, status: 0, j: { error: String((e && e.message) || e) } }))
+    const [stopRes, , claimRes] = await Promise.all([
+      runBrowserctlAsync(['stop'], 8000),
+      releaseTask,
+      claimTask,
+    ])
+    if (stopRes.error) console.error('[browserctl] stop 失败:', stopRes.error)
+    const j = claimRes.j || {}
+    if (!claimRes.ok || !j.ok || !(Number(j.remotePort) > 0)) {
+      throw new Error('无法获取端口:' + (j.error || ('HTTP ' + claimRes.status)))
+    }
+    // 持久化新端口与 linkSecret(此时 stop 已结束,旧 frpc 死透,新隧道才能绑新端口)
+    const sec2 = readSecrets()
+    sec2.frp_remote_port = Number(j.remotePort)
+    if (j.linkSecret) sec2.server_link_secret = j.linkSecret
+    writeSecrets(sec2)
+    try {
+      const st = readState()
+      st.remote_port = Number(j.remotePort)
+      if (j.linkSecret) st.link_secret = j.linkSecret
+      writeState(st)
+    } catch (e) { /* state 写失败不影响启动 */ }
+  }
+  const result = runBrowserctl(['start'])
+  // 轮询等待闸机 3080 就绪(最多 ~15s),避免固定等待在冷启动/端口释放/锁等待时误报失败
+  let fwd = false
+  const deadline = Date.now() + 15000
+  while (Date.now() < deadline) {
+    fwd = await portOpen(3080)
+    if (fwd) break
+    await new Promise(r => setTimeout(r, 400))
+  }
+  sessionTunnel = true
+  return { ok: true, ...result, forwarder: fwd }
 }
 
 async function qrSvg(text) {
@@ -425,16 +564,24 @@ export function apply(ctx, config = {}) {
         }
         const route = url.pathname.replace(/\/+$/, '') || url.pathname  // 归一化尾斜杠
         if (route === '/browserctl/api/ensure') {
-          const result = runBrowserctl(['start'])
-          // 轮询等待闸机 3080 就绪(最多 ~15s),避免固定等待在冷启动/端口释放/锁等待时误报失败
-          let fwd = false
-          const deadline = Date.now() + 15000
-          while (Date.now() < deadline) {
-            fwd = await portOpen(3080)
-            if (fwd) break
-            await new Promise(r => setTimeout(r, 400))
+          // 幂等启动(逻辑见 buildTunnel):本会话隧道在跑 → 直接返回,不拆隧道不换端口;
+          // 只有隧道没在跑 / DSH 刚启动首次 ensure 才重建。关插件面板绝不会重启隧道。
+          if (ensureRunning) {
+            sendJson(res, 200, { ok: true, pending: true, forwarder: await portOpen(3080), link: secretLink() })
+            return
           }
-          sendJson(res, 200, { ...result, forwarder: fwd, link: secretLink() })
+          const inFlight = (async () => {
+            try {
+              const r = await buildTunnel()
+              sendJson(res, 200, { ...r, link: secretLink() })
+            } catch (e) {
+              console.error('[browserctl] ensure 异常:', e)
+              sendJson(res, 503, { ok: false, error: '启动失败:' + String((e && e.message) || e) })
+            } finally {
+              ensureRunning = null
+            }
+          })()
+          ensureRunning = inFlight
           return
         }
         if (route === '/browserctl/api/status') {
@@ -443,6 +590,19 @@ export function apply(ctx, config = {}) {
           return
         }
         if (route === '/browserctl/api/stop') {
+          // 官方多用户:停止前先向服务端释放端口(lease),best-effort 不影响本地停止。
+          try {
+            const sec = readSecrets()
+            if (sec.server_mode === 'official' && sec.server_token) {
+              await fetch(OFFICIAL_API_BASE + '/api/release-port', {
+                method: 'POST',
+                headers: { authorization: 'Bearer ' + sec.server_token },
+                signal: AbortSignal.timeout(5000),
+              })
+            }
+          } catch (e) {
+            console.error('[browserctl] release-port 异常:', e)
+          }
           sendJson(res, 200, runBrowserctl(['stop']))
           return
         }
@@ -459,8 +619,9 @@ export function apply(ctx, config = {}) {
               sendJson(res, 503, { error: j.error || '闸机未就绪' })
               return
             }
-            const svg = await qrSvg(j.url)
-            sendJson(res, 200, { url: j.url, svg, ttl: j.ttl, exp: j.exp, panel: effectivePanelUrl() })
+            const uidUrl = toUidUrl(j.url)
+            const svg = await qrSvg(uidUrl)
+            sendJson(res, 200, { url: uidUrl, svg, ttl: j.ttl, exp: j.exp, panel: effectivePanelUrl() })
           } catch (e) {
             sendJson(res, 503, { error: '闸机未运行:先点"开始控制"启动隧道(或运行 browserctl.py start)' })
           }
@@ -487,8 +648,9 @@ export function apply(ctx, config = {}) {
               return
             }
             let svg = ''
-            try { svg = await qrSvg(j.url) } catch (e) { svg = '' }
-            sendJson(res, 200, { url: j.url, svg, ttl: j.ttl, exp: j.exp, uses: j.uses, panel: effectivePanelUrl() })
+            const uidUrl = toUidUrl(j.url)
+            try { svg = await qrSvg(uidUrl) } catch (e) { svg = '' }
+            sendJson(res, 200, { url: uidUrl, svg, ttl: j.ttl, exp: j.exp, uses: j.uses, panel: effectivePanelUrl() })
           } catch (e) {
             sendJson(res, 503, { error: '闸机未运行:先点"开始控制"启动隧道(或运行 browserctl.py start)' })
           }
@@ -510,9 +672,10 @@ export function apply(ctx, config = {}) {
               sendJson(res, 502, { error: j.error || '闸机拒绝创建配对' })
               return
             }
-            const svg = await qrSvg(j.url)
+            const uidUrl = toUidUrl(j.url)
+            const svg = await qrSvg(uidUrl)
             sendJson(res, 200, {
-              url: j.url, svg, ttl: j.ttl || 60, panel: effectivePanelUrl(), once: true,
+              url: uidUrl, svg, ttl: j.ttl || 60, panel: effectivePanelUrl(), once: true,
               grant: j.grant || '', uses: j.uses || uses, remaining: j.remaining || uses,
               kind: j.kind || 'pair',
             })
@@ -952,5 +1115,66 @@ export function apply(ctx, config = {}) {
       }
     }, 'dshremote: win push')
   }
+  // DSH 启动自动建隧道:启动 DeepSeek 后约 4s 在后台拉起隧道,不用每次手动点「开始控制」。
+  // 触发条件:官方模式已登录,或本机之前有端口历史(自建服务器/曾建过隧道)。
+  // 不阻塞 DSH 启动;失败静默(用户仍可手动点「开始控制」重试)。走 buildTunnel 幂等逻辑,
+  // 每个 DSH 会话首次建隧道必然 claim 全新随机端口;与「关闭整个 DSH 才释放」闭环。
+  // DSH Web 可能还没就绪(detect_port 会 SystemExit)→ 最多重试 4 次、间隔 5s。
+  ctx.effect(() => {
+    let timer = null
+    try {
+      const sec = readSecrets()
+      const st = readState()
+      const ready = (sec.server_mode === 'official' && sec.server_token) ||
+        Number(sec.frp_remote_port) > 0 || Number(st.remote_port) > 0
+      if (!ready) return undefined
+      timer = setTimeout(() => {
+        if (ensureRunning) return
+        ensureRunning = (async () => {
+          try {
+            for (let attempt = 1; attempt <= 4; attempt++) {
+              try {
+                const r = await buildTunnel()
+                if (r && r.forwarder) return r
+              } catch (e) { /* 本轮失败,下一轮重试 */ }
+              if (attempt < 4) await new Promise(res => setTimeout(res, 5000))
+            }
+          } catch (e) {
+            console.error('[browserctl] 启动自动建隧道失败:', e)
+          } finally {
+            ensureRunning = null
+          }
+        })()
+      }, 4000)
+    } catch (e) { /* ignore */ }
+    return () => { if (timer) clearTimeout(timer) }
+  }, 'dshremote: auto-start tunnel on DSH launch')
+  // DSH 退出释放钩子:只有「关闭整个 DeepSeek」(优雅退出)才停隧道 + 释放端口。
+  // 关闭/重开插件面板不经过这里,不会动隧道。崩溃退出(kill /F、断电)时本钩子不跑,
+  // 由服务端空闲回收(端口离线 >3 分钟)兜底释放;下次 DSH 启动的首个 ensure 也会
+  // 清掉上次残留的分离进程并 claim 全新端口。release/stop 都是 best-effort,不阻塞退出。
+  ctx.effect(() => {
+    return () => {
+      try {
+        const sec = readSecrets()
+        if (sec.server_mode === 'official' && sec.server_token) {
+          fetch(OFFICIAL_API_BASE + '/api/release-port', {
+            method: 'POST',
+            headers: { authorization: 'Bearer ' + sec.server_token },
+            signal: AbortSignal.timeout(2000),
+          }).catch(() => {}) // 退出窗口内发不出去就算了,交给空闲回收
+        }
+        // 停隧道(fire-and-forget 分离进程,DSH 退出后仍能跑完;frpc 死 → 端口下线)
+        try {
+          spawn('python', [SCRIPT_PATH, 'stop'], {
+            cwd: path.dirname(SCRIPT_PATH),
+            stdio: 'ignore',
+            detached: true,
+            windowsHide: true,
+          }).unref()
+        } catch (e) { /* ignore */ }
+      } catch (e) { /* ignore */ }
+    }
+  }, 'dshremote: release tunnel on DSH exit')
   ctx.logger.info('dshremote: host half ready (panel %s)', PANEL_URL)
 }

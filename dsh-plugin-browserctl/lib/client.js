@@ -343,6 +343,28 @@ var css = `
 .dshBrowserCtlStatus[data-ok='true']::before { background: var(--dsw-alias-state-success-primary, #34b371); }
 .dshBrowserCtlStatus[data-ok='false'] { color: var(--dsw-alias-state-error-primary, #e5655c); }
 .dshBrowserCtlStatus[data-ok='false']::before { background: var(--dsw-alias-state-error-primary, #e5655c); }
+/* \u5F02\u6B65\u64CD\u4F5C(\u542F\u52A8/\u505C\u6B62\u96A7\u9053\u7B49)\u7684\u8F6C\u5708\u52A0\u8F7D\u6307\u793A:\u8DDF\u968F\u5F53\u524D\u6587\u5B57\u989C\u8272,\u653E\u8FDB\u6309\u94AE/\u72B6\u6001\u680F/\u5360\u4F4D\u6846 */
+.dshBrowserCtlSpinner {
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  border: 2px solid rgba(128,128,128,.35);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: dshBrowserCtlSpin .7s linear infinite;
+  flex: none;
+  vertical-align: -2px;
+}
+/* \u4E8C\u7EF4\u7801\u5360\u4F4D\u6846\u91CC\u7684\u52A0\u8F7D\u6001:spinner + \u63D0\u793A\u6587\u5B57\u4E00\u884C\u5C45\u4E2D */
+.dshBrowserCtlQrLoading {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--dsw-alias-label-secondary, #a6aab2);
+  font-size: 13px;
+  padding: 0 14px;
+  text-align: center;
+}
 /* \u9876\u90E8\u529F\u80FD\u9875\u7B7E:\u8FDE\u63A5 / \u8BBE\u5907 / 2FA / \u9ED1\u540D\u5355 / \u65E5\u5FD7,\u4E00\u6B21\u53EA\u663E\u793A\u4E00\u4E2A\u529F\u80FD\u533A */
 .dshBrowserCtlTabs {
   display: flex;
@@ -3097,7 +3119,8 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
     run("start", async () => {
       try {
         await fetch("/browserctl/api/ensure", { cache: "no-store" });
-      } catch {
+      } catch (e) {
+        console.error("[browserctl] ensure \u8BF7\u6C42\u5931\u8D25:", e);
       }
       await new Promise((r) => setTimeout(r, 600));
       setReloadToken((x) => x + 1);
@@ -3190,7 +3213,10 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
           /* @__PURE__ */ (0, import_jsx_runtime.jsx)("h1", { children: t("tab") }),
           /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { children: t("subtitle") })
         ] }),
-        busy && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: { fontSize: 11.5, color: "var(--dsw-alias-label-tertiary,#8b8f98)", whiteSpace: "nowrap" }, children: busy === "start" ? t("starting") : busy === "stop" ? t("stopping") : t("refresh") + "\u2026" }),
+        busy && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { style: { fontSize: 11.5, color: "var(--dsw-alias-label-tertiary,#8b8f98)", whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 5 }, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlSpinner", "aria-hidden": "true" }),
+          busy === "start" ? t("starting") : busy === "stop" ? t("stopping") : t("refresh") + "\u2026"
+        ] }),
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Tooltip, { label: acctMe ? acctMe.email || t("configAcctTitle") : t("aboutAccount"), children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(
           import_dsh_client_ui_primitives.Button,
           {
@@ -3223,10 +3249,10 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
         "div",
         {
           className: "dshBrowserCtlStatus",
-          "data-ok": data ? data.forwarder === false ? "wait" : "true" : error ? "false" : "wait",
+          "data-ok": data ? data.forwarder === false ? "wait" : "true" : busy === "start" ? "wait" : error ? "false" : "wait",
           children: [
-            data ? data.forwarder === false ? t("statusTunnelStarting") : t("statusReady") : error ? t("statusNoSecret") : t("statusLoading"),
-            error ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { title: error, style: { opacity: 0.8, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, children: error }) : null
+            data ? data.forwarder === false ? t("statusTunnelStarting") : t("statusReady") : busy === "start" ? t("starting") : error ? t("statusNoSecret") : t("statusLoading"),
+            error && busy !== "start" ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { title: error, style: { opacity: 0.8, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, children: error }) : null
           ]
         }
       ),
@@ -3274,7 +3300,10 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
               ] })
             ] }) : data.once ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: t("pairExpired") }) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: { color: "var(--dsw-alias-label-tertiary,#8b8f98)" }, children: t("pairStatic") }) }),
             data.once ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { style: { margin: "4px 0 0", fontSize: 11, textAlign: "center", color: "var(--dsw-alias-label-tertiary,#8b8f98)" }, children: t("pairAppTempNote") }) : null
-          ] }) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlQrBox", style: { height: 128 }, children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: { color: "#666", fontSize: 12, padding: "0 14px", textAlign: "center" }, children: error ? t("statusNoSecret") : t("statusLoading") }) }),
+          ] }) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlQrBox", style: { height: 128 }, children: busy === "start" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { className: "dshBrowserCtlQrLoading", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlSpinner", "aria-hidden": "true" }),
+            t("starting")
+          ] }) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: { color: "#666", fontSize: 12, padding: "0 14px", textAlign: "center" }, children: error ? t("statusNoSecret") : t("statusLoading") }) }),
           data && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlUrlRow", children: [
             /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlUrl", title: data.url, children: data.url }),
             /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "ghost", size: "sm", onClick: () => {
@@ -3306,7 +3335,11 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
           ] }),
           /* @__PURE__ */ (0, import_jsx_runtime.jsx)(IosGuideCard, { t, reloadToken }),
           /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlActions", children: [
-            !data && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "primary", size: "sm", disabled: gating, onClick: startChain, children: busy === "start" ? t("starting") : t("startCtl") }),
+            !data && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "primary", size: "sm", disabled: gating, onClick: startChain, children: busy === "start" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
+              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlSpinner", "aria-hidden": "true" }),
+              " ",
+              t("starting")
+            ] }) : t("startCtl") }),
             /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "secondary", size: "sm", disabled: gating, onClick: refreshAll, children: busy === "refresh" ? t("refresh") + "\u2026" : t("refresh") }),
             data && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
               /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "primary", size: "sm", disabled: gating, onClick: () => window.open(data.panel || data.url, "_blank"), children: t("openPanel") }),
@@ -3318,7 +3351,11 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
                   disabled: gating,
                   onClick: stopChain,
                   style: { color: "var(--dsw-alias-state-error-primary,#e5655c)" },
-                  children: busy === "stop" ? t("stopping") : t("stopCtl")
+                  children: busy === "stop" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
+                    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlSpinner", "aria-hidden": "true" }),
+                    " ",
+                    t("stopping")
+                  ] }) : t("stopCtl")
                 }
               )
             ] })

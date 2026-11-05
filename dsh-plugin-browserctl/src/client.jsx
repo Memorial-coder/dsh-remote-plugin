@@ -323,6 +323,28 @@ const css = `
 .dshBrowserCtlStatus[data-ok='true']::before { background: var(--dsw-alias-state-success-primary, #34b371); }
 .dshBrowserCtlStatus[data-ok='false'] { color: var(--dsw-alias-state-error-primary, #e5655c); }
 .dshBrowserCtlStatus[data-ok='false']::before { background: var(--dsw-alias-state-error-primary, #e5655c); }
+/* 异步操作(启动/停止隧道等)的转圈加载指示:跟随当前文字颜色,放进按钮/状态栏/占位框 */
+.dshBrowserCtlSpinner {
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  border: 2px solid rgba(128,128,128,.35);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: dshBrowserCtlSpin .7s linear infinite;
+  flex: none;
+  vertical-align: -2px;
+}
+/* 二维码占位框里的加载态:spinner + 提示文字一行居中 */
+.dshBrowserCtlQrLoading {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--dsw-alias-label-secondary, #a6aab2);
+  font-size: 13px;
+  padding: 0 14px;
+  text-align: center;
+}
 /* 顶部功能页签:连接 / 设备 / 2FA / 黑名单 / 日志,一次只显示一个功能区 */
 .dshBrowserCtlTabs {
   display: flex;
@@ -3239,7 +3261,7 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
       }
     } catch {}
     run('start', async () => {
-      try { await fetch('/browserctl/api/ensure', { cache: 'no-store' }) } catch {}
+      try { await fetch('/browserctl/api/ensure', { cache: 'no-store' }) } catch (e) { console.error('[browserctl] ensure 请求失败:', e) }
       await new Promise(r => setTimeout(r, 600))
       setReloadToken(x => x + 1)
     })
@@ -3320,7 +3342,8 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
             <p>{t('subtitle')}</p>
           </div>
           {busy && (
-            <span style={{ fontSize: 11.5, color: 'var(--dsw-alias-label-tertiary,#8b8f98)', whiteSpace: 'nowrap' }}>
+            <span style={{ fontSize: 11.5, color: 'var(--dsw-alias-label-tertiary,#8b8f98)', whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+              <span className="dshBrowserCtlSpinner" aria-hidden="true" />
               {busy === 'start' ? t('starting') : busy === 'stop' ? t('stopping') : t('refresh') + '…'}
             </span>
           )}
@@ -3357,12 +3380,12 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
         </header>
         <div
           className="dshBrowserCtlStatus"
-          data-ok={data ? (data.forwarder === false ? 'wait' : 'true') : (error ? 'false' : 'wait')}
+          data-ok={data ? (data.forwarder === false ? 'wait' : 'true') : (busy === 'start' ? 'wait' : (error ? 'false' : 'wait'))}
         >
           {data
             ? (data.forwarder === false ? t('statusTunnelStarting') : t('statusReady'))
-            : (error ? t('statusNoSecret') : t('statusLoading'))}
-          {error ? <span title={error} style={{ opacity: 0.8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{error}</span> : null}
+            : (busy === 'start' ? t('starting') : (error ? t('statusNoSecret') : t('statusLoading')))}
+          {error && busy !== 'start' ? <span title={error} style={{ opacity: 0.8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{error}</span> : null}
         </div>
         <div className="dshBrowserCtlTabs">
           {TABS.map(tb => (
@@ -3408,9 +3431,16 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
                 </div>
               ) : (
                 <div className="dshBrowserCtlQrBox" style={{ height: 128 }}>
-                  <span style={{ color: '#666', fontSize: 12, padding: '0 14px', textAlign: 'center' }}>
-                    {error ? t('statusNoSecret') : t('statusLoading')}
-                  </span>
+                  {busy === 'start' ? (
+                    <span className="dshBrowserCtlQrLoading">
+                      <span className="dshBrowserCtlSpinner" aria-hidden="true" />
+                      {t('starting')}
+                    </span>
+                  ) : (
+                    <span style={{ color: '#666', fontSize: 12, padding: '0 14px', textAlign: 'center' }}>
+                      {error ? t('statusNoSecret') : t('statusLoading')}
+                    </span>
+                  )}
                 </div>
               )}
               {data && (
@@ -3445,7 +3475,9 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
               <div className="dshBrowserCtlActions">
                 {!data && (
                   <Button variant="primary" size="sm" disabled={gating} onClick={startChain}>
-                    {busy === 'start' ? t('starting') : t('startCtl')}
+                    {busy === 'start'
+                      ? (<><span className="dshBrowserCtlSpinner" aria-hidden="true" /> {t('starting')}</>)
+                      : t('startCtl')}
                   </Button>
                 )}
                 <Button variant="secondary" size="sm" disabled={gating} onClick={refreshAll}>
@@ -3456,7 +3488,9 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
                     <Button variant="primary" size="sm" disabled={gating} onClick={() => window.open(data.panel || data.url, '_blank')}>{t('openPanel')}</Button>
                     <Button variant="secondary" size="sm" disabled={gating} onClick={stopChain}
                       style={{ color: 'var(--dsw-alias-state-error-primary,#e5655c)' }}>
-                      {busy === 'stop' ? t('stopping') : t('stopCtl')}
+                      {busy === 'stop'
+                        ? (<><span className="dshBrowserCtlSpinner" aria-hidden="true" /> {t('stopping')}</>)
+                        : t('stopCtl')}
                     </Button>
                   </>
                 )}

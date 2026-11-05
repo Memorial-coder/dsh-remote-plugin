@@ -304,14 +304,14 @@ PWA_MANIFEST = """{
   "name": "DSH 远程助手",
   "short_name": "DSH 助手",
   "description": "DeepSeek 助手远程控制面板",
-  "start_url": "/p/{port}/",
-  "scope": "/p/{port}/",
+  "start_url": "./",
+  "scope": "./",
   "display": "standalone",
   "background_color": "#121316",
   "theme_color": "#121316",
   "icons": [
-    {"src": "/p/{port}/icon-192.png", "sizes": "192x192", "type": "image/png"},
-    {"src": "/p/{port}/icon-512.png", "sizes": "512x512", "type": "image/png"}
+    {"src": "icon-192.png", "sizes": "192x192", "type": "image/png"},
+    {"src": "icon-512.png", "sizes": "512x512", "type": "image/png"}
   ]
 }"""
 
@@ -624,6 +624,26 @@ new MutationObserver(function(){
 }catch(e){}
 })();"""
 _MOBILE_TOOLBAR_TAG = b'<script>' + _MOBILE_TOOLBAR_JS.encode('utf-8') + b'</script>'
+
+# 面板根 HTML 加载动效:在 DSH Web 完全渲染前显示一个深色全屏 spinner,
+# 告诉用户"正在连接,首次加载稍慢",避免看到空白页以为卡住。
+# JS 自动消除:window load(资源加载完成) + #root 出现内容(SPA 渲染完成) + 20s 兜底。
+# App(UA 含 DshRemote/)不注入——App 有自己的原生 loadingPanel。
+_LOADING_SPLASH_HTML = """<div id="dsh-loading-splash" style="position:fixed;inset:0;z-index:99999;background:#121316;display:flex;flex-direction:column;align-items:center;justify-content:center;transition:opacity .4s;color:#fff">
+<div style="width:36px;height:36px;border:3px solid rgba(255,255,255,.12);border-top-color:#4a9eff;border-radius:50%;animation:dshLdSpin .7s linear infinite"></div>
+<div style="margin-top:18px;font-size:15px;font-weight:500;letter-spacing:.01em">正在连接你的电脑\u2026</div>
+<div style="margin-top:8px;font-size:12px;color:rgba(255,255,255,.4)">首次加载稍慢，请稍候</div>
+<style>@keyframes dshLdSpin{to{transform:rotate(360deg)}}.dshLdFade{opacity:0!important;pointer-events:none}</style>
+</div>
+<script>
+(function(){var s=document.getElementById('dsh-loading-splash');if(!s)return;
+function h(){s.classList.add('dshLdFade');setTimeout(function(){try{s.remove()}catch(e){}},500)}
+window.addEventListener('load',h);
+var r=document.getElementById('root');if(r){var o=new MutationObserver(function(){if(r.children.length>0||(r.textContent||'').trim().length>0){h();o.disconnect()}});o.observe(r,{childList:true,subtree:true,characterData:true})}
+setTimeout(h,20000)})()
+</script>"""
+_LOADING_SPLASH_TAG = _LOADING_SPLASH_HTML.encode('utf-8')
+
 GATE_MAX_AGE = COOKIE_LIFETIME_DAYS * 86400
 TOTP_STEP = 30
 REPLAY_WINDOW = 90          # 同码 90 秒内只认一次(防重放)
@@ -3597,9 +3617,9 @@ color:#fff;text-decoration:none;font-size:14px}
         """往面板根 HTML 的 <head> 里塞 PWA 标签(manifest/apple-touch-icon/meta/SW 注册)
         和移动端工具条(返回/全屏/视口,见 _MOBILE_TOOLBAR_JS,仅触屏设备自行显示)。
         App(UA 含 DshRemote/)不注入工具条——App 有自己的原生导航,不需要悬浮按钮。
-        全部用公网绝对路径 /p/<port>/... 指向本闸机自供的静态资源。
+        全部用相对路径:面板无论从 /p/<port>/ 还是 /dsh-remote/p/<uid>/(uid 稳定配对)
+        打开,都解析到当前前缀下的本闸机静态资源 —— 端口变化后 PWA 图标/SW 照常工作。
         必须在校验 / 压缩之前调用,让 ETag 覆盖注入后的真实字节。"""
-        port = int(gate_state().get("remote_port") or REMOTE_PORT)
         # App 不注入移动端工具条(返回/全屏/视口),App 自有原生导航
         ua = (self.headers.get("User-Agent") or "").lower()
         is_app = "dshremote/" in ua
@@ -3608,10 +3628,9 @@ color:#fff;text-decoration:none;font-size:14px}
             b'<meta name="mobile-web-app-capable" content="yes">'
             b'<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">'
             b'<meta name="theme-color" content="#121316">'
-            b'<link rel="manifest" href="/p/' + str(port).encode() + b'/manifest.webmanifest">'
-            b'<link rel="apple-touch-icon" href="/p/' + str(port).encode() + b'/icon-180.png">'
-            b'<script>try{navigator.serviceWorker&&navigator.serviceWorker.register("/p/'
-            + str(port).encode() + b'/sw.js")}catch(e){}</script>'
+            b'<link rel="manifest" href="manifest.webmanifest">'
+            b'<link rel="apple-touch-icon" href="icon-180.png">'
+            b'<script>try{navigator.serviceWorker&&navigator.serviceWorker.register("sw.js")}catch(e){}</script>'
             + (b"" if is_app else _MOBILE_TOOLBAR_TAG)
         )
         idx = html.lower().find(b"<head")
@@ -3620,7 +3639,13 @@ color:#fff;text-decoration:none;font-size:14px}
         end = html.find(b">", idx)
         if end < 0:
             return html
-        return html[:end + 1] + tags + html[end + 1:]
+        html = html[:end + 1] + tags + html[end + 1:]
+        # 加载动效:在 </body> 前插入全屏 spinner(非 App 才注入)
+        if not is_app:
+            body_end = html.lower().find(b"</body>")
+            if body_end >= 0:
+                html = html[:body_end] + _LOADING_SPLASH_TAG + html[body_end:]
+        return html
 
     # ---- 请求入口 ----
 
@@ -3954,8 +3979,16 @@ def ensure_tunnel(remote_port=REMOTE_PORT):
                              "登录后会自动下发连接凭据与专属端口。")
         raise SystemExit("缺少 FRP 认证 Token:先运行 python browserctl.py secrets init\n"
                          "或设置环境变量 BROWSERCTL_FRP_TOKEN")
-    # 远端端口:配置面板填写的 frp_remote_port 优先;未配置则沿用传入/默认值(行为不变)。
-    remote_port = int(sec.get("frp_remote_port") or remote_port or REMOTE_PORT)
+    # 远端端口:官方模式必须用服务器登录时分配的专属端口(frp_remote_port),
+    # 绝不能回退到种子端口 17901 —— 那会让所有用户挤在作者机器同一端口。
+    # 自建模式保持原行为:配置面板填写的 frp_remote_port 优先,否则沿用传入/默认值。
+    if sec.get("server_mode") == "official":
+        remote_port = int(sec.get("frp_remote_port") or 0)
+        if remote_port <= 0:
+            raise SystemExit("尚未分配专属端口:请先在插件「配置」面板登录官方账号,\n"
+                             "登录后服务器会自动分配专属端口并重建隧道。")
+    else:
+        remote_port = int(sec.get("frp_remote_port") or remote_port or REMOTE_PORT)
     # 服务器地址/端口/token 由 load_secrets 按 server_mode 决定:
     # selfhost 用配置面板填写的自建值;否则(official / 未设置)保持与历史完全一致,活体隧道不受影响。
     if sec.get("server_mode") == "selfhost":
