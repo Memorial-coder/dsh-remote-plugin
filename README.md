@@ -3,8 +3,33 @@
 > DSH 远程助手（DshRemote）：一款 [DeepSeek Harness (DSH)](https://dsh.venice.ai) Web 面板配套工具，
 > 一键把本机 DSH 面板安全穿透到手机与外网浏览器，随时随地远程控制自己的电脑，全程 AI 辅助。
 
+> 在线体验：[立即体验 DshRemote](https://remote.ymzcc.com/dsh-remote/)
+> 链接地址：`https://remote.ymzcc.com/dsh-remote/`
+
+<p align="center">
+  <a href="https://remote.ymzcc.com/dsh-remote/" target="_blank">
+    <img src="https://img.shields.io/badge/在线体验-立即进入DshRemote-14b8a6?style=for-the-badge&logo=joy-con&logoColor=white" alt="在线体验">
+  </a>
+  <a href="https://github.com/Memorial-coder/dsh-remote-plugin" target="_blank">
+    <img src="https://img.shields.io/badge/开源地址-GitHub-black?style=for-the-badge&logo=github" alt="GitHub">
+  </a>
+</p>
+
 <p align="center">
   <img src="screenshots/01-landing.png" alt="DshRemote 官网首页" width="80%">
+</p>
+
+### 🚀 快速访问
+
+> [!IMPORTANT]
+> **官网体验**：[https://remote.ymzcc.com/dsh-remote/](https://remote.ymzcc.com/dsh-remote/)
+> **官方交流群**：1134820071 (QQ)
+
+<p align="center">
+  <a href="https://remote.ymzcc.com/dsh-remote/">在线体验</a> ·
+  <a href="INSTALL.md">安装指南</a> ·
+  <a href="https://github.com/Memorial-coder/dsh-remote-plugin">GitHub 仓库</a> ·
+  QQ 交流群：1134820071
 </p>
 
 ## 功能一览
@@ -71,6 +96,8 @@ DSH 侧边栏的远程控制面板，集成了二维码配对、设备管理、�
 
 ## 快速开始
 
+想先体验效果？直接打开官网：[https://remote.ymzcc.com/dsh-remote/](https://remote.ymzcc.com/dsh-remote/)，注册/登录即可试用。
+
 完整安装步骤见 [INSTALL.md](INSTALL.md)。
 
 **官方托管**（推荐）：注册/登录官方账号即用，服务器自动分配专属入口，开箱即用
@@ -132,4 +159,11 @@ MIT License · 2026 DshRemote Project
 
 ---
 
-**注意**：需要 Python 3.10+ 与 DSH 运行环境；官方服务器 remote.ymzcc.com 开箱即用，也支持自建 frps。
+<p align="center">
+  <a href="https://remote.ymzcc.com/dsh-remote/">在线体验</a> ·
+  <a href="INSTALL.md">安装指南</a> ·
+  <a href="https://github.com/Memorial-coder/dsh-remote-plugin">GitHub 仓库</a> ·
+  QQ 交流群：1134820071
+</p>
+
+**注意**：需要 Python 3.10+ 与 DSH 运行环境；官网 [https://remote.ymzcc.com/dsh-remote/](https://remote.ymzcc.com/dsh-remote/) 开箱即用，也支持自建 frps。
