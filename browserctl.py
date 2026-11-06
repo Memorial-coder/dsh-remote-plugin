@@ -1943,7 +1943,7 @@ body{background:#0d1117;color:#e8e4d9;font-family:-apple-system,BlinkMacSystemFo
   </div>
 </div>
 <script>
-(function(){var L=document.getElementById("app-loading"),C=document.getElementById("app-content"),E=document.getElementById("app-enabled-section"),D=document.getElementById("app-disabled-section"),VN=document.getElementById("app-version-name"),VC=document.getElementById("app-version-code"),MV=document.getElementById("app-min-version"),DL=document.getElementById("app-dl-btn"),DT=document.getElementById("app-dl-text"),RB=document.getElementById("app-release-body"),RS=document.getElementById("app-release-section"),TO=document.getElementById("app-downloaded-toast");function load(){fetch("/browserctl-gate/app/version").then(function(r){return r.json()}).then(function(d){L.style.display="none";C.style.display="block";if(!d.ok||!d.enabled){E.style.display="none";D.style.display="block";return}VN.textContent=d.latest_version_name||"未知";VC.textContent="版本号 "+(d.latest_version_code||"?")+" · 最低 "+(d.min_supported_version_code||"无");MV.textContent=d.min_supported_version_code?String(d.min_supported_version_code):"无限制";var url=d.download_url;if(url){DL.href=url;DL.addEventListener("click",function(){TO.classList.add("show");setTimeout(function(){TO.classList.remove("show")},3000)});DT.textContent="下载 APK"+(d.latest_version_name?" ("+d.latest_version_name+")":"")}else{DL.style.display="none"}if(d.release_notes){RB.textContent=d.release_notes;RS.style.display="block"}}).catch(function(e){L.style.display="none";C.innerHTML='<div class="app-error"><p>加载失败</p><button onclick="load()">重试</button></div>'})}load()})()
+(function(){var L=document.getElementById("app-loading"),C=document.getElementById("app-content"),E=document.getElementById("app-enabled-section"),D=document.getElementById("app-disabled-section"),VN=document.getElementById("app-version-name"),VC=document.getElementById("app-version-code"),MV=document.getElementById("app-min-version"),DL=document.getElementById("app-dl-btn"),DT=document.getElementById("app-dl-text"),RB=document.getElementById("app-release-body"),RS=document.getElementById("app-release-section"),TO=document.getElementById("app-downloaded-toast");function load(){fetch("browserctl-gate/app/version").then(function(r){return r.json()}).then(function(d){L.style.display="none";C.style.display="block";if(!d.ok||!d.enabled){E.style.display="none";D.style.display="block";return}VN.textContent=d.latest_version_name||"未知";VC.textContent="版本号 "+(d.latest_version_code||"?")+" · 最低 "+(d.min_supported_version_code||"无");MV.textContent=d.min_supported_version_code?String(d.min_supported_version_code):"无限制";var url=d.download_url;if(url){DL.href=url;DL.addEventListener("click",function(){TO.classList.add("show");setTimeout(function(){TO.classList.remove("show")},3000)});DT.textContent="下载 APK"+(d.latest_version_name?" ("+d.latest_version_name+")":"")}else{DL.style.display="none"}if(d.release_notes){RB.textContent=d.release_notes;RS.style.display="block"}}).catch(function(e){L.style.display="none";C.innerHTML='<div class="app-error"><p>加载失败</p><button onclick="load()">重试</button></div>'})}load()})()
 </script>
 </body>
 </html>"""
@@ -2049,6 +2049,18 @@ font-family:ui-monospace,Consolas,monospace;letter-spacing:.8px;cursor:pointer;b
 </div>
 
 <script>
+/* ---------- 远程访问路径前缀 ---------- */
+/* 本页可能被服务在 /p/<端口>/、/dsh-remote/p/<uid>/(uid 稳定配对)或本机根路径下。
+   之前这里写死 /p/17901/,多用户端口每次重启随机分配后,验证成功会被送进死端口 502。
+   纯 [0-9] 字符类不用 \d:模板虽然:r-string,但保持与 kb 约定一致。 */
+var __BC_P=(function(){
+  var p=location.pathname||'/',m;
+  m=p.match(/^\/p\/(1[6-9][0-9][0-9][0-9])(?=\/|$)/);if(m)return '/p/'+m[1];
+  m=p.match(/^\/dsh-remote\/p\/([a-z0-9]{8,32})(?=\/|$)/);if(m)return '/dsh-remote/p/'+m[1];
+  return '';
+})();
+</script>
+<script>
 /* ---------- 2FA 六格输入 ---------- */
 (function(){
   const cells=[0,1,2,3,4,5].map(i=>document.getElementById('oc'+i)),msg=document.getElementById('msg'),go=document.getElementById('go');
@@ -2087,7 +2099,7 @@ font-family:ui-monospace,Consolas,monospace;letter-spacing:.8px;cursor:pointer;b
   function verify(code){
     // 开发演示:?demo 直接成功(不走真实闸机)
     if(location.search.indexOf('demo')>=0){setTimeout(()=>onOk(),400);return}
-    fetch('/browserctl-gate/verify',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({code})})
+    fetch(__BC_P+'/browserctl-gate/verify',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({code})})
       .then(r=>r.json())
       .then(j=>{if(j.ok){onOk();return}msg.textContent=j.error||'验证失败';cells.forEach(c=>{c.value='';c.classList.remove('filled')});go.disabled=false;go.textContent='验证并进入';})
       .catch(()=>{msg.textContent='网络错误,请重试';go.disabled=false;go.textContent='验证并进入';});
@@ -2099,7 +2111,7 @@ font-family:ui-monospace,Consolas,monospace;letter-spacing:.8px;cursor:pointer;b
     const frame=document.createElement('iframe');
     frame.setAttribute('aria-hidden','true');
     frame.style.cssText='position:fixed;left:-10000px;top:0;width:1px;height:1px;border:0;opacity:0;pointer-events:none';
-    frame.src='/p/17901/';
+    frame.src=__BC_P+'/';
     document.body.appendChild(frame);
     window.__preloadFrame=frame;
     // 开场动画
@@ -2129,7 +2141,7 @@ font-family:ui-monospace,Consolas,monospace;letter-spacing:.8px;cursor:pointer;b
       }catch(e){ready=false}
       if(ready||Date.now()-t0>=20000){
         rl.textContent=ready?'正在进入…':'正在进入 DeepSeek…';
-        setTimeout(function(){location.href='/p/17901/'},ready?420:700);
+        setTimeout(function(){location.href=__BC_P+'/'},ready?420:700);
         return;
       }
       setTimeout(poll,300);
@@ -4043,8 +4055,9 @@ def spawn_detached(args, log_path):
     if os.name == "nt":
         # DETACHED_PROCESS 无窗口;CREATE_BREAKAWAY_FROM_JOB 跳出宿主作业对象,
         # 否则宿主命令/会话结束时子进程会被连坐杀死(frpc/闸机无故消失的根因)。
+        # CREATE_NO_WINDOW 彻底隐藏控制台窗口(仅 Windows)。
         creationflags = (subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
-                         | subprocess.CREATE_BREAKAWAY_FROM_JOB)
+                         | subprocess.CREATE_BREAKAWAY_FROM_JOB | subprocess.CREATE_NO_WINDOW)
         try:
             return subprocess.Popen(args, stdout=log, stderr=log, creationflags=creationflags,
                                     close_fds=True, cwd=str(HERE))
@@ -4785,7 +4798,8 @@ def cmd_stop():
                     "| ForEach-Object { $_.ProcessId }; "
                     "$pids | Where-Object { $_ -ne %d }" % _own_pid)
                 out = subprocess.run(["powershell", "-NoProfile", "-Command", ps],
-                                     capture_output=True, text=True, timeout=30)
+                                     capture_output=True, text=True, timeout=30,
+                                     creationflags=CREATE_NO_WINDOW)
                 for line in out.stdout.splitlines():
                     tok = line.strip()
                     if tok.isdigit():
