@@ -2054,18 +2054,29 @@ function AppPairCard({ t, reloadToken }) {
     setKickMsg('')
     const body = JSON.stringify({ dev })
     try {
+      // 两个请求都必须带超时:否则闸机偶尔持锁做 SSH 清理时第一个 fetch 会
+      // 长时间挂起,按钮永远停在「解除中…」(实测踩过,没有 finally 重置的机会)。
+      // 用 AbortController 而非 AbortSignal.timeout(后者 Chrome 103+ 才有,兼容旧 WebView)
+      const ac1 = new AbortController()
+      const t1 = setTimeout(() => ac1.abort(), 8000)
       let r = await fetch(API_P + '/browserctl-gate/kick', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body,
-      }).catch(() => null)
+        signal: ac1.signal,
+      }).catch(() => null).finally(() => clearTimeout(t1))
       if (!r || !r.ok) {
-        r = await fetch(API_P + '/browserctl/api/totp-kick?dev=' + encodeURIComponent(dev), { cache: 'no-store' }).catch(() => null)
+        const ac2 = new AbortController()
+        const t2 = setTimeout(() => ac2.abort(), 8000)
+        r = await fetch(API_P + '/browserctl/api/totp-kick?dev=' + encodeURIComponent(dev), { cache: 'no-store', signal: ac2.signal }).catch(() => null).finally(() => clearTimeout(t2))
       }
       if (r && r.ok) {
         setKickMsg('已解除该设备配对')
         setSessions(list => list.filter(s => s.dev !== dev))
+        // 同步踢出(闸机直调)返回时 sessions.json 已更新,1.2s 后重拉只是确认;
+        // 若闸机此刻不可达走了 state 队列兜底,巡检 ≤2s 才消费,2.5s 再补拉一次
         setTimeout(loadDevices, 1200)
+        setTimeout(loadDevices, 2500)
       } else {
         setKickMsg('解除失败')
       }

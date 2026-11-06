@@ -894,6 +894,35 @@ export function apply(ctx, config = {}) {
           // 注意:DSH webServer 会在分发前排空请求体,body 读不到。
           // 因此参数一律走查询串(?dev=...),无 dev 即全部踢下线。
           const dev = (url.searchParams.get('dev') || '').trim()
+          // 优先同步直调本机闸机:kick 端点会立即弹会话 + 写 sessions.json +
+          // 记已踢名单,响应返回时文件已更新,面板刷新就不会看到"踢完又跳回来"。
+          // (旧路径只写 state 队列,要等闸机 ≤2s 巡检消费,1.2s 后的列表刷新
+          // 会读到旧文件 → 设备"跳回来"。只给真正本机的请求带管理令牌,
+          // 判据与 /browserctl-gate 反代一致。)
+          const isLocalCall = !req.headers['x-real-ip'] && !req.headers['x-forwarded-for']
+          if (isLocalCall) {
+            try {
+              const target = dev
+                ? 'http://127.0.0.1:3080/browserctl-gate/kick?dev=' + encodeURIComponent(dev)
+                : 'http://127.0.0.1:3080/browserctl-gate/kick-all'
+              const r = await fetch(target, {
+                method: 'POST',
+                headers: adminHeaders(),
+                signal: AbortSignal.timeout(6000),
+              })
+              const j = await r.json().catch(() => ({}))
+              if (r.ok && j && j.ok) {
+                sendJson(res, 200, { ok: true })
+                return
+              }
+              // 闸机明确拒绝(401/400 等)时不要落回队列重试,直接透传
+              if (r.status === 400 || r.status === 401 || r.status === 403) {
+                sendJson(res, r.status, { ok: false, error: (j && j.error) || ('闸机拒绝 ' + r.status) })
+                return
+              }
+            } catch {}
+          }
+          // 闸机未运行/不可达(非本机调用):退回老路径——写进 state 由闸机巡检消费
           const st = readState()
           if (dev) {
             st.gate_kick_devs = [...(st.gate_kick_devs || []), dev]

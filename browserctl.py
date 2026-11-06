@@ -1861,7 +1861,9 @@ def _blacklist_check(ip, dev):
 
 def _process_kicks():
     """消费 state.gate_kick_devs(定向踢)与 gate_kick_seq(全部踢)。
-    2FA 关闭时同步把被踢设备记入"已踢"名单,防带旧 Cookie 重新登记。"""
+    定向踢一律记入"已踢"名单(与 _gate_kick 对齐,2FA 开启/关闭都生效),
+    防设备带旧 Cookie 重新登记;全部踢(seq 路径)仅 2FA 关闭时记——该路径
+    不识别管理员,2FA 开启时若也记会把管理员自己锁在验证页之外。"""
     global _kick_seq_seen
     try:
         st = read_state()
@@ -1883,8 +1885,7 @@ def _process_kicks():
                     kicked_any = True
                     _append_event("kick", "踢出设备 %s" % d)
                     _server_unregister_device(d)
-                if twofa_off:
-                    kicked_extra.append(d)
+                kicked_extra.append(d)
         st["gate_kick_devs"] = []
         changed = True
     if seq != _kick_seq_seen:
@@ -1901,7 +1902,7 @@ def _process_kicks():
         changed = True
         kicked_any = True
         _append_event("kick", "全部踢下线")
-    if twofa_off and kicked_extra:
+    if kicked_extra:
         st["gate_kicked_devs"] = _cap_kicked([*(st.get("gate_kicked_devs") or []), *kicked_extra])
         changed = True
     if changed:
@@ -2319,9 +2320,10 @@ class GateHandler(BaseHTTPRequestHandler):
 
     def _deny_unauthorized(self):
         """未通过验证时的统一拒绝响应。"""
-        self._send(403 if self._is_app_ua() else 200, DENIED_HTML,
-                   headers=[("Set-Cookie",
-                             "%s=deleted; Max-Age=0; Path=/" % GATE_COOKIE)])
+        app_ua = self._is_app_ua()
+        headers = None if app_ua else [("Set-Cookie",
+                             "%s=deleted; Max-Age=0; Path=/" % GATE_COOKIE)]
+        self._send(403 if app_ua else 200, DENIED_HTML, headers=headers)
 
     def _gate_cookie_raw(self):
         raw = self.headers.get("Cookie", "")
@@ -2382,6 +2384,10 @@ class GateHandler(BaseHTTPRequestHandler):
                 if not _sessions[dev].get("kind"):
                     _sessions[dev]["kind"] = kind
                 return dev, None
+            # 锁内再查一次已踢名单:请求可能在锁外通过检查后,与「解除配对」并发——
+            # 踢出持锁期间已把设备写进已踢名单,这里必须拦下,否则踢完一两秒又跳回来
+            if dev and dev in _gate_kicked_set():
+                return None, None  # 已被踢下线,拒绝放行
             if dev is None:
                 dev = _secrets.token_hex(8)
             # 复用 dev:设备重新扫码后仍是同一台设备(不在册时重新登记)
@@ -2452,6 +2458,11 @@ class GateHandler(BaseHTTPRequestHandler):
                 _sessions.clear()
         dev = gate_check_cookie(self._gate_cookie_raw(), st["link_secret"])
         if dev is None:
+            return False
+        # 已踢名单兜底:会话在册才有效(gate_check_cookie),但闸机重启会从
+        # sessions.json 恢复会话;被解除配对的设备即使恢复了也直接拒绝,
+        # 与 2FA 关闭路径的检查对齐,踢下线才真正"持久"。
+        if dev and dev in _gate_kicked_set():
             return False
         # 黑名单检查:IP 或设备在黑名单则拒绝
         ip = self._client_ip()
@@ -3103,7 +3114,7 @@ color:#fff;text-decoration:none;font-size:14px}
         if devid_q:
             with _gate_lock:
                 existing = next((d for d, i in _sessions.items() if i.get("devid") == devid_q), None)
-            dev = existing if existing else _secrets.token_hex(8)
+            dev = existing if existing else hashlib.md5(devid_q.encode()).hexdigest()[:16]
         else:
             dev = _secrets.token_hex(8)
         with _gate_lock:
@@ -3592,8 +3603,13 @@ color:#fff;text-decoration:none;font-size:14px}
 
     def _gate_kick(self):
         """定向踢出:立即从 sessions 中删除设备,不需要等 housekeeping 2 秒巡检。
-        2FA 关闭时把设备记入"已踢"名单,防止它带旧 Cookie 重新登记(踢下线持久生效)。"""
-        if not self._gate_ok():
+        无论 2FA 是否开启都把设备记入"已踢"名单(与 pop 同一把锁),彻底杜绝
+        「释放锁到写盘之间,设备并发请求重新登记 → 踢完一两秒又跳回来」的竞态:
+        - 2FA 关闭:Cookie 有效性不依赖会话在册,靠已踢名单拦住重登记;
+        - 2FA 开启:踢出即弹会话,旧 Cookie 随之失效,已踢名单再做一层保险。
+        插件/CLI 可用 X-BC-Admin(本机 loopback)直调本端点做同步踢出。
+        DSH webServer/插件反代会排空请求体,body 可能读不到 → 兼容 ?dev= 查询串。"""
+        if not (self._is_admin_call() or self._gate_ok()):
             self._send_json(401, {"ok": False, "error": "未通过验证"})
             return
         data = self._read_json_body()
@@ -3601,21 +3617,33 @@ color:#fff;text-decoration:none;font-size:14px}
             return
         dev = str(data.get("dev", "")).strip()
         if not dev:
+            try:
+                from urllib.parse import urlsplit, parse_qs
+                dev = (parse_qs(urlsplit(self.path).query).get("dev") or [""])[0].strip()
+            except Exception:
+                dev = ""
+        if not dev:
             self._send_json(400, {"ok": False, "error": "缺少 dev 参数"})
             return
         with _gate_lock:
             dev_info = _sessions.pop(dev, None)
+            # 已踢名单与 pop 同锁写入:此刻起任何重新登记(含在锁外通过检查、
+            # 正等锁的并发请求,见 _gate_ensure_device 锁内复查)都会被拦下
+            st = gate_state()
+            st["gate_kicked_devs"] = _cap_kicked([*(st.get("gate_kicked_devs") or []), dev])
         if dev_info:
             _device_close(_device_key({"dev": dev, **dev_info}))
             _append_event("kick", "踢出设备 %s (IP=%s)" % (dev, dev_info.get("ip", "?")))
-            _dump_sessions()
-        if not gate_state().get("totp_enabled"):
-            st = gate_state()
-            st["gate_kicked_devs"] = _cap_kicked([*(st.get("gate_kicked_devs") or []), dev])
-            try:
-                write_state(st)
-            except Exception:
-                pass
+        _dump_sessions()
+        # 兜底:pop 与写盘之间若仍有已过闸的并发请求把设备挤回 _sessions,再清一次
+        with _gate_lock:
+            if dev in _sessions:
+                _sessions.pop(dev, None)
+        _dump_sessions()
+        try:
+            write_state(st)
+        except Exception:
+            pass
         self._send_json(200, {"ok": True})
 
     def _gate_kick_all(self):

@@ -2029,18 +2029,24 @@ function AppPairCard({ t, reloadToken }) {
     setKickMsg("");
     const body = JSON.stringify({ dev });
     try {
+      const ac1 = new AbortController();
+      const t1 = setTimeout(() => ac1.abort(), 8e3);
       let r = await fetch(API_P + "/browserctl-gate/kick", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body
-      }).catch(() => null);
+        body,
+        signal: ac1.signal
+      }).catch(() => null).finally(() => clearTimeout(t1));
       if (!r || !r.ok) {
-        r = await fetch(API_P + "/browserctl/api/totp-kick?dev=" + encodeURIComponent(dev), { cache: "no-store" }).catch(() => null);
+        const ac2 = new AbortController();
+        const t2 = setTimeout(() => ac2.abort(), 8e3);
+        r = await fetch(API_P + "/browserctl/api/totp-kick?dev=" + encodeURIComponent(dev), { cache: "no-store", signal: ac2.signal }).catch(() => null).finally(() => clearTimeout(t2));
       }
       if (r && r.ok) {
         setKickMsg("\u5DF2\u89E3\u9664\u8BE5\u8BBE\u5907\u914D\u5BF9");
         setSessions((list) => list.filter((s) => s.dev !== dev));
         setTimeout(loadDevices, 1200);
+        setTimeout(loadDevices, 2500);
       } else {
         setKickMsg("\u89E3\u9664\u5931\u8D25");
       }

@@ -750,6 +750,27 @@ function apply(ctx, config = {}) {
       }
       if (route === "/browserctl/api/totp-kick") {
         const dev = (url.searchParams.get("dev") || "").trim();
+        const isLocalCall = !req.headers["x-real-ip"] && !req.headers["x-forwarded-for"];
+        if (isLocalCall) {
+          try {
+            const target = dev ? "http://127.0.0.1:3080/browserctl-gate/kick?dev=" + encodeURIComponent(dev) : "http://127.0.0.1:3080/browserctl-gate/kick-all";
+            const r = await fetch(target, {
+              method: "POST",
+              headers: adminHeaders(),
+              signal: AbortSignal.timeout(6e3)
+            });
+            const j = await r.json().catch(() => ({}));
+            if (r.ok && j && j.ok) {
+              sendJson(res, 200, { ok: true });
+              return;
+            }
+            if (r.status === 400 || r.status === 401 || r.status === 403) {
+              sendJson(res, r.status, { ok: false, error: j && j.error || "\u95F8\u673A\u62D2\u7EDD " + r.status });
+              return;
+            }
+          } catch {
+          }
+        }
         const st = readState();
         if (dev) {
           st.gate_kick_devs = [...st.gate_kick_devs || [], dev];
