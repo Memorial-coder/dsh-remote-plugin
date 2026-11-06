@@ -13,6 +13,17 @@ import { join } from 'node:path'
 
 const PACKAGE_NAME = 'dsh-plugin-browserctl'
 
+// 版本号单一来源 = package.json 的 version:host 与 client 两半都靠 esbuild
+// `--define:__DSHREMOTE_VERSION__="x.y.z"` 注入,源码里不再写死版本号
+// (历史上 package.json / client.jsx / git tag 三处各说各话)。
+const PKG = JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf8'))
+const VERSION = String(PKG.version || '').trim()
+if (!/^\d+\.\d+\.\d+/.test(VERSION)) {
+  throw new Error('package.json 的 version 不合法: ' + JSON.stringify(PKG.version))
+}
+const VERSION_DEFINE = '--define:__DSHREMOTE_VERSION__=' + JSON.stringify(VERSION)
+console.log('version -> ' + VERSION + ' (from package.json)')
+
 const EXTERNALS = [
   'react',
   'react/jsx-runtime',
@@ -65,6 +76,14 @@ function run(args) {
 }
 
 // ---- host 半 (ESM, 官方模板/peer 插件(dsh-unlag 等)同款: package.json type:module + 具名导出) ----
+// qrcode 不再 external:直接打进 lib/index.js,发布包解压即用、零 npm install。
+// 但 qrcode 是 CJS 且 pngjs 在模块闭包里 `require("fs")`(静态但不在顶层),
+// esbuild 在 ESM 产物里只能留下运行时 `__require("fs")` 兜底 —— 直接 import 会抛
+// `Dynamic require of "fs" is not supported`。所以注入 createRequire banner,
+// 让产物里的 require 在 Node ESM 下真实可用(Node 内建模块保持外部引用,不重复打包)。
+const HOST_BANNER =
+  "import { createRequire as __dshCreateRequire } from 'node:module';\n" +
+  "const require = __dshCreateRequire(import.meta.url);"
 run([
   'src/index.js',
   '--bundle',
@@ -73,9 +92,8 @@ run([
   '--format=esm',
   '--target=node22',
   '--external:node:*',
-  // qrcode 保持外部依赖(它是 CJS,打进 ESM 会留下运行时 __require("util") 炸点),
-  // Node ESM 对 CJS 包的默认互操作可直接 import QRCode from 'qrcode'
-  '--external:qrcode',
+  '--banner:js=' + HOST_BANNER,
+  VERSION_DEFINE,
   ...EXTERNALS.map(e => '--external:' + e),
   '--log-level=info',
 ])
@@ -90,6 +108,7 @@ run([
   '--format=cjs',
   '--target=es2022',
   '--jsx=automatic',
+  VERSION_DEFINE,
   ...EXTERNALS.map(e => '--external:' + e),
   '--log-level=info',
 ])

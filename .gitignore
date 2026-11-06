@@ -1,7 +1,7 @@
 node_modules/
 lib/.client.tmp.js
 
-# ?????(???)
+# 运行态与本地凭据(不入库)
 browserctl_state.json
 browserctl_sessions.json
 browserctl_devices.json
@@ -9,11 +9,13 @@ browserctl_events.json
 browserctl_blacklist.json
 browserctl_grants.json
 browserctl_notifications.json
+browserctl_bootstrap.json
 browserctl_pushwin_state.json
 browserctl_secrets.json
 browserctl_admin_token
 browserctl_frpc.toml
 browserctl_*.log
+browserctl_*.lock
 .ssh_known_hosts
 *.tmp
 

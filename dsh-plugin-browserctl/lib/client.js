@@ -32,7 +32,7 @@ var import_dsh_client_store = require("@deepseek-ai/dsh-client-store");
 var import_jsx_runtime = require("react/jsx-runtime");
 var NS = "browserctl";
 var STYLE_ID = "browserctl/styles";
-var VERSION = "0.2.0";
+var VERSION = true ? "1.0.31" : "dev";
 var ABOUT_LINKS = {
   website: "https://remote.ymzcc.com/dsh-remote/",
   github: "https://github.com/Memorial-coder/dsh-remote-plugin",
@@ -3182,14 +3182,18 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
         if (attempt < 3) await new Promise((r) => setTimeout(r, attempt * 1e3));
       }
       if (!lastErr) {
-        const deadline = Date.now() + 12e3;
+        const deadline = Date.now() + 3e4;
         let fwd = false;
+        let tunnelErr = "";
         while (Date.now() < deadline) {
           try {
             const r = await fetch(API_P + "/browserctl/api/status", { cache: "no-store" });
             const j = await r.json().catch(() => ({}));
             fwd = !!j.forwarder;
-            if (fwd) break;
+            const tun = j.tunnel;
+            const tunnelOk = !tun || tun.ok !== false;
+            if (!tunnelOk && tun && tun.error) tunnelErr = String(tun.error);
+            if (fwd && tunnelOk) break;
             if (j.startError) {
               lastErr = String(j.startError);
               break;
@@ -3203,11 +3207,12 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
           try {
             const r = await fetch(API_P + "/browserctl/api/status", { cache: "no-store" });
             const j = await r.json().catch(() => ({}));
-            lastErr = String(j.startError || "") || "\u672C\u673A\u95F8\u673A(127.0.0.1:3080)\u5728 12 \u79D2\u5185\u6CA1\u6709\u5C31\u7EEA\u3002\n\u8BF7\u67E5\u770B kit \u76EE\u5F55\u4E0B\u7684 browserctl_start.log \u4E0E browserctl_fwd.log;\n\u6700\u5E38\u89C1\u539F\u56E0\u662F\u5B89\u5168\u8F6F\u4EF6\u62E6\u622A frpc.exe(\u8BE6\u89C1 INSTALL.md \u5E38\u89C1\u95EE\u9898\u7B2C 1 \u6761)\u3002";
+            lastErr = String(j.startError || "") || (j.tunnel && j.tunnel.error ? String(j.tunnel.error) : "") || "\u672C\u673A\u95F8\u673A(127.0.0.1:3080)\u5728 30 \u79D2\u5185\u6CA1\u6709\u5C31\u7EEA\u3002\n\u8BF7\u67E5\u770B kit \u76EE\u5F55\u4E0B\u7684 browserctl_start.log \u4E0E browserctl_fwd.log;\n\u6700\u5E38\u89C1\u539F\u56E0\u662F\u5B89\u5168\u8F6F\u4EF6\u62E6\u622A frpc.exe(\u8BE6\u89C1 INSTALL.md \u5E38\u89C1\u95EE\u9898\u7B2C 1 \u6761)\u3002";
           } catch {
-            lastErr = "\u672C\u673A\u95F8\u673A(127.0.0.1:3080)\u5728 12 \u79D2\u5185\u6CA1\u6709\u5C31\u7EEA,\u8BF7\u67E5\u770B kit \u76EE\u5F55\u4E0B\u7684\u65E5\u5FD7\u6587\u4EF6\u3002";
+            lastErr = "\u672C\u673A\u95F8\u673A(127.0.0.1:3080)\u5728 30 \u79D2\u5185\u6CA1\u6709\u5C31\u7EEA,\u8BF7\u67E5\u770B kit \u76EE\u5F55\u4E0B\u7684\u65E5\u5FD7\u6587\u4EF6\u3002";
           }
         }
+        if (!lastErr && tunnelErr) lastErr = tunnelErr;
       }
       if (lastErr) console.error("[browserctl] ensure \u5168\u90E8\u91CD\u8BD5\u5931\u8D25:", lastErr);
       setStartErr(lastErr);
@@ -3406,7 +3411,21 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
             t("startFailed"),
             "\n",
             startErr
-          ] }) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: { color: "#666", fontSize: 12, padding: "0 14px", textAlign: "center" }, children: error ? t("statusNoSecret") : t("statusLoading") }) }),
+          ] }) : error ? (
+            // 二维码/配对接口失败(最常见:frp 隧道未连通,host 半直接回 503)时
+            // 把原因原文显示在二维码位置,而不是只显示一句"没有可用链接"让用户猜。
+            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: {
+              color: "var(--dsw-alias-state-error-primary,#e5655c)",
+              fontSize: 11,
+              padding: "0 12px",
+              textAlign: "left",
+              whiteSpace: "pre-wrap",
+              overflowY: "auto",
+              maxHeight: 120,
+              lineHeight: 1.5,
+              display: "block"
+            }, children: error })
+          ) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: { color: "#666", fontSize: 12, padding: "0 14px", textAlign: "center" }, children: t("statusLoading") }) }),
           data && !(cfgMode === "official" && !acctMe) && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlUrlRow", children: [
             /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlUrl", title: data.url, children: data.url }),
             /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "ghost", size: "sm", onClick: () => {

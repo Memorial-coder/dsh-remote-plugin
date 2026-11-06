@@ -73,6 +73,18 @@ FWD_PORT = 3080
 REMOTE_PORT = 17901
 COOKIE_LIFETIME_DAYS = 30
 
+# ---- FRP 入口 ----
+# 官方托管模式所有用户的隧道都连官方 frps。这里必须用**域名**而不是硬编码服务器 IP:
+#   1) 开源仓库里生产服务器 IP 按约定脱敏,若默认值留空,frpc 会把 serverAddr 写成空串,
+#      表现为日志里反复 "connection write timeout",隧道永远连不上 → 手机打开面板 502;
+#   2) remote.ymzcc.com 本身就是公开信息(插件/官网都在用),解析到官方 frps。
+# 自建模式用 frp_server_host / ssh_host 覆盖;也可用环境变量 BROWSERCTL_FRP_HOST 临时指定。
+OFFICIAL_FRP_HOST = os.environ.get("BROWSERCTL_FRP_HOST") or "remote.ymzcc.com"
+OFFICIAL_FRP_PORT = 17000
+# 启动后等 frpc 真正把远端端口注册到 frps 的最长时间(秒)。只有等到
+# "start proxy success" 才算隧道通了 —— 进程起来 ≠ 隧道可用(见 ensure_tunnel)。
+FRPC_READY_TIMEOUT = 15
+
 SERVER_CONF = os.environ.get("BC_SERVER_CONF") or "/www/conf.d/remote.conf"
 SERVER_INDEX = os.environ.get("BC_SERVER_INDEX") or "/www/sites/default/index"
 SERVER_HTPASSWD = os.environ.get("BC_SERVER_HTPASSWD") or "/www/ssl/dsh.htpasswd"
@@ -90,6 +102,9 @@ SECRETS_TEMPLATE = {
     "ssh_key": "",
     "frp_token": "",
     "frp_server_port": 17000,
+    # 隧道入口(不属于 SSH):留空时 official 模式用 OFFICIAL_FRP_HOST,
+    # selfhost 模式用 ssh_host。自建用户可只填这一项,不必暴露 SSH 主机。
+    "frp_server_host": "",
 }
 
 
@@ -101,6 +116,7 @@ def load_secrets():
     except Exception:
         pass
     data["ssh_host"] = os.environ.get("BROWSERCTL_SSH_HOST") or data.get("ssh_host") or ""
+    data["frp_server_host"] = os.environ.get("BROWSERCTL_FRP_HOST") or data.get("frp_server_host") or ""
     data["ssh_user"] = os.environ.get("BROWSERCTL_SSH_USER") or data.get("ssh_user") or "root"
     data["ssh_password"] = os.environ.get("BROWSERCTL_SSH_PASSWORD") or data.get("ssh_password") or ""
     data["ssh_key"] = os.environ.get("BROWSERCTL_SSH_KEY") or data.get("ssh_key") or ""
@@ -711,6 +727,36 @@ def gate_state():
         st["link_secret"] = _secrets.token_hex(16)
         write_state(st)
     return st
+
+
+def _tunnel_ready_or_reason():
+    """隧道此刻能否对外服务。返回 (ok, 不可用原因)。
+
+    供「生成二维码 / 配对链接 / 引导链接」的端点统一把关:frpc 没真正连上 frps 时,
+    端口在服务器上没有监听,手机扫码配对会"成功"(配对走的是服务器 API),但打开面板
+    立刻 502(官方 uid 反代报 ECONNREFUSED)。宁可拒绝出码并说明原因,也不给用户一张
+    扫了必然打不开的二维码。
+
+    兼容旧 state:tunnel_ok 是本次更新新增字段,升级前写下的 state 没有它,
+    此时按「frpc 进程是否存活」兜底(保持原有行为,不把老用户拦死)。
+    """
+    st = read_state()
+    port = int(st.get("remote_port") or 0)
+    if port <= 0:
+        return False, ("尚未建立隧道(远端端口未分配),无法生成二维码/配对链接;\n"
+                       "请先在插件里登录官方账号并点「开始控制」")
+    if "tunnel_ok" in st:
+        if not st.get("tunnel_ok"):
+            detail = str(st.get("tunnel_error") or "frpc 尚未把端口注册到 frps").strip()
+            return False, "隧道未连通:" + detail[:900]
+        pid = st.get("frpc_pid")
+        if pid and not _pid_alive(pid):
+            return False, "隧道进程已退出(frpc pid=%s),请点一次「开始控制」重建" % pid
+        return True, ""
+    pid = st.get("frpc_pid")
+    if pid and not _pid_alive(pid):
+        return False, "隧道进程已退出(frpc pid=%s),请点一次「开始控制」重建" % pid
+    return True, ""
 
 
 # ---- 上游连接池(DSH keep-alive) ----
@@ -2970,6 +3016,11 @@ color:#fff;text-decoration:none;font-size:14px}
         if port <= 0:
             raise SystemExit("尚未建立隧道(远端端口未分配),无法生成配对链接;\n"
                              "请先在插件里登录官方账号并启动隧道")
+        # 端口有值 != 隧道通了:frpc 可能在无限重试(服务器地址错/端口被旧会话占用/token 失效)。
+        # 这种状态下出码,手机配对成功但打开面板 502 —— 必须先把真实原因告诉用户。
+        ok, why = _tunnel_ready_or_reason()
+        if not ok:
+            raise SystemExit(why)
         # kind 参数让 App 扫码时能识别这张码是「临时配对」还是「长期配对」:
         # pair      → 一次性会话(App 不保存 Cookie,关掉需重扫)
         # long_pair → 登记设备,App 保存 Cookie,下次免扫码直连
@@ -3209,6 +3260,11 @@ color:#fff;text-decoration:none;font-size:14px}
         if "?p=0&" in url or url.endswith("?p=0"):
             self._send_json(409, {"ok": False, "error": "尚未建立隧道(远端端口未分配),无法生成引导链接;\n"
                                                          "请先在插件里登录官方账号并启动隧道"})
+            return
+        # 端口有值但 frpc 没真正注册成功(在重试)时同样拒绝:否则扫码进 502
+        ok, why = _tunnel_ready_or_reason()
+        if not ok:
+            self._send_json(503, {"ok": False, "error": why})
             return
         self._send_json(200, {
             "ok": True,
@@ -4179,6 +4235,13 @@ def cmd_watch():
             pid = st.get("frpc_pid")
             if not (pid and _pid_alive(pid)):
                 need.append("frpc")
+            elif not st.get("tunnel_ok"):
+                # frpc 活着但状态是「未就绪」(旧版 state 没字段 / 上次判定失败):
+                # 回读日志,如果其实已经注册成功(frpc 自己重试成功的情况),立即修正状态,
+                # 否则插件会一直显示"隧道未连通"却又不重建。
+                if _tunnel_log_ready(_frpc_log_tail(max(0, _frpc_log_size() - 65536))):
+                    _mark_tunnel(True, "", int(st.get("remote_port") or 0))
+                    st = read_state()
             if not need:
                 failures = 0  # 一切正常,复位退避
                 continue
@@ -4193,8 +4256,15 @@ def cmd_watch():
                 write_state(st)
                 print("[%s] 看门狗: 重拉闸机(pid=%d)" % (time.strftime("%H:%M:%S"), p.pid), flush=True)
             if "frpc" in need:
-                ensure_tunnel(st.get("remote_port", REMOTE_PORT))
-                print("[%s] 看门狗: 重拉 frpc" % time.strftime("%H:%M:%S"), flush=True)
+                _mark_tunnel(False, "frpc 进程不存在,看门狗正在重拉", int(st.get("remote_port") or 0))
+                try:
+                    ensure_tunnel(st.get("remote_port", REMOTE_PORT))
+                except SystemExit as e:
+                    # 失败原因已经写进 state.tunnel_error,这里只打首行,避免日志刷屏
+                    first = (str(e) or "隧道重拉失败").splitlines()[0][:240]
+                    print("[%s] 看门狗: 隧道重拉失败: %s" % (time.strftime("%H:%M:%S"), first), flush=True)
+                else:
+                    print("[%s] 看门狗: 重拉 frpc" % time.strftime("%H:%M:%S"), flush=True)
             st2 = read_state()
             st2["watchdog_pid"] = os.getpid()
             st2["watchdog_last_respawn"] = time.time()
@@ -4334,6 +4404,124 @@ def frpc_toml_path():
     return HERE / "browserctl_frpc.toml"
 
 
+def _frpc_log_tail(offset=0, limit=131072):
+    """读 frpc 日志(从 offset 起,最多 limit 字节)。
+
+    只取「本次 frpc 启动之后」写入的内容,用于判断隧道是否真的注册成功。"""
+    try:
+        with open(FRPC_LOG, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            end = f.tell()
+            start = int(offset or 0)
+            if start > end:
+                start = end
+            if end - start > limit:
+                start = end - limit
+            f.seek(start)
+            return f.read().decode("utf-8", "replace")
+    except OSError:
+        return ""
+
+
+def _frpc_log_size():
+    try:
+        return FRPC_LOG.stat().st_size
+    except OSError:
+        return 0
+
+
+def _tunnel_log_ready(text):
+    """frpc 日志出现 start proxy success = 远端端口已在 frps 上监听成功。"""
+    return "start proxy success" in (text or "")
+
+
+def _mark_tunnel(ok, error="", remote_port=0):
+    """把隧道就绪状态写进 state,插件据此决定「能不能出二维码」。
+
+    写 state 失败(ACL/占用)不能连累隧道本身:这里只告警,不抛。"""
+    def _mut(st):
+        st["tunnel_ok"] = bool(ok)
+        st["tunnel_error"] = "" if ok else str(error or "")[:1500]
+        st["tunnel_ts"] = time.time()
+        if remote_port:
+            st["remote_port"] = int(remote_port)
+        return st
+    try:
+        update_state(_mut)
+    except Exception as e:  # noqa: BLE001
+        print("[警告] 隧道状态写入失败(不影响隧道本身): %r" % e, flush=True)
+
+
+def _wait_tunnel_ready(offset, timeout=FRPC_READY_TIMEOUT):
+    """等 frpc 真正把端口注册到 frps。返回 (ok, 本次新增日志)。
+
+    为什么必须等:frpc 进程起来 ≠ 隧道可用。serverAddr 为空/端口被旧会话占用/token
+    失效时 frpc 会一直重试,但 state 里 remote_port 已经有值,插件就会拿这个端口生成
+    二维码 —— 手机扫码配对成功、打开面板却 502。这里等不到 "start proxy success"
+    就判定失败,把真实原因写进 state.tunnel_error。"""
+    deadline = time.time() + max(3, int(timeout))
+    seen = ""
+    while time.time() < deadline:
+        txt = _frpc_log_tail(offset)
+        if txt:
+            seen = (seen + txt)[-65536:]
+        if _tunnel_log_ready(txt):
+            return True, seen
+        # frpc 已经明确报错:它自己会退避重试,再给 3 秒;仍无成功就判失败
+        if ("login to server failed" in txt or "start error" in txt
+                or "already exists" in txt):
+            time.sleep(3.0)
+            txt2 = _frpc_log_tail(offset)
+            if txt2:
+                seen = (seen + txt2)[-65536:]
+            if _tunnel_log_ready(txt2):
+                return True, seen
+            return False, seen
+        time.sleep(0.5)
+    return False, seen
+
+
+def _tunnel_failure_text(log_text, server_host, server_port, remote_port):
+    """把 frpc 日志里的失败翻译成用户能照做的中文步骤(面板会原样显示)。"""
+    t = log_text or ""
+    lines = []
+    if "already exists" in t:
+        lines += [
+            "frps 上端口 %d 已经被一条旧会话占用(frpc 日志: proxy ... already exists)。" % remote_port,
+            "常见原因:上一次的 frpc 没被真正杀掉,或同一账号在另一台机器/另一个插件副本上开着隧道。",
+            "处理:关掉其它机器/副本的「开始控制」,然后在本机重新点一次「开始控制」;",
+            "      仍不行就重启 DSH(插件会重新向服务器申请端口)。",
+        ]
+    elif "connection write timeout" in t or "connect to server error" in t:
+        lines += [
+            "frpc 连不上 frps 服务器 %s:%d(走 KCP = UDP,不是 TCP)。" % (server_host, int(server_port)),
+            "处理:① 确认本机能访问 %s:%d 的 UDP 出站(公司网/防火墙常拦 UDP);" % (server_host, int(server_port)),
+            "      ② 官方模式服务器地址应为 remote.ymzcc.com:17000,自建模式核对 frp_server_host;",
+            "      ③ 换手机热点试一次,排除本机网络限制。",
+        ]
+    elif "login to server failed" in t or "token" in t.lower():
+        lines += [
+            "frpc 登录 frps 被拒绝(token 不正确或服务端不接受)。",
+            "官方模式:在面板退出账号后重新登录,刷新连接凭据;",
+            "自建模式:检查 browserctl_secrets.json 里的 FRP token 与 frps.toml 是否一致。",
+        ]
+    elif "start error" in t:
+        lines += [
+            "frpc 已连上 frps,但端口 %d 注册失败(日志: start error)。" % remote_port,
+            "最常见是端口被同账号的旧会话占用;关掉其它副本后重试,或重启 DSH 重新申请端口。",
+        ]
+    else:
+        lines += [
+            "frpc 在 %d 秒内没有把端口 %d 注册到 frps(日志里没有 start proxy success)。"
+            % (FRPC_READY_TIMEOUT, remote_port),
+        ]
+    tail = "\n".join((t or "").strip().splitlines()[-8:])
+    if tail:
+        lines += ["", "frpc 日志尾部:", tail]
+    lines += ["", "完整日志: %s" % FRPC_LOG]
+    return "\n".join(lines)
+
+
 def ensure_tunnel(remote_port=REMOTE_PORT):
     sec = load_secrets()
     if not sec.get("frp_token"):
@@ -4353,17 +4541,22 @@ def ensure_tunnel(remote_port=REMOTE_PORT):
     else:
         remote_port = int(sec.get("frp_remote_port") or remote_port or REMOTE_PORT)
     # 服务器地址/端口/token 由 load_secrets 按 server_mode 决定:
-    # selfhost 用配置面板填写的自建值;官方模式(official / 未设置)用 PUBLIC_HOST。
-    # PUBLIC_HOST 兜底不能省:凭据模板里的默认 ssh_host 已被移除,少了这行官方模式
-    # 会生成 serverAddr = "" 的空隧道,frpc 只会报 connection write timeout。
+    #   selfhost → frp_server_host(或 ssh_host);其它(官方/未设置)→ frp_server_host
+    #   → ssh_host → 官方域名。
+    # 关键:绝不能因为「SSH 主机为空」就把 serverAddr 写成空串 —— 开源镜像里 ssh_host
+    # 按脱敏约定为空,空 serverAddr 会让 frpc 永远 "connection write timeout",隧道起不来,
+    # 手机扫码后打开面板就是 502(这条是 2026-11-06 实际踩到的坑)。
     if sec.get("server_mode") == "selfhost":
-        server_host = (sec.get("ssh_host") or "").strip() or PUBLIC_HOST
-        server_port = int(sec.get("frp_server_port") or 17000)
-        server_token = sec.get("frp_token")
+        server_host = (sec.get("frp_server_host") or sec.get("ssh_host") or "").strip()
+        if not server_host:
+            raise SystemExit("自建模式缺少 FRP 服务器地址:先运行 python browserctl.py secrets init\n"
+                             "或设置环境变量 BROWSERCTL_FRP_HOST,或在 browserctl_secrets.json 里填 frp_server_host")
     else:
-        server_host = (sec.get("ssh_host") or "").strip() or PUBLIC_HOST
-        server_port = int(sec.get("frp_server_port") or 17000)
-        server_token = sec.get("frp_token")
+        server_host = (sec.get("frp_server_host") or sec.get("ssh_host") or OFFICIAL_FRP_HOST).strip()
+        if not server_host:
+            server_host = OFFICIAL_FRP_HOST
+    server_port = int(sec.get("frp_server_port") or OFFICIAL_FRP_PORT)
+    server_token = sec.get("frp_token")
     toml = frpc_toml_path()
     toml.write_text(
         'serverAddr = "%s"\n'
@@ -4407,18 +4600,39 @@ def ensure_tunnel(remote_port=REMOTE_PORT):
     state = read_state()
     pid = state.get("frpc_pid")
     if pid and _pid_alive(pid):
-        print("frpc 已在运行(pid=%d)" % pid)
-        return remote_port
+        # 已在运行:回读日志确认它真的注册成功过(进程活着不代表隧道可用)
+        recent = _frpc_log_tail(max(0, _frpc_log_size() - 65536))
+        if _tunnel_log_ready(recent):
+            _mark_tunnel(True, "", remote_port)
+            print("frpc 已在运行(pid=%d) → 远端端口 %d" % (pid, remote_port))
+            return remote_port
+        err = ("frpc 进程在运行(pid=%d),但日志里没有 start proxy success,隧道可能没连上;\n"
+               "先执行 python browserctl.py stop 再 start,或查看 %s") % (pid, FRPC_LOG)
+        _mark_tunnel(False, err, remote_port)
+        raise SystemExit(err)
     if not FRPC.exists():
         raise SystemExit("未找到 frpc.exe: %s" % FRPC)
+    offset = _frpc_log_size()
+    _mark_tunnel(False, "frpc 正在启动,等待端口注册到 frps…", remote_port)
     p = spawn_detached([str(FRPC), "-c", str(toml)], FRPC_LOG)
-    time.sleep(2.0)
+    time.sleep(1.0)
     if p.poll() is not None:
         raise SystemExit("frpc 启动失败,详见 %s" % FRPC_LOG)
     state["frpc_pid"] = p.pid
     state["remote_port"] = remote_port
-    write_state(state)
-    print("frpc 已启动(pid=%d) → 远端端口 %d" % (p.pid, remote_port))
+    try:
+        write_state(state)
+    except OSError as e:
+        print("[警告] state 写入失败(隧道本身不受影响): %r" % e, flush=True)
+    ok, log_text = _wait_tunnel_ready(offset)
+    if not ok:
+        err = _tunnel_failure_text(log_text, server_host, server_port, remote_port)
+        _mark_tunnel(False, err, remote_port)
+        # 不 kill frpc:它会自己退避重试,看门狗也会继续检查,端口恢复后隧道能自愈。
+        # 这里只把「未就绪 + 原因」如实抛给调用方(插件据此不出二维码 / 显示原因)。
+        raise SystemExit("隧道没有连通:\n" + err)
+    _mark_tunnel(True, "", remote_port)
+    print("frpc 已启动(pid=%d) → 远端端口 %d 已注册到 frps" % (p.pid, remote_port))
     return remote_port
 
 
@@ -4973,12 +5187,17 @@ def read_state():
 _perms_hardened = False
 
 
-def write_state(st):
-    """原子写(tmp + os.replace)+ 首次创建时收紧 ACL,避免半截文件与权限继承。"""
-    global _perms_hardened
-    payload = json.dumps(st, ensure_ascii=False, indent=2)
-    with state_lock():
-        tmp = STATE.with_suffix(".json.tmp")
+def _write_json_file_atomic(path, payload):
+    """原子写(tmp + os.replace),失败时退化为直接覆盖写。
+
+    2026-11-06 实测:Windows 上 os.replace 偶发 PermissionError [WinError 5]
+    (杀软/索引器短暂持有目标文件句柄、或 ACL 收紧后瞬间不生效),原来直接抛栈会把
+    `browserctl.py start` 从中间打断(frpc 已经起来、state 却没写,后续步骤全废)。
+    这里短重试几次,仍失败就退化直写并告警:少一次原子性,远好过启动半途崩。
+    """
+    tmp = path.with_suffix(".json.tmp")
+    last = None
+    try:
         with open(tmp, "w", encoding="utf-8") as f:
             f.write(payload)
             f.flush()
@@ -4986,7 +5205,43 @@ def write_state(st):
                 os.fsync(f.fileno())
             except OSError:
                 pass
-        os.replace(tmp, STATE)
+        for attempt in range(6):
+            try:
+                os.replace(tmp, path)
+                return True
+            except PermissionError as e:
+                last = e
+                time.sleep(0.15 * (attempt + 1))
+    except OSError as e:
+        last = e
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(payload)
+            f.flush()
+            try:
+                os.fsync(f.fileno())
+            except OSError:
+                pass
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        print("[警告] state 原子替换失败(%r),已改为直接写入" % (last,), flush=True)
+        return True
+    except OSError:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise last if last else OSError("write_state failed")
+
+
+def write_state(st):
+    """原子写(tmp + os.replace)+ 首次创建时收紧 ACL,避免半截文件与权限继承。"""
+    global _perms_hardened
+    payload = json.dumps(st, ensure_ascii=False, indent=2)
+    with state_lock():
+        _write_json_file_atomic(STATE, payload)
     if not _perms_hardened:
         harden_file_perms(STATE)
         _perms_hardened = True
@@ -4997,16 +5252,7 @@ def update_state(mutator):
     with state_lock():
         st = read_state()
         out = mutator(st) or st
-        payload = json.dumps(out, ensure_ascii=False, indent=2)
-        tmp = STATE.with_suffix(".json.tmp")
-        with open(tmp, "w", encoding="utf-8") as f:
-            f.write(payload)
-            f.flush()
-            try:
-                os.fsync(f.fileno())
-            except OSError:
-                pass
-        os.replace(tmp, STATE)
+        _write_json_file_atomic(STATE, json.dumps(out, ensure_ascii=False, indent=2))
     return out
 
 
@@ -5046,6 +5292,13 @@ def cmd_status():
     assigned = st.get("remote_port")
     print("frpc 隧道:", "运行中(pid=%s)" % st["frpc_pid"] if frpc_alive else "未运行",
           "→ 远端端口", assigned if assigned else "未分配(隧道未建立)")
+    if "tunnel_ok" in st:
+        if st.get("tunnel_ok"):
+            print("隧道就绪: 是(端口已在 frps 监听,公网可打开)")
+        else:
+            first = str(st.get("tunnel_error") or "frpc 尚未把端口注册到 frps").strip().splitlines()
+            print("隧道就绪: 否 →", first[0][:200] if first else "原因未记录")
+            print("           (插件面板不会生成二维码;处理完后再点一次「开始控制」)")
     if assigned:
         try:
             req = urllib.request.Request("https://%s/p/%d/" % (PUBLIC_HOST, int(assigned)))
@@ -5066,8 +5319,20 @@ def cmd_start():
         port = detect_port()
         print("DSH Web 端口: %d" % port)
         ensure_forwarder()
-        ensure_tunnel()
-        ensure_watchdog()
+        tunnel_err = None
+        try:
+            ensure_tunnel()
+        except SystemExit as e:
+            tunnel_err = e
+        # 隧道失败也要把看门狗拉起来:它会按退避继续重连,不必等用户再点一次按钮。
+        try:
+            ensure_watchdog()
+        except SystemExit:
+            raise
+        except Exception as e:  # noqa: BLE001
+            print("[警告] 看门狗启动失败: %r" % e, flush=True)
+        if tunnel_err is not None:
+            raise tunnel_err
         name, value, payload = mint_cookie()
         st = read_state()
         st["dsh_port"] = port

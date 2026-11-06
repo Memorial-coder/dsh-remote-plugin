@@ -5,8 +5,10 @@ import { defineStore } from '@deepseek-ai/dsh-client-store'
 const NS = 'browserctl'
 const STYLE_ID = 'browserctl/styles'
 
-// 插件版本号(「关于」面板展示)
-const VERSION = '0.2.0'
+// 插件版本号(「关于」面板展示)。单一来源 = package.json 的 version:
+// build.mjs 用 esbuild --define:__DSHREMOTE_VERSION__ 注入,浏览器端只认这个注入值
+// (不能 import fs/package.json,浏览器 bundle 里没有 Node 能力);源码未构建时显示 dev。
+const VERSION = typeof __DSHREMOTE_VERSION__ === 'string' ? __DSHREMOTE_VERSION__ : 'dev'
 // 「关于」面板三个外部链接,集中一处管理,日后发布一次改齐
 const ABOUT_LINKS = {
   website: 'https://remote.ymzcc.com/dsh-remote/',
@@ -3335,37 +3337,46 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
         }
         if (attempt < 3) await new Promise(r => setTimeout(r, attempt * 1000))
       }
-      // Phase 2: ensure 已接受（ok 或 pending），轮询直到 3080 真正就绪
-      // 避免 ensure 返回 pending 但隧道还在后台构建中(claim-port/start/探活),
-      // 立即刷新导致 QR 获取失败显示"闸机未运行"、用户以为要再点一次。
+      // Phase 2: ensure 已接受（ok 或 pending），轮询直到「闸机 3080 + frp 隧道」都真正就绪。
+      // 只判断 forwarder 不够:browserctl.py start 现在会自己等最多 15s 到 frpc 日志出现
+      // `start proxy success`,ensure 最长约 26s 才返回;并发点击时拿到 pending 的这一侧
+      // 也可能要等到隧道就绪,所以这里给 30s 并把 status.tunnel.ok 一起当就绪条件。
       if (!lastErr) {
-        const deadline = Date.now() + 12000
+        const deadline = Date.now() + 30000
         let fwd = false
+        let tunnelErr = ''
         while (Date.now() < deadline) {
           try {
             const r = await fetch(API_P + '/browserctl/api/status', { cache: 'no-store' })
             const j = await r.json().catch(() => ({}))
             fwd = !!j.forwarder
-            if (fwd) break
+            const tun = j.tunnel
+            // 旧闸机没有 tunnel 字段 → 视为就绪(保持旧行为,不拦老环境)
+            const tunnelOk = !tun || tun.ok !== false
+            if (!tunnelOk && tun && tun.error) tunnelErr = String(tun.error)
+            if (fwd && tunnelOk) break
             // 后台 ensure 已经失败:立刻取回原因,不用空等到超时
             if (j.startError) { lastErr = String(j.startError); break }
           } catch { fwd = false }
           await new Promise(r => setTimeout(r, 300))
         }
-        // 等满 12 秒还没起来:再探一次把原因取回来(以前这里直接放弃,
+        // 等满 30 秒还没起来:再探一次把原因取回来(以前这里直接放弃,
         // 面板就永远停在"隧道正在建立",用户看不到任何失败原因)
         if (!lastErr && !fwd) {
           try {
             const r = await fetch(API_P + '/browserctl/api/status', { cache: 'no-store' })
             const j = await r.json().catch(() => ({}))
             lastErr = String(j.startError || '')
-              || '本机闸机(127.0.0.1:3080)在 12 秒内没有就绪。\n'
+              || (j.tunnel && j.tunnel.error ? String(j.tunnel.error) : '')
+              || '本机闸机(127.0.0.1:3080)在 30 秒内没有就绪。\n'
                + '请查看 kit 目录下的 browserctl_start.log 与 browserctl_fwd.log;\n'
                + '最常见原因是安全软件拦截 frpc.exe(详见 INSTALL.md 常见问题第 1 条)。'
           } catch {
-            lastErr = '本机闸机(127.0.0.1:3080)在 12 秒内没有就绪,请查看 kit 目录下的日志文件。'
+            lastErr = '本机闸机(127.0.0.1:3080)在 30 秒内没有就绪,请查看 kit 目录下的日志文件。'
           }
         }
+        // 闸机在跑但 frp 隧道没连上:把 tunnel_error(多行中文,可能含 frpc 日志尾部)作为原因
+        if (!lastErr && tunnelErr) lastErr = tunnelErr
       }
       if (lastErr) console.error('[browserctl] ensure 全部重试失败:', lastErr)
       setStartErr(lastErr)
@@ -3559,9 +3570,19 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
                     }}>
                       {t('startFailed')}{'\n'}{startErr}
                     </span>
+                  ) : error ? (
+                    // 二维码/配对接口失败(最常见:frp 隧道未连通,host 半直接回 503)时
+                    // 把原因原文显示在二维码位置,而不是只显示一句"没有可用链接"让用户猜。
+                    <span style={{
+                      color: 'var(--dsw-alias-state-error-primary,#e5655c)', fontSize: 11,
+                      padding: '0 12px', textAlign: 'left', whiteSpace: 'pre-wrap',
+                      overflowY: 'auto', maxHeight: 120, lineHeight: 1.5, display: 'block',
+                    }}>
+                      {error}
+                    </span>
                   ) : (
                     <span style={{ color: '#666', fontSize: 12, padding: '0 14px', textAlign: 'center' }}>
-                      {error ? t('statusNoSecret') : t('statusLoading')}
+                      {t('statusLoading')}
                     </span>
                   )}
                 </div>

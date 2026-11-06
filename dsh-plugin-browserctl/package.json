@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-browserctl",
-  "version": "1.0.0",
+  "version": "1.0.31",
   "private": true,
   "type": "module",
   "description": "DSH 远程助手(DshRemote): 把 DeepSeek 助手 Web 面板安全穿透到手机与外网, 侧边栏一键开启",
@@ -21,7 +21,13 @@
     "locale/en.json",
     "locale/zh.json",
     "icon.svg",
-    "README.md"
+    "README.md",
+    "browserctl.py",
+    "frpc.exe",
+    "win_push.py",
+    "push_toast.ps1",
+    "fix-antivirus.ps1",
+    "browserctl_pwa"
   ],
   "dsh": {
     "client": {
@@ -42,12 +48,10 @@
   },
   "scripts": {
     "build": "node build.mjs",
-    "test": "node test/smoke.cjs"
+    "test": "node test/smoke.cjs && node test/layout.cjs"
   },
   "devDependencies": {
-    "esbuild": "0.27.2"
-  },
-  "dependencies": {
+    "esbuild": "0.27.2",
     "qrcode": "^1.5.4"
   }
 }

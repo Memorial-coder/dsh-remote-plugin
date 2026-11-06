@@ -1,7 +1,29 @@
 name: Release
 
-# 公开镜像仓库:打 v* 标签时自动构建、冒烟、打包插件并发布 GitHub Release。
-# 发布后「关于」面板的下载地址 github.com/Memorial-coder/dsh-remote-plugin/releases/latest 即真实可用。
+# 公开镜像仓库:打 v* 标签时自动构建、冒烟、打包「自包含插件包」并发布 GitHub Release。
+#
+# 发布产物是一个**解压即用**的插件目录(DSH「设置 → 插件 → 添加插件 → 选择本地目录」直接选它):
+#
+#   dsh-remote-plugin/            ← 包根,同时有 package.json 和 browserctl.py
+#     package.json                ← DSH 插件清单(dsh.bundle.patch / dsh.client)
+#     cordis.patch.yml
+#     lib/index.js lib/client.js  ← 构建产物(host 半 + client 半)
+#     src/ locale/ icon.svg README.md INSTALL.md LICENSE
+#     browserctl.py               ← 闸机/隧道核心(只用 Python 标准库)
+#     frpc.exe win_push.py push_toast.ps1 fix-antivirus.ps1
+#     browserctl_pwa/             ← iOS 添加到主屏用的图标与 Service Worker
+#     requirements.txt            ← 仅自建服务器时用得到(paramiko),官方托管模式不需要
+#
+# 关键约束(踩过坑,别改回去):
+#   1. **不要打 node_modules**:`qrcode` 已在构建期内联进 lib/index.js,运行时零 npm 依赖;
+#      以前带 node_modules 是因为 esbuild 把 qrcode 标成 external,clone 后必须 npm install。
+#   2. **脱敏版 browserctl.py 必须一起打进去**:插件 host 半的运行核心就是它,缺了它插件
+#      能装但点「开始控制」永远失败(找不闸机程序)。INSTALL.md 已写明包根必须同时有两个文件。
+#   3. **zip 条目用正斜杠 + 单一顶层目录**:macOS/Linux 的 unzip 会把反斜杠当字面字符
+#      (Windows 上正常,别的系统解出一堆乱名文件)。用 `cd dist/pkg && zip -r ... dsh-remote-plugin` 保证。
+#   4. 版本号唯一来源 = dsh-plugin-browserctl/package.json;build.mjs 用它 define 进产物,
+#      工作流只从它取 tag,不手写版本。
+#
 # 注意:官网「检查更新」用的 version.json(remote.ymzcc.com/dsh-remote/version.json)
 # 是独立部署的,发版时需另行更新并部署,不归本 workflow 管。
 on:
@@ -17,58 +39,107 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: dsh-plugin-browserctl/package-lock.json
 
-      - name: Install deps
+      - name: Install deps (build only, no runtime deps)
         working-directory: dsh-plugin-browserctl
         run: npm ci
 
       - name: Build
         working-directory: dsh-plugin-browserctl
-        run: node build.mjs
+        run: npm run build
 
-      - name: Smoke test
+      - name: Test (smoke + layout)
         working-directory: dsh-plugin-browserctl
-        run: node test/smoke.cjs
+        run: npm test
 
       # 手动触发(workflow_dispatch)时没有标签,从 package.json 取版本号
       - name: Resolve version
         id: ver
         run: |
+          VERSION="$(node -p "require('./dsh-plugin-browserctl/package.json').version")"
           if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
             echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
           else
-            echo "tag=v$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+            echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
           fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
 
-      # 只留运行时依赖(qrcode),剔除 esbuild(devDep),让产物解压即用
-      - name: Prune dev deps
-        working-directory: dsh-plugin-browserctl
-        run: npm prune --omit=dev
-
-      - name: Package plugin
+      - name: Package self-contained plugin
         run: |
-          set -e
-          mkdir -p dist/pkg
-          cp -r dsh-plugin-browserctl/lib dsh-plugin-browserctl/src dsh-plugin-browserctl/locale \
-                dsh-plugin-browserctl/node_modules dsh-plugin-browserctl/build.mjs \
-                dsh-plugin-browserctl/package.json dsh-plugin-browserctl/package-lock.json \
-                dsh-plugin-browserctl/README.md \
-                dsh-plugin-browserctl/icon.svg dsh-plugin-browserctl/cordis.patch.yml dist/pkg/
-          cp LICENSE dist/pkg/
-          rm -f dist/pkg/lib/.client.tmp.js
-          (cd dist && zip -r "dsh-remote-plugin-${{ steps.ver.outputs.tag }}.zip" pkg)
+          set -euo pipefail
+          STAGE="dist/pkg/dsh-remote-plugin"
+          rm -rf dist
+          mkdir -p "$STAGE/lib" "$STAGE/src" "$STAGE/locale"
+
+          # 1) 插件本体(包根就这些)
+          cp dsh-plugin-browserctl/package.json \
+             dsh-plugin-browserctl/cordis.patch.yml \
+             dsh-plugin-browserctl/icon.svg \
+             dsh-plugin-browserctl/README.md \
+             "$STAGE/"
+          cp dsh-plugin-browserctl/lib/index.js dsh-plugin-browserctl/lib/client.js "$STAGE/lib/"
+          cp dsh-plugin-browserctl/src/index.js dsh-plugin-browserctl/src/client.jsx "$STAGE/src/"
+          cp dsh-plugin-browserctl/locale/*.json "$STAGE/locale/"
+
+          # 2) 运行核心(与 package.json 同层 = 插件能自包含找到闸机)
+          cp browserctl.py frpc.exe win_push.py push_toast.ps1 fix-antivirus.ps1 \
+             requirements.txt INSTALL.md LICENSE "$STAGE/"
+          cp -r browserctl_pwa "$STAGE/browserctl_pwa"
+
+          # 3) 自检:包根同时有两件套、无 node_modules、无脱敏残留、无 Windows 绝对路径
+          test -f "$STAGE/package.json"
+          test -f "$STAGE/browserctl.py"
+          test -f "$STAGE/lib/index.js"
+          test -f "$STAGE/lib/client.js"
+          if find "$STAGE" -name node_modules | grep -q .; then
+            echo "ERROR: 发布包里不该有 node_modules(qrcode 已内联)" >&2
+            exit 1
+          fi
+          for bad in '103.236.91.7' '/ymz/1panel' 'memorial' '1Panel-openresty'; do
+            if grep -rIl -- "$bad" "$STAGE" >/dev/null 2>&1; then
+              echo "ERROR: 发布包含生产内部信息: $bad" >&2
+              exit 1
+            fi
+          done
+
+          # 4) 打包:顶层目录 + 正斜杠(macOS/Linux unzip 友好)
+          (cd dist/pkg && zip -r -q "dsh-remote-plugin-${VERSION}.zip" dsh-remote-plugin)
+          cp "dist/pkg/dsh-remote-plugin-${VERSION}.zip" "dist/dsh-remote-plugin-${VERSION}.zip"
+
+      - name: Verify zip layout
+        run: |
+          set -euo pipefail
+          ZIP="dist/dsh-remote-plugin-${VERSION}.zip"
+          echo "--- 包内文件清单 ---"
+          unzip -l "$ZIP"
+          # 反斜杠条目 = 非 Windows 解压坏掉
+          if unzip -l "$ZIP" | grep -q '\\'; then
+            echo "ERROR: zip 条目含反斜杠" >&2
+            exit 1
+          fi
+          for f in dsh-remote-plugin/package.json dsh-remote-plugin/browserctl.py \
+                   dsh-remote-plugin/lib/index.js dsh-remote-plugin/lib/client.js \
+                   dsh-remote-plugin/frpc.exe dsh-remote-plugin/INSTALL.md; do
+            unzip -l "$ZIP" | grep -q " $f$" || { echo "ERROR: zip 缺 $f" >&2; exit 1; }
+          done
+          # 解压后再用 node 实测插件入口能加载(模拟 DSH 加载 lib/index.js)
+          rm -rf dist/unzip && mkdir -p dist/unzip
+          unzip -q "$ZIP" -d dist/unzip
+          node -e "import('./dist/unzip/dsh-remote-plugin/lib/index.js').then(m=>{if(!m||!m.inject)throw new Error('inject missing');console.log('host entry OK')})"
 
       - name: Create release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "${{ steps.ver.outputs.tag }}" \
-            dist/dsh-remote-plugin-*.zip \
+            "dist/dsh-remote-plugin-${VERSION}.zip" \
             --repo "$GITHUB_REPOSITORY" \
             --title "dsh-remote-plugin ${{ steps.ver.outputs.tag }}" \
             --generate-notes

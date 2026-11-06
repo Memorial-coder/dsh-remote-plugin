@@ -18,21 +18,64 @@ import QRCode from 'qrcode'
 export const name = 'browserctl'
 export const inject = ['webServer']
 
-// 路径全部相对插件目录解析:插件位于 <root>/dsh-plugin-browserctl/,核心文件在 <root>/。
-// 这样仓库克隆到任意位置、任意机器都能直接跑,不再依赖作者本机绝对路径。
+// ---- 核心目录解析(发布包自包含 / 源码克隆两种布局都能跑) -------------------
 // ESM 下没有 __dirname:bundle 是单文件 lib/index.js,import.meta.url 即它自身位置。
+// 两种布局的核心区别是 browserctl.py 在哪:
+//   A 发布包(pkg/)  : <pkg>/lib/index.js + <pkg>/browserctl.py + <pkg>/package.json
+//                      → 解压即用,核心文件与 package.json 同级,不需要 node_modules
+//   B 源码克隆(repo): <repo>/dsh-plugin-browserctl/lib/index.js + <repo>/browserctl.py
+//                      → 开发布局,核心文件在上两级的仓库根
+// 判据统一是「该目录下存在 browserctl.py」,不再写死往上两级。
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const ROOT = path.resolve(__dirname, '..', '..')
-const STATE_PATH = path.join(ROOT, 'browserctl_state.json')
-const BLACKLIST_PATH = path.join(ROOT, 'browserctl_blacklist.json')
-const SESSIONS_PATH = path.join(ROOT, 'browserctl_sessions.json')
-const EVENTS_PATH = path.join(ROOT, 'browserctl_events.json')
-const DEVICES_PATH = path.join(ROOT, 'browserctl_devices.json')
-const SCRIPT_PATH = path.join(ROOT, 'browserctl.py')
-const SECRETS_PATH = path.join(ROOT, 'browserctl_secrets.json')
+const PKG_ROOT = path.resolve(__dirname, '..')        // 发布包根 = package.json 所在目录
+const DEV_ROOT = path.resolve(__dirname, '..', '..')  // 源码克隆:插件目录的上一级(仓库根)
+
+/** 按优先级列出候选核心目录:① BROWSERCTL_HOME ② 发布包根 ③ 仓库根。 */
+function _coreCandidates() {
+  const list = []
+  const envHome = String(process.env.BROWSERCTL_HOME || '').trim()
+  if (envHome) list.push(path.resolve(envHome))
+  for (const dir of [PKG_ROOT, DEV_ROOT]) {
+    if (!list.includes(dir)) list.push(dir)
+  }
+  return list
+}
+
+/** 解析核心目录(存放 browserctl.py/state/secrets 的目录);找不到返回 null。导出供测试。 */
+export function resolveCoreRoot() {
+  for (const dir of _coreCandidates()) {
+    try {
+      if (existsSync(path.join(dir, 'browserctl.py'))) return dir
+    } catch { /* 目录不可访问:继续探测下一个 */ }
+  }
+  return null
+}
+
+/** 核心目录缺失时的明确中文错误(带已探测的绝对路径与两种布局的处置办法)。 */
+export function coreNotFoundError() {
+  const lines = ['找不到浏览器控制核心文件 browserctl.py。已探测的目录:']
+  const envHome = String(process.env.BROWSERCTL_HOME || '').trim()
+  if (envHome) lines.push('  - ' + path.resolve(envHome) + '  (环境变量 BROWSERCTL_HOME)')
+  lines.push('  - ' + PKG_ROOT + '  (发布包布局:browserctl.py 应与 package.json 同级)')
+  lines.push('  - ' + DEV_ROOT + '  (源码克隆布局:仓库根)')
+  lines.push('发布包应包含 browserctl.py(与 package.json 同级);源码克隆请从仓库根运行,或在插件目录 npm install/link。')
+  return lines.join('\n')
+}
+
+const ROOT = resolveCoreRoot()
+// ROOT 为 null 时仍要保证模块能加载(否则 path.join(null, ...) 在 import 阶段就抛异常),
+// 这里退到 DEV_ROOT 只为拼出可读的绝对路径(文件必然不存在);真正缺什么由 coreNotFoundError() 说明。
+const CORE_DIR = ROOT || DEV_ROOT
+const STATE_PATH = path.join(CORE_DIR, 'browserctl_state.json')
+const BLACKLIST_PATH = path.join(CORE_DIR, 'browserctl_blacklist.json')
+const SESSIONS_PATH = path.join(CORE_DIR, 'browserctl_sessions.json')
+const EVENTS_PATH = path.join(CORE_DIR, 'browserctl_events.json')
+const DEVICES_PATH = path.join(CORE_DIR, 'browserctl_devices.json')
+const SCRIPT_PATH = path.join(CORE_DIR, 'browserctl.py')
+const SECRETS_PATH = path.join(CORE_DIR, 'browserctl_secrets.json')
 // 本地管理令牌:闸机把特权端点(生成链接/配对码/改推送开关)从「loopback 即管理员」
 // 改成「loopback + 持有令牌」。每次调用都重新读,这样闸机重启后新建的令牌能立刻生效。
-const ADMIN_TOKEN_PATH = path.join(ROOT, 'browserctl_admin_token')
+const ADMIN_TOKEN_PATH = path.join(CORE_DIR, 'browserctl_admin_token')
 
 function adminHeaders() {
   try {
@@ -42,8 +85,10 @@ function adminHeaders() {
   return {}
 }
 
-// 插件/面板版本号(「关于」面板与 /api/config 共用)
-const VERSION = '1.0.0'
+// 插件/面板版本号(「关于」面板、/api/config、检查更新共用)。
+// 单一来源 = package.json 的 version:build.mjs 构建时注入 __DSHREMOTE_VERSION__,
+// 源码直接跑(没有构建)时退回 'dev',绝不在这里写死版本号(历史上三处版本号互相打架)。
+const VERSION = typeof __DSHREMOTE_VERSION__ === 'string' ? __DSHREMOTE_VERSION__ : 'dev'
 
 // 本 DSH 会话是否已建过隧道。首次 ensure(DSH 刚启动)必须重建:claim 全新随机端口,
 // 并清掉上次会话残留的分离 frpc/fwd(崩溃退出时 dispose 钩子不会跑)。会话内再次
@@ -103,6 +148,63 @@ function readState() {
   } catch {
     return {}
   }
+}
+
+// ---- 隧道就绪门禁 ----------------------------------------------------------
+// 二维码只有在内网转发 + frp 隧道真正连通后才有意义:否则用户扫到的链接打开就是 502
+// (公网入口在,但背后 frpc 没连上)。闸机(新版 browserctl.py)在 state 里落
+// tunnel_ok / tunnel_error / tunnel_ts / frpc_pid,这里据此在**生成二维码之前**拦截。
+// tunnel_ok 的判定依据是 frpc 日志出现 `start proxy success`(远端端口已注册到 frps),
+// 不是「进程活着」—— 所以有 tunnel_ok 时以它为准,frpc_pid 只做辅助展示。
+// 兼容旧闸机(state 无 tunnel_ok):按 remote_port > 0 && frpc_pid 存活判定;
+// 两个字段都没有 → 允许(保持旧行为,绝不因为升级插件把老环境一刀切拒掉)。
+function pidAlive(pid) {
+  const n = Number(pid) || 0
+  if (n <= 0) return false
+  try {
+    // signal 0 = 只探测存在性,不发信号。Windows 上同样可用。
+    process.kill(n, 0)
+    return true
+  } catch (e) {
+    // EPERM = 进程存在但当前进程无权探测(Windows 上可能遇到),同样视为存活
+    return !!e && e.code === 'EPERM'
+  }
+}
+
+/** 隧道是否就绪。返回 {ok:true,tunnel:{...}} 或 {ok:false, error:'可读原因'}。导出供测试。 */
+export function tunnelReady() {
+  const st = readState()
+  const pid = Number(st.frpc_pid) || 0
+  const tunnel = {
+    ok: false,
+    error: '',
+    port: Number(st.remote_port) || 0,
+    pid,
+    ts: Number(st.tunnel_ts) || 0,
+  }
+  if (Object.prototype.hasOwnProperty.call(st, 'tunnel_ok')) {
+    if (st.tunnel_ok === true) return { ok: true, tunnel: { ...tunnel, ok: true } }
+    const reason = String(st.tunnel_error || '').trim()
+    const error = reason || '隧道尚未建立(frpc 未连接),请稍候或重新点「开始控制」'
+    return { ok: false, error, tunnel: { ...tunnel, error } }
+  }
+  // 旧闸机兼容分支:没有 tunnel_ok 字段
+  const port = Number(st.remote_port) || 0
+  if (port > 0 || pid > 0) {
+    if (port > 0 && pidAlive(pid)) return { ok: true, tunnel: { ...tunnel, ok: true } }
+    const error = '隧道尚未建立(frpc 进程未运行),请先点「开始控制」'
+    return { ok: false, error, tunnel: { ...tunnel, error } }
+  }
+  return { ok: true, tunnel: { ...tunnel, ok: true } }
+}
+
+/** 二维码类路由的统一门禁:未就绪直接 503 + 可读原因,绝不把扫了会 502 的码发出去。 */
+function tunnelGuard(res) {
+  const ready = tunnelReady()
+  if (ready.ok) return true
+  sendJson(res, 503, { ok: false, error: '隧道未建立：' + (ready.error || '请先点「开始控制」'),
+                       tunnel: ready.tunnel })
+  return false
 }
 
 function readBlacklist() {
@@ -328,7 +430,9 @@ function startLogTail(n = 25) {
 
 function runBrowserctl(args) {
   const script = SCRIPT_PATH
-  if (!existsSync(script)) return { started: false, error: 'browserctl.py 不存在: ' + script }
+  if (!existsSync(script)) {
+    return { started: false, error: ROOT ? ('browserctl.py 不存在: ' + script) : coreNotFoundError() }
+  }
   const py = resolvePython()
   if (py.missing) return { started: false, error: PY_NOT_FOUND }
   const creationflags = process.platform === 'win32'
@@ -356,7 +460,10 @@ function runBrowserctl(args) {
 function runBrowserctlAsync(args, timeoutMs = 8000) {
   return new Promise((resolve) => {
     const script = SCRIPT_PATH
-    if (!existsSync(script)) { resolve({ started: false, error: 'browserctl.py 不存在: ' + script }); return }
+    if (!existsSync(script)) {
+      resolve({ started: false, error: ROOT ? ('browserctl.py 不存在: ' + script) : coreNotFoundError() })
+      return
+    }
     const py = resolvePython()
     if (py.missing) { resolve({ started: false, error: PY_NOT_FOUND }); return }
     const creationflags = process.platform === 'win32'
@@ -477,14 +584,45 @@ function portOpen(port) {
   })
 }
 
+// 等隧道就绪:轮询 state 直到 tunnel_ok === true,或到 deadline。
+// 兼容旧闸机(state 没有 tunnel_ok 字段)时给 4s 宽限(让新闸机把字段落盘,避免
+// 在 start 还没写 state 的窗口里误判成旧闸机),之后按旧行为放行,绝不拦死老用户。
+function waitTunnelReady(deadline) {
+  return new Promise((resolve) => {
+    const startedAt = Date.now()
+    const tick = () => {
+      const st = readState()
+      const hasFlag = Object.prototype.hasOwnProperty.call(st, 'tunnel_ok')
+      if (hasFlag) {
+        if (st.tunnel_ok === true) { resolve(tunnelReady()); return }
+      } else if (Date.now() - startedAt >= 4000) {
+        // 旧闸机(升级前写入的 state):按旧行为判定
+        resolve(tunnelReady())
+        return
+      }
+      if (Date.now() >= deadline) { resolve(tunnelReady()); return }
+      setTimeout(tick, 400)
+    }
+    tick()
+  })
+}
+
 // 幂等建隧道(/browserctl/api/ensure 路由与「DSH 启动自动建隧道」共用)。
 // 本会话已建过隧道且闸机在跑(3080 通)→ 直接返回,绝不拆正在运行的隧道、绝不换端口。
 // 否则重建:官方模式先停旧 → 释放旧端口 → claim 全新随机端口 → 持久化 → 启动。
 // claim 失败会 throw,由调用方(路由发 503 / 自动建隧道打日志)处理。
 async function buildTunnel() {
+  // 核心目录没找到时立刻给明确原因(发布包漏带 browserctl.py / 从仓库根之外启动),
+  // 不要走到后面 spawn 才失败。
+  if (!ROOT) return { ok: false, started: false, forwarder: false, error: coreNotFoundError() }
+  const startedAt = Date.now()
   if (sessionTunnel) {
     const fwd = await portOpen(3080)
-    if (fwd) return { ok: true, alreadyRunning: true, forwarder: true }
+    if (fwd) {
+      const ready = tunnelReady()
+      // 闸机在跑但隧道掉了(例如 frpc 被安全软件杀掉):不在这里回 ok,继续走重建流程自愈
+      if (ready.ok) return { ok: true, alreadyRunning: true, forwarder: true, tunnel: ready.tunnel }
+    }
   }
   const sec = readSecrets()
   if (sec.server_mode === 'official' && sec.server_token) {
@@ -551,8 +689,28 @@ async function buildTunnel() {
       logTail: tail,
     }
   }
+  // 3080 通了只说明闸机(fwd)在跑,不代表 frp 隧道已连通:
+  // browserctl.py start 现在会自己等最多 15s 到 frpc 日志出现 `start proxy success`,
+  // 但插件是 detached 启动拿不到 stdout,所以必须回读 state 再判一次 tunnel_ok。
+  // 冷启动时 start 内部可能已消耗 ~15s,这里给到总共约 26s(15s fwd + 余量)。
+  const tunnel = await waitTunnelReady(startedAt + 26000)
+  if (!tunnel.ok) {
+    const tail = startLogTail(20)
+    return {
+      ok: false,
+      started: true,
+      forwarder: true,
+      tunnel: tunnel.tunnel,
+      error: 'frp 隧道未连通(公网入口暂时打不开,二维码已隐藏)。\n'
+        + (tunnel.error || '隧道尚未建立(frpc 未连接)') + '\n'
+        + '处理:确认本机能访问 frps(端口/UDP 未被安全软件拦截),然后重新点「开始控制」;'
+        + '仍失败请查看 kit 目录下 browserctl_frpc.log 与 browserctl_start.log。'
+        + (tail ? '\n\n— 启动日志尾部 —\n' + tail : ''),
+      logTail: tail,
+    }
+  }
   sessionTunnel = true
-  return { ok: true, ...result, forwarder: true }
+  return { ok: true, ...result, forwarder: true, tunnel: tunnel.tunnel }
 }
 
 async function qrSvg(text) {
@@ -696,20 +854,22 @@ export function apply(ctx, config = {}) {
           // 幂等启动(逻辑见 buildTunnel):本会话隧道在跑 → 直接返回,不拆隧道不换端口;
           // 只有隧道没在跑 / DSH 刚启动首次 ensure 才重建。关插件面板绝不会重启隧道。
           if (ensureRunning) {
-            sendJson(res, 200, { ok: true, pending: true, forwarder: await portOpen(3080), link: secretLink() })
+            sendJson(res, 200, { ok: true, pending: true, forwarder: await portOpen(3080),
+                                 link: secretLink(), tunnel: tunnelReady().tunnel })
             return
           }
           const inFlight = (async () => {
             try {
               const r = await buildTunnel()
-              // 起不来(找不到 Python / 脚本缺失 / 闸机 15s 没就绪)时用 503,前端才会走错误分支把原因显示出来
+              // 起不来(找不到 Python / 脚本缺失 / 闸机 15s 没就绪 / frp 隧道未连通)时用 503,
+              // 前端才会走错误分支把原因显示出来。tunnel 一并回给前端(未就绪时含 tunnel_error 原文)。
               const code = r && r.ok === false ? 503 : 200
               lastEnsureError = r && r.ok === false ? String(r.error || '') : ''
-              sendJson(res, code, { ...r, link: secretLink() })
+              sendJson(res, code, { ...r, link: secretLink(), tunnel: (r && r.tunnel) || tunnelReady().tunnel })
             } catch (e) {
               console.error('[browserctl] ensure 异常:', e)
               lastEnsureError = '启动失败:' + String((e && e.message) || e)
-              sendJson(res, 503, { ok: false, error: lastEnsureError })
+              sendJson(res, 503, { ok: false, error: lastEnsureError, tunnel: tunnelReady().tunnel })
             } finally {
               ensureRunning = null
             }
@@ -720,8 +880,15 @@ export function apply(ctx, config = {}) {
         if (route === '/browserctl/api/status') {
           const fwd = await portOpen(3080)
           // 闸机没起来时把上次 ensure 的失败原因一并给出,前端才能显示真正的原因
+          // tunnel:二维码可用性(frpc 是否连通),前端据此决定是否显示"隧道未建立"而不是空二维码
+          const ready = tunnelReady()
           sendJson(res, 200, { forwarder: fwd, link: secretLink(),
-                               startError: fwd ? '' : lastEnsureError })
+                               startError: fwd ? '' : lastEnsureError,
+                               tunnel: {
+                                 ok: ready.ok,
+                                 error: ready.ok ? '' : String(ready.error || ''),
+                                 port: Number(readState().remote_port) || 0,
+                               } })
           return
         }
         if (route === '/browserctl/api/stop') {
@@ -743,6 +910,8 @@ export function apply(ctx, config = {}) {
         }
         if (route === '/browserctl/api/qr') {
           // 引导链接(默认 24h 过期,gate 侧 HMAC 校验);不再下发永久静态密钥。
+          // 门禁:frp 隧道未连通时直接 503,绝不把扫了会 502 的二维码发给用户。
+          if (!tunnelGuard(res)) return
           try {
             const r = await fetch('http://127.0.0.1:3080/browserctl-gate/link?ttl=86400', {
               method: 'GET',
@@ -765,6 +934,7 @@ export function apply(ctx, config = {}) {
         if (route === '/browserctl/api/link') {
           // iOS / 无 App 设备引导链接:按需 ttl(闸机侧 clamp 到 [60s, 7d])。
           // 同一闸机端点,额外附带二维码 SVG,让手机相机直接扫(比复制链接方便)。
+          if (!tunnelGuard(res)) return
           let ttl = 86400
           const rawTtl = parseInt(url.searchParams.get('ttl') || '', 10)
           if (!Number.isNaN(rawTtl)) ttl = Math.max(60, Math.min(604800, rawTtl))
@@ -795,6 +965,8 @@ export function apply(ctx, config = {}) {
           // 配对码(默认 60s 一次性;?uses=N 可设该码可被扫码次数)。
           // 向闸机 loopback 端点申请 grant;闸机不可用或为老版本时返回明确错误,
           // client 半自动回退到长期链接密钥(/api/qr)。
+          // 门禁:隧道未连通时不发配对码(闸机自身也会 503,这里先拦一层给出统一文案)。
+          if (!tunnelGuard(res)) return
           try {
             const uses = Math.max(1, Math.min(50, parseInt(url.searchParams.get('uses') || '1', 10) || 1))
             const r = await fetch('http://127.0.0.1:3080/browserctl-gate/pair?uses=' + uses, {
@@ -840,6 +1012,7 @@ export function apply(ctx, config = {}) {
           // 二维码指向 /browserctl-gate/pair/claim?g=<grant>。
           // 手机 App 扫码后 WebView 打开该链接 → 闸机签发 30 天 bc-gate cookie → 302 进面板,
           // 之后打开 App 免扫码直连。与 60s 一次性配对互补,同样复用闸机认证/踢下线机制。
+          if (!tunnelGuard(res)) return
           try {
             const r = await fetch('http://127.0.0.1:3080/browserctl-gate/pair?ttl=long', {
               method: 'POST',
@@ -1272,7 +1445,7 @@ export function apply(ctx, config = {}) {
   // 单实例由 win_push.py 内部锁文件守卫,重复 spawn 无害。
   if (process.platform === 'win32') {
     ctx.effect(() => {
-      const script = path.join(ROOT, 'win_push.py')
+      const script = path.join(CORE_DIR, 'win_push.py')
       if (!existsSync(script)) return undefined
       const py = resolvePython()
       if (py.missing) {
@@ -1281,7 +1454,7 @@ export function apply(ctx, config = {}) {
       }
       try {
         const child = spawn(py.cmd, [...py.pre, script], {
-          cwd: ROOT,
+          cwd: CORE_DIR,
           stdio: 'ignore',
           windowsHide: true, // 防 CMD 窗口弹出(win_push 是控制台程序,不隐藏会闪黑框)
         })

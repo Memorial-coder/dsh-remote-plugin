@@ -96,16 +96,19 @@ DSH 侧边栏的远程控制面板，集成了二维码配对、设备管理、�
 
 ## 快速开始
 
-想先体验效果？直接打开官网：[https://remote.ymzcc.com/dsh-remote/](https://remote.ymzcc.com/dsh-remote/)，注册/登录即可试用。
+**装之前先确认两件事**：
 
-完整安装步骤见 [INSTALL.md](INSTALL.md)。
+- **需要一个官方账号**：官方托管模式要先去 <https://remote.ymzcc.com> 注册（免费），登录后服务器才分配专属端口。
+- **Windows 上 `frpc.exe` 可能被判为 `PUA:Win32/FRProxy` 拦截**：解压后先右键 `fix-antivirus.ps1` →「使用 PowerShell 运行」→ UAC 点「是」，否则隧道起不来、手机打开是 502。
 
-**官方托管**（推荐）：注册/登录官方账号即用，服务器自动分配专属入口，开箱即用
+完整安装步骤见 [INSTALL.md](INSTALL.md)。想先看效果？直接打开官网：[https://remote.ymzcc.com/dsh-remote/](https://remote.ymzcc.com/dsh-remote/)。
+
+**官方托管**（推荐）：登录官方账号即用，服务器自动分配专属入口
 
 ```
-1. 在 DSH 中安装本插件
-2. 侧边栏打开「DSH 远程助手」→ 点击「开始控制」
-3. 手机扫码二维码，即可远程访问
+1. 解压插件包（Windows 先跑一次 fix-antivirus.ps1）
+2. DSH →「设置」→ 插件页 →「添加插件」→「选择本地目录」→ 选中插件包根目录 → 重启 DSH
+3. 侧边栏「远程助手」→ 登录官方账号 → 点「开始控制」→ 手机扫码二维码远程访问
 ```
 
 **自建服务器**：配置自己的 frps 服务器；密钥仅保存在本机，不会被提交或上传
@@ -127,14 +130,25 @@ DSH 侧边栏的远程控制面板，集成了二维码配对、设备管理、�
 ## 安全性
 
 - **数据本地**：所有 AI 对话和文件处理都在本机 DSH 中运行，数据不上传第三方服务器
-- **端到端加密**：frp 隧道全程加密传输
+- **全程 TLS 加密**：手机 → 官方 frps/Nginx → 本机闸机全程 TLS；数据始终留在本机，不经第三方明文
 - **双重验证**：TOTP 2FA + Cookie 设备信任，暴力破解自动封禁
 - **设备隔离**：多设备同时在线互不干扰，支持定向踢出
 
 ## 目录结构
 
+插件包是自包含目录（DSH 里「添加插件 → 选择本地目录」选中的就是它），运行时零 npm 依赖：
+
 ```
-├── browserctl.py           核心闸机（单文件，4800+ 行）
+插件包根/                     ← DSH 里「添加插件 → 选择本地目录」选中的就是它
+├── package.json            DSH 插件清单（main → lib/index.js）
+├── cordis.patch.yml        插件注册补丁（向 profile 插入插件行）
+├── lib/                    预构建产物（esbuild，已入库）
+│   ├── index.js            host 半：API 路由注册（qrcode 已内联）
+│   └── client.js           client 半：侧边栏面板 UI
+├── src/                    插件源码
+├── locale/                 中文 / 英文文案
+├── icon.svg                侧边栏图标
+├── browserctl.py           核心闸机（单文件，只用 Python 标准库）
 │                           ├── 本地 HTTP 网关
 │                           ├── frpc 隧道管理
 │                           ├── TOTP 2FA 验证
@@ -142,16 +156,15 @@ DSH 侧边栏的远程控制面板，集成了二维码配对、设备管理、�
 │                           ├── IP 黑名单与暴力破解防护
 │                           ├── 看门狗进程（自动恢复）
 │                           └── CLI 命令行工具
-├── dsh-plugin-browserctl/  DSH 插件
-│   ├── src/index.js        host 半：API 路由注册
-│   ├── src/client.jsx      client 半：侧边栏面板 UI
-│   └── lib/                构建产物（esbuild）
 ├── frpc.exe                FRP 客户端（Windows）
-├── win_push.py             Windows 消息推送驻留
+├── win_push.py             消息推送驻留
 ├── push_toast.ps1          PowerShell 推送脚本
-├── screenshots/            功能截图
-└── INSTALL.md              安装指南
+├── browserctl_pwa/         PWA 图标与 Service Worker
+├── fix-antivirus.ps1       一键修复 frpc.exe 被 PUA 拦截
+└── INSTALL.md / LICENSE
 ```
+
+`qrcode` 已在构建期内联进 `lib/index.js`，运行时不需要 `node_modules`。仓库另带 `screenshots/`（本 README 引用的功能截图）。
 
 ## 开源许可
 
@@ -166,4 +179,4 @@ MIT License · 2026 DshRemote Project
   QQ 交流群：1134820071
 </p>
 
-**注意**：需要 Python 3.10+ 与 DSH 运行环境；官网 [https://remote.ymzcc.com/dsh-remote/](https://remote.ymzcc.com/dsh-remote/) 开箱即用，也支持自建 frps。
+**注意**：不需要单独安装 Python 或 Node —— 插件按序探测 `BROWSERCTL_PYTHON`、包内 `python/`、DSH 自带运行时、PATH，`browserctl.py` 只用标准库。官网 [https://remote.ymzcc.com/dsh-remote/](https://remote.ymzcc.com/dsh-remote/) 开箱即用，也支持自建 frps。
