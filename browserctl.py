@@ -3083,8 +3083,8 @@ color:#fff;text-decoration:none;font-size:14px}
         服务端设备注册表形成三端验证(手机 devid → 公网 nginx → 本地闸机)。
         同一 devid 的手机重复扫码时复用已有 dev,不重复计数。
         注意:无论服务端注册成功与否,必须给手机发 302+Cookie。
-        _server_register_device 已加固(捕获 BaseException),此处的 try/finally
-        是第二道防线,防止新增的 SystemExit/异常静默杀死处理线程→502。"""
+        _server_register_device 已加固(捕获 BaseException),此处再把登记会话/落盘/
+        记事件整体兜一层,防止任何异常静默杀死处理线程→公网 502。"""
         # 先消费挂起的"踢全部"(gate_kick_seq 变更):claim 端点不经过 _gate_ok,
         # 若不先处理,新会话会在下一个面板请求被 _process_kicks 清掉,
         # 表现为"重新配对也没用、一直 403"。
@@ -3111,9 +3111,7 @@ color:#fff;text-decoration:none;font-size:14px}
                               "name": name, "kind": "app",
                               "devid": devid_q,
                               "since": now, "ts": now}
-        _device_ensure(_device_key({"dev": dev, "devid": devid_q}), _sessions[dev])
-        _dump_sessions()
-        # 先准备 Cookie 和重定向(即使后面注册失败,手机也要拿到 302+Cookie)
+        # 先铸 Cookie:这是手机能不能进面板的唯一凭据,必须最先算出来
         st = gate_state()
         secret = st.get("link_secret")
         if not secret:
@@ -3124,12 +3122,18 @@ color:#fff;text-decoration:none;font-size:14px}
                     % (GATE_COOKIE, cookie, GATE_MAX_AGE)),
                    ("Referrer-Policy", "no-referrer"),
                    ("Location", "../..")]
-        # 服务端注册(官方模式没有 SSH 凭据,必然失败;已加固为静默失败)
+        # 登记会话 / 落盘 / 服务端注册 / 记事件:全部属于"锦上添花",
+        # 任何一步失败都不允许影响下发的 302+Cookie(否则手机端就是
+        # "配对已失效或未授权",而本地日志一片空白,极难排查)。
         try:
-            _server_register_device(dev, name + (" devid=" + devid_q if devid_q else ""), ip, ua)
+            _device_ensure(_device_key({"dev": dev, "devid": devid_q}), _sessions[dev])
+            _dump_sessions()
+            _server_register_device(
+                dev, name + (" devid=" + devid_q if devid_q else ""), ip, ua)
+            _append_event("pair", "手机 App 长期配对成功 IP=%s UA=%s" % (ip, ua[:40]))
         except BaseException as e:
-            print("[gate] 服务端注册异常(不影响配对): %s" % e, flush=True)
-        _append_event("pair", "手机 App 长期配对成功 IP=%s UA=%s" % (ip, ua[:40]))
+            print("[gate] 长期配对登记步骤异常(不影响下发 Cookie): %r" % (e,), flush=True)
+            traceback.print_exc()
         self._send(302, "redirecting…", "text/html; charset=utf-8", headers=headers)
 
     def _gate_bootstrap(self):
