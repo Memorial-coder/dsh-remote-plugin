@@ -4353,13 +4353,15 @@ def ensure_tunnel(remote_port=REMOTE_PORT):
     else:
         remote_port = int(sec.get("frp_remote_port") or remote_port or REMOTE_PORT)
     # 服务器地址/端口/token 由 load_secrets 按 server_mode 决定:
-    # selfhost 用配置面板填写的自建值;否则(official / 未设置)保持与历史完全一致,活体隧道不受影响。
+    # selfhost 用配置面板填写的自建值;官方模式(official / 未设置)用 PUBLIC_HOST。
+    # PUBLIC_HOST 兜底不能省:凭据模板里的默认 ssh_host 已被移除,少了这行官方模式
+    # 会生成 serverAddr = "" 的空隧道,frpc 只会报 connection write timeout。
     if sec.get("server_mode") == "selfhost":
-        server_host = sec.get("ssh_host") or "remote.ymzcc.com"
+        server_host = (sec.get("ssh_host") or "").strip() or PUBLIC_HOST
         server_port = int(sec.get("frp_server_port") or 17000)
         server_token = sec.get("frp_token")
     else:
-        server_host = sec.get("ssh_host")
+        server_host = (sec.get("ssh_host") or "").strip() or PUBLIC_HOST
         server_port = int(sec.get("frp_server_port") or 17000)
         server_token = sec.get("frp_token")
     toml = frpc_toml_path()
