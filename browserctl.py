@@ -72,11 +72,11 @@ FWD_PORT = 3080
 REMOTE_PORT = 17901
 COOKIE_LIFETIME_DAYS = 30
 
-SERVER_CONF = os.environ.get("BC_SERVER_CONF") or "/www/conf.d/remote.conf"
-SERVER_INDEX = os.environ.get("BC_SERVER_INDEX") or "/www/sites/default/index"
-SERVER_HTPASSWD = os.environ.get("BC_SERVER_HTPASSWD") or "/www/ssl/dsh.htpasswd"
-HTPASSWD_USER = os.environ.get("BC_HTPASSWD_USER") or "dsh"
-OPENRESTY = os.environ.get("BC_OPENRESTY") or "openresty"
+os.environ.get("BC_SERVER_CONF") or "/www/conf.d/remote.conf"
+os.environ.get("BC_SERVER_INDEX") or "/www/sites/default/index"
+os.environ.get("BC_SERVER_HTPASSWD") or "/www/ssl/dsh.htpasswd"
+os.environ.get("BC_HTPASSWD_USER") or "dsh"
+os.environ.get("BC_OPENRESTY") or "openresty"
 
 # ---- 凭据外置(源码中不再出现任何明文密钥) ----
 # 优先级:环境变量 > browserctl_secrets.json(0600, 已 gitignore) > 内置默认(仅非敏感项)
@@ -4307,8 +4307,8 @@ def _run(s, cmd):
 
 # 必须落在容器可见的挂载点里(宿主机挂载目录 => 容器路径)。
 # 之前放 /opt/frp,容器内根本看不到 -> Lua 的注册表校验被静默跳过。
-DEVICE_REGISTRY_PATH = os.environ.get("BC_DEVICE_REGISTRY_PATH") or "/www/dsh/device_registry.json"
-DEVICE_REGISTRY_DIR = os.environ.get("BC_DEVICE_REGISTRY_DIR") or "/www/dsh"
+os.environ.get("BC_DEVICE_REGISTRY_PATH") or "/www/dsh/device_registry.json"
+os.environ.get("BC_DEVICE_REGISTRY_DIR") or "/www/dsh"
 LEGACY_REGISTRY_PATH = "/opt/frp/device_registry.json"
 
 
