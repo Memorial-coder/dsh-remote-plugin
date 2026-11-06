@@ -9,6 +9,7 @@
 | `win_push.py` / `push_toast.ps1` | Windows 消息推送驻留 |
 | `requirements.txt` | Python 依赖（paramiko，**仅自建模式的 `nginx` 自动部署需要**，官方托管用不到） |
 | `dsh-plugin-browserctl/` | DSH 插件（含预构建产物 `lib/`，免构建直接挂载） |
+| `fix-antivirus.ps1` | **一键修复杀软拦截**（Windows Defender 把 frpc.exe 判为 PUA 拦掉时用） |
 | `browserctl_pwa/` | PWA 图标与 Service Worker |
 
 ## 系统要求
@@ -138,6 +139,33 @@ python browserctl.py status
 2. `python browserctl.py secrets init` 重填，确认 FRP 服务器地址/端口/Token 与 frps 实际一致。
 3. `python browserctl.py ssh-trust` 信任主机密钥后重试 `nginx` 部署。
 4. 服务端 allowPorts 必须包含你分配的端口范围；只放行了 17901 会导致专属端口连不上。
+
+### 报 `PermissionError: [WinError 5] 拒绝访问` / 「无法运行: Access is denied」（Windows）
+
+**根因**：Windows Defender 把 `frpc.exe` 判为 `PUA:Win32/FRProxy`（ThreatID 335323，潜在不受欢迎程序）
+并阻止执行。**改名、换目录、换副本都没用**——它按文件判定，所有副本一起拦。
+Windows 11 默认开启 PUA 拦截，所以这个坑相当常见。装了联想电脑管家（火绒引擎）/ 火绒 / 360 的机器，
+它们还会各自再拦一次。
+
+**一键修复**：仓库根目录的 `fix-antivirus.ps1` —— 右键 →「使用 PowerShell 运行」（会弹 UAC）：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\fix-antivirus.ps1
+```
+
+它会：解除下载锁定 → 给本目录加 Defender 排除项 → 检查并询问是否关闭 PUA 拦截 →
+实际跑一次 `frpc.exe -v` 验证并报告结果。
+
+**手动修复**：
+
+1. 管理员 PowerShell 在仓库根目录执行：`Get-ChildItem -Recurse | Unblock-File`
+2. Windows 安全中心 → 病毒和威胁防护 →「病毒和威胁防护」设置 → 管理设置 → 排除项 →
+   添加或删除排除项 → 添加排除项 → **文件夹** → 选本目录
+   （若提示被「篡改防护」阻止，就用同样的图形界面手动加）
+3. **关键一步**：Windows 安全中心 → 应用和浏览器控制 → 基于信誉的保护设置 →
+   「潜在不受欢迎的应用」→ **关闭**。PUA 拦截开着时 frpc.exe 一定会被拦。
+4. 联想电脑管家 / 火绒 / 360 的排除项与 Defender 相互独立，要各自在它的界面里加本目录
+5. 验证 `.\frpc.exe -v` 能输出版本号；若 frpc.exe 已被隔离/删除，先重新 clone/解压再做上面步骤
 
 ### 看不到「远程助手」侧边栏按钮？
 

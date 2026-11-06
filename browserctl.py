@@ -4088,16 +4088,23 @@ def _spawn_error_help(exe, err):
     if denied and "frpc" in name:
         lines += [
             "系统拒绝了执行请求(PermissionError / WinError 5 拒绝访问)。",
-            "最常见原因:安全软件或 Windows「智能应用控制」拦截了隧道程序 frpc.exe,",
-            "本地闸机已经起来了,但隧道建不起来,所以手机打开链接会是 502。",
-            "请按顺序处理:",
-            "  1) 用【管理员】PowerShell 进入本目录执行: Get-ChildItem -Recurse | Unblock-File",
-            "  2) 把本目录加入杀毒软件排除项(Windows 安全中心 → 病毒和威胁防护 → 管理设置",
-            "     → 排除项 → 添加文件夹;联想电脑管家 / 火绒 / 360 同理)",
-            "  3) Windows 11 若开启了「智能应用控制」,它会拦截未签名程序,需在",
-            "     Windows 安全中心 → 应用和浏览器控制 → 智能应用控制 里关闭",
-            "  4) 验证是否已放行: 在本目录运行  .\\frpc.exe -v   应输出 frpc 版本号",
-            "  5) 重新运行: python browserctl.py start",
+            "最常见原因:Windows Defender 把 frpc.exe 判为 PUA:Win32/FRProxy(潜在不受欢迎程序)",
+            "并阻止它执行;联想电脑管家 / 火绒 / 360 等杀软也会做同样的事。",
+            "此时本地闸机已经起来了,但隧道建不起来,所以手机打开链接会是 502。",
+            "",
+            "最快办法:在本目录右键 fix-antivirus.ps1 →「使用 PowerShell 运行」,",
+            "它会自动请求管理员权限、解除下载锁定、加排除项、并验证 frpc.exe 能否执行。",
+            "",
+            "手动处理(按顺序):",
+            "  1) 管理员 PowerShell 在本目录执行: Get-ChildItem -Recurse | Unblock-File",
+            "  2) Windows 安全中心 → 病毒和威胁防护 → 管理设置 → 排除项 → 添加文件夹 → 选本目录",
+            "     (若提示被「篡改防护」阻止,就用同样的图形界面路径手动加,或临时关掉篡改防护)",
+            "  3) 关键一步:Windows 安全中心 → 应用和浏览器控制 → 基于信誉的保护设置",
+            "     →「潜在不受欢迎的应用」→ 关闭。PUA 拦截开着时 frpc.exe 一定会被拦。",
+            "  4) 联想电脑管家 / 火绒 / 360 的排除项与 Defender 相互独立,要各自在它的界面里加本目录",
+            "  5) Windows 11 若开启「智能应用控制」,它拦未签名程序,需要关闭",
+            "  6) 验证: 在本目录运行  .\\frpc.exe -v   应输出 frpc 版本号",
+            "  7) 重新运行: python browserctl.py start",
         ]
     elif denied:
         lines += [
@@ -4389,7 +4396,7 @@ def _run(s, cmd):
     return code, out, err
 
 
-# 必须落在容器可见的挂载点里:宿主机目录(映射) => /www(容器)。
+# 必须落在容器可见的挂载点里(宿主机挂载目录 => 容器路径)。
 # 之前放 /opt/frp,容器内根本看不到 -> Lua 的注册表校验被静默跳过。
 DEVICE_REGISTRY_PATH = os.environ.get("BC_DEVICE_REGISTRY_PATH") or "/www/dsh/device_registry.json"
 DEVICE_REGISTRY_DIR = os.environ.get("BC_DEVICE_REGISTRY_DIR") or "/www/dsh"
