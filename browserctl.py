@@ -145,7 +145,8 @@ def harden_credential_files():
     历史上它们的 ACL 继承了 CodexSandboxUsers:(I)(M) 之类的条目,同机其它账户可读。
     """
     for p in (SECRETS_FILE, STATE, SESSIONS_FILE, EVENTS_FILE, BLACKLIST_FILE,
-              DEVICES_FILE, NOTIFS_FILE, BOOTSTRAP_FILE, ADMIN_TOKEN_FILE, KNOWN_HOSTS):
+              DEVICES_FILE, NOTIFS_FILE, BOOTSTRAP_FILE, ADMIN_TOKEN_FILE, KNOWN_HOSTS,
+              GRANTS_FILE):
         try:
             if p.exists():
                 harden_file_perms(p)
@@ -1002,7 +1003,8 @@ def pair_create(ttl=PAIR_GRANT_TTL, max_live=PAIR_MAX_LIVE, prefix="", uses=1, k
     仅本机直连可调用(双门禁)。
     kind 区分 'pair'(临时配对) / 'long_pair'(App 长期配对)。
     判断种类必须用 kind 字段,不能靠前缀字符——普通随机码首位 1/64 概率恰好是 'L',
-    靠前缀判断会把临时码误判成长期配对,绕过 2FA(安全债 C-01)。"""
+    靠前缀判断会把临时码误判成长期配对,绕过 2FA(安全债 C-01)。
+    max_live 按 kind 分别计数:临时配对 8 个上限,长期配对 32 个上限,互不影响。"""
     grant = prefix + _secrets.token_urlsafe(32)
     now = time.time()
     try:
@@ -1013,8 +1015,12 @@ def pair_create(ttl=PAIR_GRANT_TTL, max_live=PAIR_MAX_LIVE, prefix="", uses=1, k
         for g in [g for g, rec in _grants.items() if rec.get("exp", 0) <= now]:
             _grants.pop(g, None)
         _grants[grant] = {"exp": now + ttl, "uses": uses, "remaining": uses, "kind": kind}
-        while len(_grants) > max_live:  # FIFO 淘汰最老的
-            _grants.popitem(last=False)
+        # 只淘汰同种 kind 的最老 grant,不同种互不影响
+        same_kind = [g for g, rec in _grants.items() if rec.get("kind") == kind]
+        while len(same_kind) > max_live:
+            oldest = same_kind.pop(0)
+            _grants.pop(oldest, None)
+    _dump_grants()
     return grant
 
 
@@ -1025,36 +1031,46 @@ def pair_create_long():
 
 
 def pair_claim(grant):
-    """消费 grant:有效则剩余次数 -1,用尽或过期即删除。返回 True 表示有效。"""
+    """消费 grant:有效则剩余次数 -1,用尽或过期即删除。返回 True 表示有效。
+    注意 _dump_grants 内部会取 _gate_lock,必须在锁外调用(否则死锁)。"""
     now = time.time()
+    ok = False
+    touched = False
     with _gate_lock:
         rec = _grants.get(grant)
-        if rec is None:
-            return False
-        if rec.get("exp", 0) <= now:
-            _grants.pop(grant, None)
-            return False
-        rec["remaining"] = int(rec.get("remaining", 1)) - 1
-        if rec["remaining"] <= 0:
-            _grants.pop(grant, None)
-        return True
+        if rec is not None:
+            touched = True
+            if rec.get("exp", 0) <= now:
+                _grants.pop(grant, None)          # 过期:删掉
+            else:
+                rec["remaining"] = int(rec.get("remaining", 1)) - 1
+                ok = True
+                if rec["remaining"] <= 0:
+                    _grants.pop(grant, None)      # 次数用尽:删掉
+    if touched:
+        _dump_grants()
+    return ok
 
 
 def pair_status(grant):
     """查询 grant 当前状态(供本地面板轮询:检测到有人扫码后自动换码)。"""
     now = time.time()
+    dropped = False
     with _gate_lock:
         rec = _grants.get(grant)
-        if rec is None:
-            return {"ok": True, "exists": False, "uses": 0, "remaining": 0, "exp": 0}
-        if rec.get("exp", 0) <= now:
+        if rec is not None and rec.get("exp", 0) <= now:
             _grants.pop(grant, None)
-            return {"ok": True, "exists": False, "uses": 0, "remaining": 0, "exp": 0}
-        return {"ok": True, "exists": True,
-                "uses": int(rec.get("uses", 1)),
-                "remaining": int(rec.get("remaining", 1)),
-                "exp": rec.get("exp", 0),
-                "kind": rec.get("kind", "pair")}
+            dropped = True
+            rec = None
+        row = {"ok": True, "exists": rec is not None,
+               "uses": int(rec.get("uses", 1)) if rec else 0,
+               "remaining": int(rec.get("remaining", 1)) if rec else 0,
+               "exp": rec.get("exp", 0) if rec else 0,
+               "kind": rec.get("kind", "pair") if rec else ""}
+    # 轮询很频繁,只有真的清掉了过期项才落盘(锁外调用,防死锁)
+    if dropped:
+        _dump_grants()
+    return row
 
 
 # ---- 引导链接:HMAC 签名 + 过期时间(gate 侧校验,替代 nginx 静态密钥比较) ----
@@ -1213,6 +1229,7 @@ SESSIONS_FILE = HERE / "browserctl_sessions.json"
 EVENTS_FILE = HERE / "browserctl_events.json"
 BLACKLIST_FILE = HERE / "browserctl_blacklist.json"
 DEVICES_FILE = HERE / "browserctl_devices.json"
+GRANTS_FILE = HERE / "browserctl_grants.json"
 _EVENTS_MAX = 60
 
 # ---- App 发布管理（APK 上传/版本配置/更新公告）----
@@ -1645,6 +1662,70 @@ def _load_sessions():
     # 为已恢复的会话补 IP 归属地 + 设备注册,写入文件(锁已释放)
     if restored:
         _dump_sessions()
+    return restored
+
+
+# ---- 配对 grant 落盘:长期配对的有效期是 7 天,不能只活在进程内存里 ----
+# 症状:在面板上点「App 配对」生成二维码,过一会儿(闸机被看门狗拉起 / stop+start /
+# 插件 ensure / 用户重启电脑)再扫,闸机回 403「配对链接已失效」,手机 App 显示
+# 「配对已失效或未授权」。临时配对 60s 内就被消费掉了,所以从来看不出问题 ——
+# 这正是"一次性链接能进、长期链接进不去"。落盘后重启不再丢已经发出去的码。
+
+def _dump_grants():
+    """把未过期的 grant 写入 GRANTS_FILE(原子写;失败不抛,不影响配对主流程)。"""
+    now = time.time()
+    with _gate_lock:
+        items = [(g, dict(rec)) for g, rec in _grants.items()
+                 if float(rec.get("exp", 0)) > now]
+    if not items:
+        try:
+            GRANTS_FILE.unlink()
+        except OSError:
+            pass
+        return
+    payload = json.dumps({"ts": now,
+                          "grants": {g: rec for g, rec in items}},
+                         ensure_ascii=False, indent=1)
+    tmp = GRANTS_FILE.with_suffix(".json.tmp")
+    try:
+        tmp.write_text(payload, encoding="utf-8")
+        os.replace(tmp, GRANTS_FILE)
+    except Exception:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+
+
+def _load_grants():
+    """闸机启动时恢复未过期的 grant,让已经发出去的二维码仍然可用。"""
+    try:
+        raw = json.loads(GRANTS_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return 0
+    rows = raw.get("grants") if isinstance(raw, dict) else None
+    if not isinstance(rows, dict):
+        return 0
+    now = time.time()
+    restored = 0
+    with _gate_lock:
+        for g, rec in rows.items():
+            if not isinstance(rec, dict):
+                continue
+            try:
+                exp = float(rec.get("exp", 0))
+                uses = max(1, min(50, int(rec.get("uses", 1))))
+                remaining = max(0, min(uses, int(rec.get("remaining", 1))))
+            except (TypeError, ValueError):
+                continue
+            if exp <= now or remaining <= 0:
+                continue
+            _grants[g] = {"exp": exp, "uses": uses, "remaining": remaining,
+                          "kind": rec.get("kind", "pair")}
+            restored += 1
+    # 清掉文件里已过期的残留,避免文件只涨不缩
+    if restored:
+        _dump_grants()
     return restored
 
 
@@ -3776,6 +3857,9 @@ def gate_serve():
     _notifs_load()
     if _notifs:
         print("已恢复 %d 条推送通知记录" % len(_notifs), flush=True)
+    _grants_restored = _load_grants()
+    if _grants_restored:
+        print("已恢复 %d 条配对 grant(长期二维码继续有效)" % _grants_restored, flush=True)
     print("browserctl 闸机: 127.0.0.1:%d (TOTP 2FA) → DSH(自动探测)" % FWD_PORT, flush=True)
 
     def housekeeping():
@@ -4100,7 +4184,8 @@ def _spawn_error_help(exe, err):
             "  2) Windows 安全中心 → 病毒和威胁防护 → 管理设置 → 排除项 → 添加文件夹 → 选本目录",
             "     (若提示被「篡改防护」阻止,就用同样的图形界面路径手动加,或临时关掉篡改防护)",
             "  3) 关键一步:Windows 安全中心 → 应用和浏览器控制 → 基于信誉的保护设置",
-            "     →「潜在不受欢迎的应用」→ 关闭。PUA 拦截开着时 frpc.exe 一定会被拦。",
+            "     →「潜在不受欢迎的应用」→ 关闭(注意:PUA 开着 + MOTW 下载标记才会触发拦截;",
+             "     Unblock-File 去掉标记后通常就够,还不行才关 PUA)。",
             "  4) 联想电脑管家 / 火绒 / 360 的排除项与 Defender 相互独立,要各自在它的界面里加本目录",
             "  5) Windows 11 若开启「智能应用控制」,它拦未签名程序,需要关闭",
             "  6) 验证: 在本目录运行  .\\frpc.exe -v   应输出 frpc 版本号",
@@ -4404,21 +4489,34 @@ LEGACY_REGISTRY_PATH = "/opt/frp/device_registry.json"
 
 
 def _server_read_registry():
-    """SSH 读取服务端设备注册表。"""
-    s = _ssh()
+    """SSH 读取服务端设备注册表。
+    官方模式/SSH 不可用时返回空字典,不抛异常(防止配对请求静默死亡→502)。"""
+    try:
+        s = _ssh()
+    except BaseException:
+        return {}
     try:
         code, out, _ = _run(s, "cat %s 2>/dev/null || echo '{}'" % DEVICE_REGISTRY_PATH)
         return json.loads(out) if code == 0 else {}
+    except BaseException as e:
+        print("[gate] 服务端注册表读取失败: %s" % e, flush=True)
+        return {}
     finally:
-        s.close()
+        try:
+            s.close()
+        except BaseException:
+            pass
 
 
 def _server_write_registry(registry):
-    """SSH 写入服务端设备注册表。
+    """SSH 写入服务端设备注册表。失败静默,不抛异常。
 
     目录先 mkdir -p;权限 644(容器内 worker 需要能读,文件不在站点根目录下)。
     """
-    s = _ssh()
+    try:
+        s = _ssh()
+    except BaseException:
+        return
     try:
         data = json.dumps(registry, ensure_ascii=False, indent=2)
         _run(s, "mkdir -p %s" % DEVICE_REGISTRY_DIR)
@@ -4426,8 +4524,13 @@ def _server_write_registry(registry):
         with sftp.open(DEVICE_REGISTRY_PATH, "w") as f:
             f.write(data)
         _run(s, "chmod 644 %s" % DEVICE_REGISTRY_PATH)
+    except BaseException as e:
+        print("[gate] 服务端注册表写入失败: %s" % e, flush=True)
     finally:
-        s.close()
+        try:
+            s.close()
+        except BaseException:
+            pass
 
 
 def _server_migrate_registry():
@@ -4451,7 +4554,7 @@ def _server_migrate_registry():
 
 
 def _server_register_device(dev, name, ip, ua):
-    """向服务端注册表添加/更新设备。"""
+    """向服务端注册表添加/更新设备。失败静默,不抛异常。"""
     try:
         reg = _server_read_registry()
         reg[dev] = {"name": name, "ip": str(ip)[:39],
@@ -4459,19 +4562,19 @@ def _server_register_device(dev, name, ip, ua):
                      "revoked": False}
         _server_write_registry(reg)
         print("[gate] 服务端注册设备 %s (%s)" % (dev, name), flush=True)
-    except Exception as e:
+    except BaseException as e:
         print("[gate] 服务端注册失败(可能 SSH 未连通): %s" % e, flush=True)
 
 
 def _server_unregister_device(dev):
-    """从服务端注册表删除设备。"""
+    """从服务端注册表删除设备。失败静默,不抛异常。"""
     try:
         reg = _server_read_registry()
         if dev in reg:
             del reg[dev]
             _server_write_registry(reg)
             print("[gate] 服务端删除设备 %s" % dev, flush=True)
-    except Exception as e:
+    except BaseException as e:
         print("[gate] 服务端删除失败: %s" % e, flush=True)
 
 

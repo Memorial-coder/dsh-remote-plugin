@@ -1,4 +1,4 @@
-﻿# ============================================================================
+# ============================================================================
 #  修复杀软拦截 frpc.exe  —— 一键脚本(需要管理员权限)
 #
 #  症状: 手机打开链接显示 502,或终端报
@@ -108,7 +108,9 @@ if ($hasDefender) {
     try {
         $pua = (Get-MpPreference).PUAProtection   # 0=关闭 1=开启 2=仅审核
         if ($pua -eq 1) {
-            Say "      当前为「开启」—— frpc.exe 就是被它判成 PUA:Win32/FRProxy 拦掉的。" 'Yellow'
+            Say "      当前为「开启」—— frpc.exe 会被判成 PUA:Win32/FRProxy(ThreatID 335323)。" 'Yellow'
+            Say "      (注:PUA 开启不一定就会拦;需要文件同时带 MOTW 下载标记才会触发。" 'Gray'
+            Say "      第 1 步的 Unblock-File 消掉 MOTW 后往往就够。如果还不行再关 PUA。)" 'Gray'
             if (-not $NoPua) {
                 Say "      关掉它能彻底解决,但会降低对流氓软件/广告软件的防护。" 'Yellow'
                 $ans = Read-Host "      是否关闭 PUA 拦截? 输入 y 关闭,直接回车跳过"
