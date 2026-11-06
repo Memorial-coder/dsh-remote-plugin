@@ -3266,6 +3266,9 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
   // 顶栏「账号登录」弹窗 + 未登录启动远程时的提示
   const [accountOpen, setAccountOpen] = useState(false)
   const [loginPrompt, setLoginPrompt] = useState(false)
+  // 启动失败的具体原因(如「找不到 Python」)。以前只 console.error,界面什么都不显示,
+  // 用户只看到「点了没反应」,所以这里必须把原因原样呈现出来。
+  const [startErr, setStartErr] = useState('')
   // 顶栏账号按钮的登录态(登录后显示邮箱)
   const [acctMe, setAcctMe] = useState(null)
   // 当前连接模式(official/selfhost),用于判断未登录时是否显示二维码
@@ -3306,6 +3309,7 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
         if (!(m && m.loggedIn)) { setLoginPrompt(true); return }
       }
     } catch {}
+    setStartErr('') // 重新启动前清掉上一次的失败原因
     run('start', async () => {
       // Phase 1: 触发 ensure（偶发网络抖动/端口竞争时最多重试 3 次）
       let lastErr = ''
@@ -3337,6 +3341,7 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
         }
       }
       if (lastErr) console.error('[browserctl] ensure 全部重试失败:', lastErr)
+      setStartErr(lastErr)
       await new Promise(r => setTimeout(r, 600))
       setReloadToken(x => x + 1)
     })
@@ -3519,6 +3524,14 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
                       <span className="dshBrowserCtlSpinner" aria-hidden="true" />
                       {t('starting')}
                     </span>
+                  ) : startErr ? (
+                    <span style={{
+                      color: 'var(--dsw-alias-state-error-primary,#e5655c)', fontSize: 11,
+                      padding: '0 12px', textAlign: 'left', whiteSpace: 'pre-wrap',
+                      overflowY: 'auto', maxHeight: 120, lineHeight: 1.5, display: 'block',
+                    }}>
+                      {t('startFailed')}{'\n'}{startErr}
+                    </span>
                   ) : (
                     <span style={{ color: '#666', fontSize: 12, padding: '0 14px', textAlign: 'center' }}>
                       {error ? t('statusNoSecret') : t('statusLoading')}
@@ -3699,6 +3712,7 @@ export function apply(ctx) {
       aboutAccountLogged: '已登录',
       loginRequired: '需要先登录',
       loginRequiredDesc: '使用官方服务器需要先登录账号,登录后才会分配专属入口。点击下方按钮前往登录。',
+      startFailed: '启动失败:',
       aboutDesc: '把本机 DeepSeek 助手 Web 面板安全穿透到手机或外网浏览器,随时随地远程控制。',
       aboutWebsite: '官网',
       aboutGithub: 'GitHub',
@@ -3886,6 +3900,7 @@ export function apply(ctx) {
       aboutAccountLogged: 'Signed in',
       loginRequired: 'Sign in required',
       loginRequiredDesc: 'Using the official server requires signing in first; a dedicated entry is assigned after login. Tap below to sign in.',
+      startFailed: 'Start failed:',
       aboutDesc: 'Securely tunnel this DeepSeek assistant web panel to your phone or any browser for remote control, anywhere.',
       aboutWebsite: 'Website',
       aboutGithub: 'GitHub',

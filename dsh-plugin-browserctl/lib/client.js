@@ -3107,6 +3107,7 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
   const [configOpen, setConfigOpen] = (0, import_react.useState)(false);
   const [accountOpen, setAccountOpen] = (0, import_react.useState)(false);
   const [loginPrompt, setLoginPrompt] = (0, import_react.useState)(false);
+  const [startErr, setStartErr] = (0, import_react.useState)("");
   const [acctMe, setAcctMe] = (0, import_react.useState)(null);
   const [cfgMode, setCfgMode] = (0, import_react.useState)("official");
   const panel = (0, import_react.useRef)(null);
@@ -3157,6 +3158,7 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
       }
     } catch {
     }
+    setStartErr("");
     run("start", async () => {
       let lastErr = "";
       for (let attempt = 1; attempt <= 3; attempt++) {
@@ -3189,6 +3191,7 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
         }
       }
       if (lastErr) console.error("[browserctl] ensure \u5168\u90E8\u91CD\u8BD5\u5931\u8D25:", lastErr);
+      setStartErr(lastErr);
       await new Promise((r) => setTimeout(r, 600));
       setReloadToken((x) => x + 1);
     });
@@ -3370,6 +3373,20 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
           ] }) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlQrBox", style: { height: 128 }, children: busy === "start" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { className: "dshBrowserCtlQrLoading", children: [
             /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlSpinner", "aria-hidden": "true" }),
             t("starting")
+          ] }) : startErr ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { style: {
+            color: "var(--dsw-alias-state-error-primary,#e5655c)",
+            fontSize: 11,
+            padding: "0 12px",
+            textAlign: "left",
+            whiteSpace: "pre-wrap",
+            overflowY: "auto",
+            maxHeight: 120,
+            lineHeight: 1.5,
+            display: "block"
+          }, children: [
+            t("startFailed"),
+            "\n",
+            startErr
           ] }) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: { color: "#666", fontSize: 12, padding: "0 14px", textAlign: "center" }, children: error ? t("statusNoSecret") : t("statusLoading") }) }),
           data && !(cfgMode === "official" && !acctMe) && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlUrlRow", children: [
             /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlUrl", title: data.url, children: data.url }),
@@ -3519,6 +3536,7 @@ function apply(ctx) {
       aboutAccountLogged: "\u5DF2\u767B\u5F55",
       loginRequired: "\u9700\u8981\u5148\u767B\u5F55",
       loginRequiredDesc: "\u4F7F\u7528\u5B98\u65B9\u670D\u52A1\u5668\u9700\u8981\u5148\u767B\u5F55\u8D26\u53F7,\u767B\u5F55\u540E\u624D\u4F1A\u5206\u914D\u4E13\u5C5E\u5165\u53E3\u3002\u70B9\u51FB\u4E0B\u65B9\u6309\u94AE\u524D\u5F80\u767B\u5F55\u3002",
+      startFailed: "\u542F\u52A8\u5931\u8D25:",
       aboutDesc: "\u628A\u672C\u673A DeepSeek \u52A9\u624B Web \u9762\u677F\u5B89\u5168\u7A7F\u900F\u5230\u624B\u673A\u6216\u5916\u7F51\u6D4F\u89C8\u5668,\u968F\u65F6\u968F\u5730\u8FDC\u7A0B\u63A7\u5236\u3002",
       aboutWebsite: "\u5B98\u7F51",
       aboutGithub: "GitHub",
@@ -3706,6 +3724,7 @@ function apply(ctx) {
       aboutAccountLogged: "Signed in",
       loginRequired: "Sign in required",
       loginRequiredDesc: "Using the official server requires signing in first; a dedicated entry is assigned after login. Tap below to sign in.",
+      startFailed: "Start failed:",
       aboutDesc: "Securely tunnel this DeepSeek assistant web panel to your phone or any browser for remote control, anywhere.",
       aboutWebsite: "Website",
       aboutGithub: "GitHub",

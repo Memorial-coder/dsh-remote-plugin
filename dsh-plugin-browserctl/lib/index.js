@@ -1,8 +1,8 @@
 // src/index.js
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import crypto from "node:crypto";
 import net from "node:net";
-import { existsSync, readFileSync, writeFileSync, renameSync, rmSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync, renameSync, rmSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import QRCode from "qrcode";
@@ -163,15 +163,75 @@ function toUidUrl(url) {
 function secretLink() {
   return null;
 }
+var _pyResolved = null;
+function _pythonCandidates() {
+  const exe = process.platform === "win32" ? "python.exe" : "python3";
+  const list = [];
+  const envPy = process.env.BROWSERCTL_PYTHON || process.env.DSHREMOTE_PYTHON;
+  if (envPy) list.push({ cmd: envPy, pre: [] });
+  const root = path.dirname(SCRIPT_PATH);
+  list.push({ cmd: path.join(root, "python", exe), pre: [] });
+  list.push({ cmd: path.join(root, "python", "bin", "python3"), pre: [] });
+  const home = process.env.USERPROFILE || process.env.HOME || "";
+  if (home) {
+    const rtDir = path.join(home, ".dsh", "dsh-runtimes");
+    try {
+      for (const d of readdirSync(rtDir)) {
+        const base = path.join(rtDir, d, "dependencies", "python");
+        list.push({ cmd: path.join(base, "python.exe"), pre: [] });
+        list.push({ cmd: path.join(base, exe), pre: [] });
+        list.push({ cmd: path.join(base, "bin", "python3"), pre: [] });
+      }
+    } catch {
+    }
+  }
+  list.push({ cmd: "python", pre: [] });
+  list.push({ cmd: "python3", pre: [] });
+  if (process.platform === "win32") list.push({ cmd: "py", pre: ["-3"] });
+  return list;
+}
+function _pythonUsable(cand) {
+  try {
+    const r = spawnSync(cand.cmd, [
+      ...cand.pre,
+      "-c",
+      "import sys; raise SystemExit(0 if sys.version_info >= (3, 8) else 1)"
+    ], {
+      stdio: "ignore",
+      timeout: 8e3,
+      windowsHide: true
+    });
+    return r && r.status === 0;
+  } catch {
+    return false;
+  }
+}
+var PY_NOT_FOUND = '\u627E\u4E0D\u5230\u53EF\u7528\u7684 Python \u89E3\u91CA\u5668\u3002\u672C\u63D2\u4EF6\u9700\u8981 Python 3.8+,\u4F46\u901A\u5E38**\u65E0\u9700\u624B\u52A8\u5B89\u88C5**\u2014\u2014DSH \u81EA\u5E26\u8FD0\u884C\u65F6\u3002\n\u5DF2\u5C1D\u8BD5:\u73AF\u5883\u53D8\u91CF BROWSERCTL_PYTHON\u3001\u5305\u5185 python/\u3001DSH \u8FD0\u884C\u65F6 (~/.dsh/dsh-runtimes/*/dependencies/python)\u3001PATH \u4E0A\u7684 python/python3/py\u3002\n\u89E3\u51B3\u529E\u6CD5(\u4EFB\u9009\u5176\u4E00):\n  1. \u5B89\u88C5 Python 3.10+ \u5E76\u52FE\u9009 "Add python.exe to PATH"(https://www.python.org/downloads/);\n  2. \u8BBE\u7F6E\u73AF\u5883\u53D8\u91CF BROWSERCTL_PYTHON \u6307\u5411 python.exe \u7684\u5B8C\u6574\u8DEF\u5F84;\n  3. \u786E\u8BA4 DSH \u5B89\u88C5\u5B8C\u6574(\u81EA\u5E26\u8FD0\u884C\u65F6\u76EE\u5F55\u672A\u88AB\u6E05\u7406),\u7136\u540E\u91CD\u542F DSH\u3002';
+function resolvePython() {
+  if (_pyResolved) return _pyResolved;
+  for (const c of _pythonCandidates()) {
+    if (path.isAbsolute(c.cmd) && !existsSync(c.cmd)) continue;
+    if (_pythonUsable(c)) {
+      _pyResolved = c;
+      return c;
+    }
+  }
+  _pyResolved = { cmd: "python", pre: [], missing: true };
+  return _pyResolved;
+}
 function runBrowserctl(args) {
   const script = SCRIPT_PATH;
   if (!existsSync(script)) return { started: false, error: "browserctl.py \u4E0D\u5B58\u5728: " + script };
+  const py = resolvePython();
+  if (py.missing) return { started: false, error: PY_NOT_FOUND };
   const creationflags = process.platform === "win32" ? 8 | 512 | 16777216 | 134217728 : 0;
-  const child = spawn("python", [script, ...args], {
+  const child = spawn(py.cmd, [...py.pre, script, ...args], {
     cwd: path.dirname(script),
     stdio: "ignore",
     detached: true,
     creationflags
+  });
+  child.on("error", () => {
   });
   child.unref();
   return { started: true };
@@ -183,9 +243,14 @@ function runBrowserctlAsync(args, timeoutMs = 8e3) {
       resolve({ started: false, error: "browserctl.py \u4E0D\u5B58\u5728: " + script });
       return;
     }
+    const py = resolvePython();
+    if (py.missing) {
+      resolve({ started: false, error: PY_NOT_FOUND });
+      return;
+    }
     const creationflags = process.platform === "win32" ? 8 | 512 | 16777216 | 134217728 : 0;
     let done = false;
-    const child = spawn("python", [script, ...args], {
+    const child = spawn(py.cmd, [...py.pre, script, ...args], {
       cwd: path.dirname(script),
       stdio: "ignore",
       detached: true,
@@ -332,6 +397,9 @@ async function buildTunnel() {
     }
   }
   const result = runBrowserctl(["start"]);
+  if (result.started === false) {
+    return { ok: false, ...result, forwarder: false };
+  }
   let fwd = false;
   const deadline = Date.now() + 15e3;
   while (Date.now() < deadline) {
@@ -445,7 +513,8 @@ function apply(ctx, config = {}) {
         const inFlight = (async () => {
           try {
             const r = await buildTunnel();
-            sendJson(res, 200, { ...r, link: secretLink() });
+            const code = r && r.ok === false ? 503 : 200;
+            sendJson(res, code, { ...r, link: secretLink() });
           } catch (e) {
             console.error("[browserctl] ensure \u5F02\u5E38:", e);
             sendJson(res, 503, { ok: false, error: "\u542F\u52A8\u5931\u8D25:" + String(e && e.message || e) });
@@ -1004,8 +1073,13 @@ function apply(ctx, config = {}) {
     ctx.effect(() => {
       const script = path.join(ROOT, "win_push.py");
       if (!existsSync(script)) return void 0;
+      const py = resolvePython();
+      if (py.missing) {
+        ctx.logger.warn("dshremote: \u672A\u627E\u5230 Python,\u8DF3\u8FC7 Windows \u63A8\u9001\u9A7B\u7559(\u96A7\u9053\u529F\u80FD\u4E0D\u53D7\u5F71\u54CD)");
+        return void 0;
+      }
       try {
-        const child = spawn("python", [script], {
+        const child = spawn(py.cmd, [...py.pre, script], {
           cwd: ROOT,
           stdio: "ignore",
           windowsHide: true
@@ -1074,7 +1148,9 @@ function apply(ctx, config = {}) {
           });
         }
         try {
-          spawn("python", [SCRIPT_PATH, "stop"], {
+          const py = resolvePython();
+          if (py.missing) throw new Error("no python");
+          const stopper = spawn(py.cmd, [...py.pre, SCRIPT_PATH, "stop"], {
             cwd: path.dirname(SCRIPT_PATH),
             stdio: "ignore",
             detached: true,
@@ -1082,7 +1158,10 @@ function apply(ctx, config = {}) {
             // CREATE_BREAKAWAY_FROM_JOB | CREATE_NO_WINDOW:跳出作业对象不被连坐杀,
             // 且不弹 CMD 窗口
             creationflags: process.platform === "win32" ? 16777216 | 134217728 : 0
-          }).unref();
+          });
+          stopper.on("error", () => {
+          });
+          stopper.unref();
         } catch (e) {
         }
       } catch (e) {
@@ -1092,7 +1171,9 @@ function apply(ctx, config = {}) {
   ctx.logger.info("dshremote: host half ready");
 }
 export {
+  PY_NOT_FOUND,
   apply,
   inject,
-  name
+  name,
+  resolvePython
 };

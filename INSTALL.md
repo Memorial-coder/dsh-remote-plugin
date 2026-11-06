@@ -7,14 +7,22 @@
 | `browserctl.py` | 核心网关（单文件）：本机闸机 + frpc 隧道 + 2FA/配对/设备管理 + 服务器端自动部署 |
 | `frpc.exe` | FRP 客户端（Windows） |
 | `win_push.py` / `push_toast.ps1` | Windows 消息推送驻留 |
-| `requirements.txt` | Python 依赖（paramiko，用于 SSH 操作） |
+| `requirements.txt` | Python 依赖（paramiko，**仅自建模式的 `nginx` 自动部署需要**，官方托管用不到） |
 | `dsh-plugin-browserctl/` | DSH 插件（含预构建产物 `lib/`，免构建直接挂载） |
 | `browserctl_pwa/` | PWA 图标与 Service Worker |
 
 ## 系统要求
 
 - Windows / macOS / Linux
-- Python 3.10+
+- **Python 3.8+，但通常不需要你手动安装**：插件会按下面的顺序自动查找解释器，用第一个能跑的——
+
+  1. 环境变量 `BROWSERCTL_PYTHON`
+  2. 包内 `python/` 目录
+  3. **DSH 自带运行时** `~/.dsh/dsh-runtimes/*/dependencies/python/` ← 从 DSH 里用就靠这条
+  4. PATH 上的 `python` / `python3` / `py -3`
+
+  `browserctl.py` **只依赖 Python 标准库**，不需要 `pip install` 任何东西。
+  四条都找不到时，面板会直接显示原因和解决办法，不会静默失败。
 - [DeepSeek Harness (DSH)](https://dsh.venice.ai) 已安装运行
 - （自建模式）一台有公网 IP 的 Linux 服务器 + 已运行的 frps
 
@@ -69,11 +77,14 @@ https://remote.ymzcc.com/dsh-remote/p/<uid>/
 
 前提：一台有公网 IP 的 Linux 服务器，已运行 frps（建议端口 17000，allowPorts 包含你分配的端口范围），安装 OpenResty/Nginx。
 
-**1. 安装 Python 依赖**
+**1. 安装 Python 依赖（仅自建模式需要；官方托管跳过）**
 
 ```bash
 pip install -r requirements.txt
 ```
+
+> 这一步只为 `browserctl.py nginx`（自动部署服务器端反代）装 `paramiko`。
+> 闸机本身只用标准库，官方托管方案完全不需要装任何 Python 包。
 
 **2. 配置服务器信息**
 

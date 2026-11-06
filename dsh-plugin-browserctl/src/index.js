@@ -7,10 +7,10 @@
  *   /api/stop     停止隧道
  * 仅监听 127.0.0.1;链接密钥来自 browserctl_state.json。
  */
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import crypto from 'node:crypto'
 import net from 'node:net'
-import { existsSync, readFileSync, writeFileSync, renameSync, rmSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, writeFileSync, renameSync, rmSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import QRCode from 'qrcode'
@@ -226,18 +226,93 @@ function secretLink() {
   return null
 }
 
+// ---- Python 解释器定位 ------------------------------------------------------
+// 很多用户机器上**没有装 Python**。但 DSH 自己就带了一个运行时:
+//   ~/.dsh/dsh-runtimes/<runtime>/dependencies/python/python.exe
+// 而 browserctl.py 只依赖标准库(无第三方包),所以直接复用 DSH 自带解释器即可,
+// 用户不需要额外安装任何东西。找不到时才回退到 PATH,并给出可操作的提示。
+// 结果缓存:只探测一次,避免每次 start/stop 都去试错(探测要起进程,有开销)。
+let _pyResolved = null
+
+function _pythonCandidates() {
+  const exe = process.platform === 'win32' ? 'python.exe' : 'python3'
+  const list = []
+  // 1) 显式覆盖:排障时让用户/我们指定
+  const envPy = process.env.BROWSERCTL_PYTHON || process.env.DSHREMOTE_PYTHON
+  if (envPy) list.push({ cmd: envPy, pre: [] })
+  // 2) 随包内嵌(发行版若带了便携 Python)
+  const root = path.dirname(SCRIPT_PATH)
+  list.push({ cmd: path.join(root, 'python', exe), pre: [] })
+  list.push({ cmd: path.join(root, 'python', 'bin', 'python3'), pre: [] })
+  // 3) DSH 自带运行时 —— 没装 Python 的机器主要靠这条
+  const home = process.env.USERPROFILE || process.env.HOME || ''
+  if (home) {
+    const rtDir = path.join(home, '.dsh', 'dsh-runtimes')
+    try {
+      for (const d of readdirSync(rtDir)) {
+        const base = path.join(rtDir, d, 'dependencies', 'python')
+        list.push({ cmd: path.join(base, 'python.exe'), pre: [] })
+        list.push({ cmd: path.join(base, exe), pre: [] })
+        list.push({ cmd: path.join(base, 'bin', 'python3'), pre: [] })
+      }
+    } catch { /* 目录不存在:忽略 */ }
+  }
+  // 4) PATH 上的解释器(用户自己装过 Python 的机器)
+  list.push({ cmd: 'python', pre: [] })
+  list.push({ cmd: 'python3', pre: [] })
+  if (process.platform === 'win32') list.push({ cmd: 'py', pre: ['-3'] }) // py 启动器要带 -3
+  return list
+}
+
+function _pythonUsable(cand) {
+  try {
+    // 顺便验版本:Windows 商店的 python.exe 占位程序会「成功」启动却打开商店,
+    // 因此必须真的跑一段代码确认它能解释 Python。
+    const r = spawnSync(cand.cmd, [...cand.pre, '-c',
+      'import sys; raise SystemExit(0 if sys.version_info >= (3, 8) else 1)'], {
+      stdio: 'ignore', timeout: 8000, windowsHide: true,
+    })
+    return r && r.status === 0
+  } catch { return false }
+}
+
+export const PY_NOT_FOUND =
+  '找不到可用的 Python 解释器。本插件需要 Python 3.8+,但通常**无需手动安装**——DSH 自带运行时。\n' +
+  '已尝试:环境变量 BROWSERCTL_PYTHON、包内 python/、DSH 运行时 ' +
+  '(~/.dsh/dsh-runtimes/*/dependencies/python)、PATH 上的 python/python3/py。\n' +
+  '解决办法(任选其一):\n' +
+  '  1. 安装 Python 3.10+ 并勾选 "Add python.exe to PATH"(https://www.python.org/downloads/);\n' +
+  '  2. 设置环境变量 BROWSERCTL_PYTHON 指向 python.exe 的完整路径;\n' +
+  '  3. 确认 DSH 安装完整(自带运行时目录未被清理),然后重启 DSH。'
+
+export function resolvePython() {
+  if (_pyResolved) return _pyResolved
+  for (const c of _pythonCandidates()) {
+    // 绝对路径候选先看文件在不在,省一次进程启动
+    if (path.isAbsolute(c.cmd) && !existsSync(c.cmd)) continue
+    if (_pythonUsable(c)) { _pyResolved = c; return c }
+  }
+  _pyResolved = { cmd: 'python', pre: [], missing: true }
+  return _pyResolved
+}
+
 function runBrowserctl(args) {
   const script = SCRIPT_PATH
   if (!existsSync(script)) return { started: false, error: 'browserctl.py 不存在: ' + script }
+  const py = resolvePython()
+  if (py.missing) return { started: false, error: PY_NOT_FOUND }
   const creationflags = process.platform === 'win32'
     ? (0x00000008 | 0x00000200 | 0x01000000 | 0x08000000) // DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB | CREATE_NO_WINDOW
     : 0
-  const child = spawn('python', [script, ...args], {
+  const child = spawn(py.cmd, [...py.pre, script, ...args], {
     cwd: path.dirname(script),
     stdio: 'ignore',
     detached: true,
     creationflags,
   })
+  // 必须有 error 监听:ChildProcess 的 'error' 事件无人监听会抛成未捕获异常,
+  // 可能连带把 DSH 主进程搞崩(旧代码在这里是裸 spawn)。
+  child.on('error', () => {})
   child.unref()
   return { started: true }
 }
@@ -249,11 +324,13 @@ function runBrowserctlAsync(args, timeoutMs = 8000) {
   return new Promise((resolve) => {
     const script = SCRIPT_PATH
     if (!existsSync(script)) { resolve({ started: false, error: 'browserctl.py 不存在: ' + script }); return }
+    const py = resolvePython()
+    if (py.missing) { resolve({ started: false, error: PY_NOT_FOUND }); return }
     const creationflags = process.platform === 'win32'
       ? (0x00000008 | 0x00000200 | 0x01000000 | 0x08000000)
       : 0
     let done = false
-    const child = spawn('python', [script, ...args], {
+    const child = spawn(py.cmd, [...py.pre, script, ...args], {
       cwd: path.dirname(script),
       stdio: 'ignore',
       detached: true,
@@ -413,6 +490,11 @@ async function buildTunnel() {
     } catch (e) { /* state 写失败不影响启动 */ }
   }
   const result = runBrowserctl(['start'])
+  // 解释器/脚本压根没起来(如找不到 Python)时立刻返回,不空等 15s;
+  // 并且把 ok 置 false,让前端能弹出具体原因,而不是"点了没反应"。
+  if (result.started === false) {
+    return { ok: false, ...result, forwarder: false }
+  }
   // 轮询等待闸机 3080 就绪(最多 ~15s),避免固定等待在冷启动/端口释放/锁等待时误报失败
   let fwd = false
   const deadline = Date.now() + 15000
@@ -572,7 +654,9 @@ export function apply(ctx, config = {}) {
           const inFlight = (async () => {
             try {
               const r = await buildTunnel()
-              sendJson(res, 200, { ...r, link: secretLink() })
+              // 起不来(找不到 Python / 脚本缺失)时用 503,前端才会走错误分支把原因显示出来
+              const code = r && r.ok === false ? 503 : 200
+              sendJson(res, code, { ...r, link: secretLink() })
             } catch (e) {
               console.error('[browserctl] ensure 异常:', e)
               sendJson(res, 503, { ok: false, error: '启动失败:' + String((e && e.message) || e) })
@@ -1109,8 +1193,13 @@ export function apply(ctx, config = {}) {
     ctx.effect(() => {
       const script = path.join(ROOT, 'win_push.py')
       if (!existsSync(script)) return undefined
+      const py = resolvePython()
+      if (py.missing) {
+        ctx.logger.warn('dshremote: 未找到 Python,跳过 Windows 推送驻留(隧道功能不受影响)')
+        return undefined
+      }
       try {
-        const child = spawn('python', [script], {
+        const child = spawn(py.cmd, [...py.pre, script], {
           cwd: ROOT,
           stdio: 'ignore',
           windowsHide: true, // 防 CMD 窗口弹出(win_push 是控制台程序,不隐藏会闪黑框)
@@ -1180,7 +1269,9 @@ export function apply(ctx, config = {}) {
         }
         // 停隧道(fire-and-forget 分离进程,DSH 退出后仍能跑完;frpc 死 → 端口下线)
         try {
-          spawn('python', [SCRIPT_PATH, 'stop'], {
+          const py = resolvePython()
+          if (py.missing) throw new Error('no python')
+          const stopper = spawn(py.cmd, [...py.pre, SCRIPT_PATH, 'stop'], {
             cwd: path.dirname(SCRIPT_PATH),
             stdio: 'ignore',
             detached: true,
@@ -1190,7 +1281,9 @@ export function apply(ctx, config = {}) {
             creationflags: process.platform === 'win32'
               ? (0x01000000 | 0x08000000)
               : 0,
-          }).unref()
+          })
+          stopper.on('error', () => {})
+          stopper.unref()
         } catch (e) { /* ignore */ }
       } catch (e) { /* ignore */ }
     }
