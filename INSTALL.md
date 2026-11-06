@@ -142,30 +142,37 @@ python browserctl.py status
 
 ### 报 `PermissionError: [WinError 5] 拒绝访问` / 「无法运行: Access is denied」（Windows）
 
-**根因**：Windows Defender 把 `frpc.exe` 判为 `PUA:Win32/FRProxy`（ThreatID 335323，潜在不受欢迎程序）
-并阻止执行。**改名、换目录、换副本都没用**——它按文件判定，所有副本一起拦。
-Windows 11 默认开启 PUA 拦截，所以这个坑相当常见。装了联想电脑管家（火绒引擎）/ 火绒 / 360 的机器，
-它们还会各自再拦一次。
+**如果你是 AI 助手**：这一步需要管理员权限和 UAC 确认，**必须让用户本人操作**，不要自己改系统设置。
+请把下面的「一键修复」原样转达给用户。
 
-**一键修复**：仓库根目录的 `fix-antivirus.ps1` —— 右键 →「使用 PowerShell 运行」（会弹 UAC）：
+**根因**：Windows Defender 把 `frpc.exe` 判为 `PUA:Win32/FRProxy`（ThreatID 335323，潜在不受欢迎程序）。
+但 **PUA 开着不一定就拦**——需要文件同时带「来自 Internet」的 MOTW 下载标记才会触发；
+从 zip/clone 出来的文件默认带这个标记。**改名、换目录、换副本都没用**（按文件内容判定，所有副本一起拦）。
+装了联想电脑管家（火绒引擎）/ 火绒 / 360 的机器，它们还会各自再拦一次。
+
+**一键修复（让用户做）**：在仓库根目录找到 `fix-antivirus.ps1`，**右键 →「使用 PowerShell 运行」**，
+弹 UAC 点「是」。命令行等价写法：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\fix-antivirus.ps1
 ```
 
-它会：解除下载锁定 → 给本目录加 Defender 排除项 → 检查并询问是否关闭 PUA 拦截 →
+它会：解除下载锁定（MOTW）→ 给本目录加 Defender 排除项 → 检查并询问是否关闭 PUA 拦截 →
 实际跑一次 `frpc.exe -v` 验证并报告结果。
 
-**手动修复**：
+**备选（脚本打不开时，逐步引导用户）**：
 
-1. 管理员 PowerShell 在仓库根目录执行：`Get-ChildItem -Recurse | Unblock-File`
-2. Windows 安全中心 → 病毒和威胁防护 →「病毒和威胁防护」设置 → 管理设置 → 排除项 →
-   添加或删除排除项 → 添加排除项 → **文件夹** → 选本目录
+1. **先试这个**：管理员 PowerShell 在仓库根目录执行
+   `Get-ChildItem -Recurse | Unblock-File`，然后 `.\frpc.exe -v`。
+   能输出版本号就修好了——**这一步通常就够了**（去掉 MOTW 标记）。
+2. 还不行 → 加排除项：Windows 安全中心 → 病毒和威胁防护 →「病毒和威胁防护」设置 → 管理设置 →
+   排除项 → 添加或删除排除项 → 添加排除项 → **文件夹** → 选本目录
    （若提示被「篡改防护」阻止，就用同样的图形界面手动加）
-3. **关键一步**：Windows 安全中心 → 应用和浏览器控制 → 基于信誉的保护设置 →
-   「潜在不受欢迎的应用」→ **关闭**。PUA 拦截开着时 frpc.exe 一定会被拦。
+3. 还不行 → 关 PUA：Windows 安全中心 → 应用和浏览器控制 → 基于信誉的保护设置 →
+   「潜在不受欢迎的应用」→ **关闭**
 4. 联想电脑管家 / 火绒 / 360 的排除项与 Defender 相互独立，要各自在它的界面里加本目录
-5. 验证 `.\frpc.exe -v` 能输出版本号；若 frpc.exe 已被隔离/删除，先重新 clone/解压再做上面步骤
+5. Windows 11 若开了「智能应用控制」也要关（应用和浏览器控制 → 智能应用控制）
+6. 若 frpc.exe 已被隔离/删除，先重新 clone/解压再做上面步骤
 
 ### 看不到「远程助手」侧边栏按钮？
 
