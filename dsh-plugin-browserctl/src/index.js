@@ -229,7 +229,7 @@ function runBrowserctl(args) {
   const script = SCRIPT_PATH
   if (!existsSync(script)) return { started: false, error: 'browserctl.py 不存在: ' + script }
   const creationflags = process.platform === 'win32'
-    ? (0x00000008 | 0x00000200 | 0x01000000) // DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB
+    ? (0x00000008 | 0x00000200 | 0x01000000 | 0x08000000) // DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB | CREATE_NO_WINDOW
     : 0
   const child = spawn('python', [script, ...args], {
     cwd: path.dirname(script),
@@ -249,7 +249,7 @@ function runBrowserctlAsync(args, timeoutMs = 8000) {
     const script = SCRIPT_PATH
     if (!existsSync(script)) { resolve({ started: false, error: 'browserctl.py 不存在: ' + script }); return }
     const creationflags = process.platform === 'win32'
-      ? (0x00000008 | 0x00000200 | 0x01000000)
+      ? (0x00000008 | 0x00000200 | 0x01000000 | 0x08000000)
       : 0
     let done = false
     const child = spawn('python', [script, ...args], {
@@ -719,7 +719,7 @@ export function apply(ctx, config = {}) {
             const uidUrl = toUidUrl(j.url)
             let svg = ''
             try { svg = await qrSvg(uidUrl) } catch (e) { svg = '' }
-            sendJson(res, 200, { ok: true, url: uidUrl, svg, long: true, ttl: j.ttl || 0, panel: effectivePanelUrl(), kind: j.kind || 'long_pair' })
+            sendJson(res, 200, { ok: true, url: uidUrl, svg, long: true, ttl: j.ttl || 0, panel: effectivePanelUrl(), kind: j.kind || 'long_pair', grant: j.grant || '', uses: j.uses || 1, remaining: j.remaining || 1 })
           } catch (e) {
             sendJson(res, 503, { error: '无法连接浏览器控制闸机:' + String((e && e.message) || e) + ' (先点"开始控制"启动隧道)' })
           }
@@ -1108,7 +1108,11 @@ export function apply(ctx, config = {}) {
       const script = path.join(ROOT, 'win_push.py')
       if (!existsSync(script)) return undefined
       try {
-        const child = spawn('python', [script], { cwd: ROOT, stdio: 'ignore' })
+        const child = spawn('python', [script], {
+          cwd: ROOT,
+          stdio: 'ignore',
+          windowsHide: true, // 防 CMD 窗口弹出(win_push 是控制台程序,不隐藏会闪黑框)
+        })
         child.on('error', () => {}) // python 不存在等,静默(推送驻留属尽力而为)
         return () => { try { child.kill() } catch {} }
       } catch {
@@ -1120,7 +1124,8 @@ export function apply(ctx, config = {}) {
   // 触发条件:官方模式已登录,或本机之前有端口历史(自建服务器/曾建过隧道)。
   // 不阻塞 DSH 启动;失败静默(用户仍可手动点「开始控制」重试)。走 buildTunnel 幂等逻辑,
   // 每个 DSH 会话首次建隧道必然 claim 全新随机端口;与「关闭整个 DSH 才释放」闭环。
-  // DSH Web 可能还没就绪(detect_port 会 SystemExit)→ 最多重试 4 次、间隔 5s。
+  // DSH Web 可能还没就绪(detect_port 会 SystemExit)→ 最多重试 10 次、间隔 5s(约 50s),
+  // 覆盖 DSH 冷启动窗口;每次失败都打日志,便于排查为什么重启后不自启。
   ctx.effect(() => {
     let timer = null
     try {
@@ -1133,15 +1138,21 @@ export function apply(ctx, config = {}) {
         if (ensureRunning) return
         ensureRunning = (async () => {
           try {
-            for (let attempt = 1; attempt <= 4; attempt++) {
+            for (let attempt = 1; attempt <= 10; attempt++) {
               try {
                 const r = await buildTunnel()
-                if (r && r.forwarder) return r
-              } catch (e) { /* 本轮失败,下一轮重试 */ }
-              if (attempt < 4) await new Promise(res => setTimeout(res, 5000))
+                if (r && r.forwarder) {
+                  ctx.logger.info('dshremote: 自动建隧道成功(第 %d 次尝试,forwarder=%s)', attempt, r.forwarder)
+                  return r
+                }
+                ctx.logger.warn('dshremote: 自动建隧道 forwarder 未就绪(第 %d 次尝试)', attempt)
+              } catch (e) {
+                ctx.logger.warn('dshremote: 自动建隧道失败(第 %d 次尝试):%s', attempt, String((e && e.message) || e))
+              }
+              if (attempt < 10) await new Promise(res => setTimeout(res, 5000))
             }
           } catch (e) {
-            console.error('[browserctl] 启动自动建隧道失败:', e)
+            ctx.logger.error('dshremote: 启动自动建隧道异常:', e)
           } finally {
             ensureRunning = null
           }
@@ -1172,6 +1183,11 @@ export function apply(ctx, config = {}) {
             stdio: 'ignore',
             detached: true,
             windowsHide: true,
+            // CREATE_BREAKAWAY_FROM_JOB | CREATE_NO_WINDOW:跳出作业对象不被连坐杀,
+            // 且不弹 CMD 窗口
+            creationflags: process.platform === 'win32'
+              ? (0x01000000 | 0x08000000)
+              : 0,
           }).unref()
         } catch (e) { /* ignore */ }
       } catch (e) { /* ignore */ }
