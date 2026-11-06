@@ -752,6 +752,12 @@ def _tunnel_ready_or_reason():
         pid = st.get("frpc_pid")
         if pid and not _pid_alive(pid):
             return False, "隧道进程已退出(frpc pid=%s),请点一次「开始控制」重建" % pid
+        # 端口必须对得上:claim-port 换端口后,旧 frpc 注册的还是旧端口,state.tunnel_ok
+        # 却可能还是 True —— 这种"假就绪"出码后必然 502(2026-11-06 实测)。
+        running = _last_success_port(_frpc_log_tail(max(0, _frpc_log_size() - 65536)))
+        if running and int(running) != int(port):
+            return False, ("隧道端口不一致(本机 frpc 注册的是 %d,服务器分配的应是 %d),\n"
+                           "请在面板重新点一次「开始控制」重建隧道" % (running, port))
         return True, ""
     pid = st.get("frpc_pid")
     if pid and not _pid_alive(pid):
@@ -4239,9 +4245,22 @@ def cmd_watch():
                 # frpc 活着但状态是「未就绪」(旧版 state 没字段 / 上次判定失败):
                 # 回读日志,如果其实已经注册成功(frpc 自己重试成功的情况),立即修正状态,
                 # 否则插件会一直显示"隧道未连通"却又不重建。
-                if _tunnel_log_ready(_frpc_log_tail(max(0, _frpc_log_size() - 65536))):
-                    _mark_tunnel(True, "", int(st.get("remote_port") or 0))
+                txt = _frpc_log_tail(max(0, _frpc_log_size() - 65536))
+                want = int(st.get("remote_port") or 0)
+                have = _last_success_port(txt)
+                if have and want and have != want:
+                    # 注册的是旧端口:不算就绪,交给下面的重建(ensure_tunnel 会先杀旧 frpc)
+                    need.append("frpc")
+                elif _tunnel_log_ready(txt):
+                    _mark_tunnel(True, "", want)
                     st = read_state()
+            else:
+                # tunnel_ok=True 也要校验端口:claim-port 换端口后,残留的旧 frpc 仍注册
+                # 旧端口,服务器注册表却是新端口 → 公网 502(state 却显示就绪)。
+                want = int(st.get("remote_port") or 0)
+                have = _last_success_port(_frpc_log_tail(max(0, _frpc_log_size() - 65536)))
+                if have and want and have != want:
+                    need.append("frpc")
             if not need:
                 failures = 0  # 一切正常,复位退避
                 continue
@@ -4435,6 +4454,23 @@ def _tunnel_log_ready(text):
     return "start proxy success" in (text or "")
 
 
+def _last_success_port(text):
+    """取日志里最后一条 start proxy success 对应的远端端口;取不到返回 0。
+
+    为什么必须比对端口:claim-port 会换一个新端口并更新服务器注册表,但本机可能还有
+    一条用旧端口注册的 frpc 在跑。此时「日志里有 start proxy success」为真、「进程活着」
+    也为真,唯独端口对不上 —— 服务器按新端口转发到 frps 上并不存在的 proxy,手机打开
+    仍然 502,而 state 却显示隧道就绪(2026-11-06 实际踩到)。"""
+    port = 0
+    for line in (text or "").splitlines():
+        if "start proxy success" not in line:
+            continue
+        m = re.search(r"dsh_web_(\d+)", line)
+        if m:
+            port = int(m.group(1))
+    return port
+
+
 def _mark_tunnel(ok, error="", remote_port=0):
     """把隧道就绪状态写进 state,插件据此决定「能不能出二维码」。
 
@@ -4602,14 +4638,34 @@ def ensure_tunnel(remote_port=REMOTE_PORT):
     if pid and _pid_alive(pid):
         # 已在运行:回读日志确认它真的注册成功过(进程活着不代表隧道可用)
         recent = _frpc_log_tail(max(0, _frpc_log_size() - 65536))
-        if _tunnel_log_ready(recent):
+        running_port = _last_success_port(recent)
+        if running_port and int(remote_port) > 0 and running_port != int(remote_port):
+            # 端口对不上比"没起来"更隐蔽:claim-port 换了端口(服务器注册表已更新),而这条
+            # frpc 注册的还是旧端口 → 公网按新端口转发到 frps 上不存在的 proxy → 502。
+            # 唯一正确做法是杀掉旧 frpc,按新配置重新拉起。
+            print("[提示] 正在运行的 frpc 隧道端口是 %d,与期望端口 %d 不一致,重启 frpc"
+                  % (running_port, int(remote_port)), flush=True)
+            try:
+                _run_hidden(["taskkill", "/PID", str(pid), "/T", "/F"],
+                            capture_output=True, text=True, timeout=15)
+            except Exception as e:  # noqa: BLE001
+                print("[警告] 结束旧 frpc(pid=%d)失败: %r" % (pid, e), flush=True)
+            for _ in range(40):
+                if not _pid_alive(pid):
+                    break
+                time.sleep(0.15)
+            _mark_tunnel(False, "隧道端口已变更(%d → %d),正在按新端口重启 frpc"
+                         % (running_port, int(remote_port)), int(remote_port))
+            pid = 0
+        elif _tunnel_log_ready(recent):
             _mark_tunnel(True, "", remote_port)
             print("frpc 已在运行(pid=%d) → 远端端口 %d" % (pid, remote_port))
             return remote_port
-        err = ("frpc 进程在运行(pid=%d),但日志里没有 start proxy success,隧道可能没连上;\n"
-               "先执行 python browserctl.py stop 再 start,或查看 %s") % (pid, FRPC_LOG)
-        _mark_tunnel(False, err, remote_port)
-        raise SystemExit(err)
+        else:
+            err = ("frpc 进程在运行(pid=%d),但日志里没有 start proxy success,隧道可能没连上;\n"
+                   "先执行 python browserctl.py stop 再 start,或查看 %s") % (pid, FRPC_LOG)
+            _mark_tunnel(False, err, remote_port)
+            raise SystemExit(err)
     if not FRPC.exists():
         raise SystemExit("未找到 frpc.exe: %s" % FRPC)
     offset = _frpc_log_size()
