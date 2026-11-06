@@ -72,11 +72,11 @@ FWD_PORT = 3080
 REMOTE_PORT = 17901
 COOKIE_LIFETIME_DAYS = 30
 
-os.environ.get("BC_SERVER_CONF") or "/www/conf.d/remote.conf"
-os.environ.get("BC_SERVER_INDEX") or "/www/sites/default/index"
-os.environ.get("BC_SERVER_HTPASSWD") or "/www/ssl/dsh.htpasswd"
-os.environ.get("BC_HTPASSWD_USER") or "dsh"
-os.environ.get("BC_OPENRESTY") or "openresty"
+SERVER_CONF = os.environ.get("BC_SERVER_CONF") or "/www/conf.d/remote.conf"
+SERVER_INDEX = os.environ.get("BC_SERVER_INDEX") or "/www/sites/default/index"
+SERVER_HTPASSWD = os.environ.get("BC_SERVER_HTPASSWD") or "/www/ssl/dsh.htpasswd"
+HTPASSWD_USER = os.environ.get("BC_HTPASSWD_USER") or "dsh"
+OPENRESTY = os.environ.get("BC_OPENRESTY") or "openresty"
 
 # ---- 凭据外置(源码中不再出现任何明文密钥) ----
 # 优先级:环境变量 > browserctl_secrets.json(0600, 已 gitignore) > 内置默认(仅非敏感项)
@@ -2861,7 +2861,12 @@ color:#fff;text-decoration:none;font-size:14px}
 
     def _pair_url(self, grant, kind="pair"):
         st = read_state()
-        port = st.get("remote_port", REMOTE_PORT)
+        # 绝不回退写死端口:端口没分配说明隧道没起来,此时生成 /p/17901/ 的码会指向
+        # 别人(作者)的机器,扫码必然 502。宁可报错,也不给一条假链接。
+        port = int(st.get("remote_port") or 0)
+        if port <= 0:
+            raise SystemExit("尚未建立隧道(远端端口未分配),无法生成配对链接;\n"
+                             "请先在插件里登录官方账号并启动隧道")
         # kind 参数让 App 扫码时能识别这张码是「临时配对」还是「长期配对」:
         # pair      → 一次性会话(App 不保存 Cookie,关掉需重扫)
         # long_pair → 登记设备,App 保存 Cookie,下次免扫码直连
@@ -2885,12 +2890,22 @@ color:#fff;text-decoration:none;font-size:14px}
             long_pair = False
         if long_pair:
             grant = pair_create_long()
-            self._send_json(200, {"ok": True, "url": self._pair_url(grant, kind="long_pair"),
+            try:
+                url = self._pair_url(grant, kind="long_pair")
+            except SystemExit as e:
+                self._send_json(409, {"ok": False, "error": str(e)})
+                return
+            self._send_json(200, {"ok": True, "url": url,
                                   "ttl": LONG_PAIR_GRANT_TTL, "long": True,
                                   "uses": 1, "remaining": 1, "grant": grant, "kind": "long_pair"})
             return
         grant = pair_create(uses=uses)
-        self._send_json(200, {"ok": True, "url": self._pair_url(grant, kind="pair"),
+        try:
+            url = self._pair_url(grant, kind="pair")
+        except SystemExit as e:
+            self._send_json(409, {"ok": False, "error": str(e)})
+            return
+        self._send_json(200, {"ok": True, "url": url,
                               "ttl": PAIR_GRANT_TTL, "uses": uses,
                               "remaining": uses, "grant": grant, "kind": "pair"})
 
@@ -3075,9 +3090,15 @@ color:#fff;text-decoration:none;font-size:14px}
         ttl = max(60, min(ttl, 7 * 86400))   # 夹在 [60s, 7d] 防配置漂移
         uses = max(0, min(uses, 99))         # 0 = 不限次数;缺省 1 次(一次性)
         token = make_bootstrap_token(secret, ttl, uses)
+        url = bootstrap_link_url(token)
+        # p=0 表示端口未分配(隧道没起来):给假链接会让用户扫码必然 502,宁可报错
+        if "?p=0&" in url or url.endswith("?p=0"):
+            self._send_json(409, {"ok": False, "error": "尚未建立隧道(远端端口未分配),无法生成引导链接;\n"
+                                                         "请先在插件里登录官方账号并启动隧道"})
+            return
         self._send_json(200, {
             "ok": True,
-            "url": bootstrap_link_url(token),
+            "url": url,
             "ttl": ttl,
             "exp": int(time.time()) + ttl,
             "uses": uses,
@@ -3590,8 +3611,10 @@ color:#fff;text-decoration:none;font-size:14px}
         公网路径已由 nginx 做过 bc-gate Cookie 门禁,这里直接返回静态内容即可。"""
         from urllib.parse import urlsplit
         p = urlsplit(self.path).path.rstrip("/") or "/"
-        port = int(gate_state().get("remote_port") or REMOTE_PORT)
+        port = int(gate_state().get("remote_port") or 0)
         if p == "/manifest.webmanifest":
+            if port <= 0:
+                return self._send(503, b"tunnel not ready", "text/plain")
             # 用 replace 而非 format:manifest 本身是 JSON,花括号会被 format 当占位符
             self._send(200, PWA_MANIFEST.replace("{port}", str(port)),
                        "application/manifest+json; charset=utf-8",
@@ -3623,9 +3646,11 @@ color:#fff;text-decoration:none;font-size:14px}
         返回包含版本信息的静态 HTML 下载页(JS 动态加载版本数据)。"""
         from urllib.parse import urlsplit
         p = urlsplit(self.path).path.rstrip("/") or "/"
+        port = int(gate_state().get("remote_port") or 0)
         if p not in ("/app", "/app/index.html"):
             return False
-        port = int(gate_state().get("remote_port") or REMOTE_PORT)
+        if port <= 0:
+            return self._send(503, b"tunnel not ready", "text/plain")
         html = _APP_DOWNLOAD_PAGE_TEMPLATE.replace("{port}", str(port))
         self._send(200, html.encode("utf-8"), "text/html; charset=utf-8",
                    headers=[("Cache-Control", "no-cache")])
@@ -4042,6 +4067,49 @@ def totp_set(enabled, reset=False):
     return st
 
 
+def _unblock_downloaded(path):
+    """去掉 Windows 下载锁定(MOTW / Zone.Identifier 数据流)。
+    从 zip 或浏览器下载得到的 exe 会带这个数据流,部分机器策略下直接拒绝执行
+    (表现为 PermissionError [WinError 5]),启动前静默清掉,失败不报错。"""
+    if os.name != "nt":
+        return
+    try:
+        os.remove(str(path) + ":Zone.Identifier")
+    except OSError:
+        pass
+
+
+def _spawn_error_help(exe, err):
+    """把子进程启动失败翻译成可照做的中文提示(不要把 traceback 甩给用户)。"""
+    name = os.path.basename(str(exe)).lower()
+    winerr = getattr(err, "winerror", None)
+    denied = (winerr == 5) or isinstance(err, PermissionError)
+    lines = ["无法启动程序: %s" % exe]
+    if denied and "frpc" in name:
+        lines += [
+            "系统拒绝了执行请求(PermissionError / WinError 5 拒绝访问)。",
+            "最常见原因:安全软件或 Windows「智能应用控制」拦截了隧道程序 frpc.exe,",
+            "本地闸机已经起来了,但隧道建不起来,所以手机打开链接会是 502。",
+            "请按顺序处理:",
+            "  1) 用【管理员】PowerShell 进入本目录执行: Get-ChildItem -Recurse | Unblock-File",
+            "  2) 把本目录加入杀毒软件排除项(Windows 安全中心 → 病毒和威胁防护 → 管理设置",
+            "     → 排除项 → 添加文件夹;联想电脑管家 / 火绒 / 360 同理)",
+            "  3) Windows 11 若开启了「智能应用控制」,它会拦截未签名程序,需在",
+            "     Windows 安全中心 → 应用和浏览器控制 → 智能应用控制 里关闭",
+            "  4) 验证是否已放行: 在本目录运行  .\\frpc.exe -v   应输出 frpc 版本号",
+            "  5) 重新运行: python browserctl.py start",
+        ]
+    elif denied:
+        lines += [
+            "系统拒绝了执行请求(PermissionError / WinError 5 拒绝访问),",
+            "通常是安全软件拦截或权限不足:把本目录加入杀软排除项后重试。",
+        ]
+    else:
+        lines.append("错误详情: %s" % err)
+    lines.append("排查时请在 kit 目录手动运行 python browserctl.py start,错误会直接打印在终端。")
+    return "\n".join(lines)
+
+
 def spawn_detached(args, log_path):
     # 日志 0600:含隧道/错误栈信息,仅当前用户可读
     try:
@@ -4051,20 +4119,36 @@ def spawn_detached(args, log_path):
     except OSError:
         pass
     log = open(log_path, "a", encoding="utf-8", buffering=1)
-    creationflags = 0
     if os.name == "nt":
+        _unblock_downloaded(args[0])
         # DETACHED_PROCESS 无窗口;CREATE_BREAKAWAY_FROM_JOB 跳出宿主作业对象,
         # 否则宿主命令/会话结束时子进程会被连坐杀死(frpc/闸机无故消失的根因)。
         # CREATE_NO_WINDOW 彻底隐藏控制台窗口(仅 Windows)。
-        creationflags = (subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
-                         | subprocess.CREATE_BREAKAWAY_FROM_JOB | subprocess.CREATE_NO_WINDOW)
+        base = (subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+                | subprocess.CREATE_NO_WINDOW)
+        # 逐级降级:某些机器(作业对象策略/安全软件/智能应用控制)会拒绝带特定 flag
+        # 的 CreateProcess,报 WinError 5。依次退回「不带 breakaway」→「不带任何 flag」,
+        # 尽量把进程拉起来,而不是直接抛栈。2026-11-06 同学机器实测踩到过。
+        attempts = [base | subprocess.CREATE_BREAKAWAY_FROM_JOB, base, 0]
+    else:
+        attempts = [0]
+    last_err = None
+    for idx, creationflags in enumerate(attempts):
         try:
-            return subprocess.Popen(args, stdout=log, stderr=log, creationflags=creationflags,
-                                    close_fds=True, cwd=str(HERE))
-        except OSError:
-            creationflags &= ~subprocess.CREATE_BREAKAWAY_FROM_JOB  # 作业不允许 breakaway 时退回
-    return subprocess.Popen(args, stdout=log, stderr=log, creationflags=creationflags,
-                            close_fds=True, cwd=str(HERE))
+            p = subprocess.Popen(args, stdout=log, stderr=log, creationflags=creationflags,
+                                 close_fds=True, cwd=str(HERE))
+            if idx > 0:
+                print("提示: 已用兼容模式启动(降级 creationflags=%d)" % creationflags)
+            return p
+        except OSError as e:
+            last_err = e
+            continue
+    msg = _spawn_error_help(args[0], last_err)
+    try:
+        log.write(msg + "\n")
+    except Exception:
+        pass
+    raise SystemExit(msg)
 
 
 # ---------------- frpc 隧道 ----------------
@@ -4305,10 +4389,10 @@ def _run(s, cmd):
     return code, out, err
 
 
-# 必须落在容器可见的挂载点里(宿主机挂载目录 => 容器路径)。
+# 必须落在容器可见的挂载点里:宿主机目录(映射) => /www(容器)。
 # 之前放 /opt/frp,容器内根本看不到 -> Lua 的注册表校验被静默跳过。
-os.environ.get("BC_DEVICE_REGISTRY_PATH") or "/www/dsh/device_registry.json"
-os.environ.get("BC_DEVICE_REGISTRY_DIR") or "/www/dsh"
+DEVICE_REGISTRY_PATH = os.environ.get("BC_DEVICE_REGISTRY_PATH") or "/www/dsh/device_registry.json"
+DEVICE_REGISTRY_DIR = os.environ.get("BC_DEVICE_REGISTRY_DIR") or "/www/dsh"
 LEGACY_REGISTRY_PATH = "/opt/frp/device_registry.json"
 
 
@@ -4586,8 +4670,7 @@ def public_host():
 
 
 def bootstrap_link_url(token):
-    """引导链接:带 p=<远端端口>。单用户时代边缘只认 17901,p 参数多余;
-    多用户边缘按 $arg_p 路由到对应用户的闸机(部署后生效,先带着不碍事)。"""
+    """引导链接:带 p=<远端端口>。不再回退写死端口——p=0 表示未就绪,边缘不会路由到 17901。"""
     port = 0
     try:
         st = read_state()
@@ -4596,9 +4679,9 @@ def bootstrap_link_url(token):
         pass
     if not port:
         try:
-            port = int(load_secrets().get("frp_remote_port") or REMOTE_PORT)
+            port = int(load_secrets().get("frp_remote_port") or 0)
         except Exception:
-            port = REMOTE_PORT
+            port = 0
     return "https://%s/dsh-auth.html?p=%d&k=%s" % (public_host(), port, token)
 
 
@@ -4607,7 +4690,11 @@ def bootstrap_url(ttl=86400, uses=1):
     secret = state.get("link_secret")
     if not secret:
         raise SystemExit("缺少链接密钥;先执行 python browserctl.py nginx")
-    return bootstrap_link_url(make_bootstrap_token(secret, ttl, uses))
+    url = bootstrap_link_url(make_bootstrap_token(secret, ttl, uses))
+    if "?p=0&" in url or url.endswith("?p=0"):
+        raise SystemExit("尚未建立隧道(远端端口未分配),无法生成引导链接;\n"
+                         "请先登录官方账号并启动隧道(python browserctl.py start)")
+    return url
 
 
 def upload_bootstrap(remote_port=REMOTE_PORT):
@@ -4734,17 +4821,21 @@ def cmd_status():
     print("本地转发器 3080:", "运行中" if fwd_alive else "未运行",
           "(pid=%s)" % st.get("fwd_pid"))
     frpc_alive = bool(st.get("frpc_pid") and _pid_alive(st["frpc_pid"]))
+    assigned = st.get("remote_port")
     print("frpc 隧道:", "运行中(pid=%s)" % st["frpc_pid"] if frpc_alive else "未运行",
-          "→ 远端端口", st.get("remote_port", REMOTE_PORT))
-    try:
-        req = urllib.request.Request("https://%s/p/%d/" % (PUBLIC_HOST, REMOTE_PORT))
-        r = urllib.request.urlopen(req, timeout=10)
-        print("公网入口:", r.status)
-    except urllib.error.HTTPError as e:
-        print("公网入口: HTTP %d(%s)" % (
-            e.code, {401: "Basic Auth / Cookie 未配置"}.get(e.code, e.reason)))
-    except Exception as e:
-        print("公网入口: 不可达(%s)" % e)
+          "→ 远端端口", assigned if assigned else "未分配(隧道未建立)")
+    if assigned:
+        try:
+            req = urllib.request.Request("https://%s/p/%d/" % (PUBLIC_HOST, int(assigned)))
+            r = urllib.request.urlopen(req, timeout=10)
+            print("公网入口:", r.status)
+        except urllib.error.HTTPError as e:
+            print("公网入口: HTTP %d(%s)" % (
+                e.code, {401: "Basic Auth / Cookie 未配置"}.get(e.code, e.reason)))
+        except Exception as e:
+            print("公网入口: 不可达(%s)" % e)
+    else:
+        print("公网入口: 未检测(端口未分配)")
 
 
 def cmd_start():
@@ -4771,7 +4862,11 @@ def cmd_start():
     else:
         print("(链接密钥未生成;执行 python browserctl.py nginx 后输出扫码链接)")
     print("面板直链(已有 Cookie):")
-    print("  https://%s/p/%d/" % (PUBLIC_HOST, st.get("remote_port", REMOTE_PORT)))
+    _rp = st.get("remote_port")
+    if _rp:
+        print("  https://%s/p/%d/" % (PUBLIC_HOST, int(_rp)))
+    else:
+        print("  (端口未分配,隧道未建立)")
     print("=" * 62)
 
 
@@ -4825,7 +4920,11 @@ def cmd_link(ttl=86400, uses=1):
         if not secret:
             raise SystemExit("缺少链接密钥;先运行 python browserctl.py nginx")
         token = make_bootstrap_token(secret, ttl, uses)
-        info = {"url": bootstrap_link_url(token),
+        url = bootstrap_link_url(token)
+        if "?p=0&" in url or url.endswith("?p=0"):
+            raise SystemExit("尚未建立隧道(远端端口未分配),无法生成引导链接;\n"
+                             "请先登录官方账号并启动隧道(python browserctl.py start)")
+        info = {"url": url,
                 "ttl": int(ttl), "exp": int(time.time()) + int(ttl), "uses": uses}
     print("引导链接(有效期至 %s,可用 %s):" % (
         time.strftime("%Y-%m-%d %H:%M", time.localtime(info["exp"])),

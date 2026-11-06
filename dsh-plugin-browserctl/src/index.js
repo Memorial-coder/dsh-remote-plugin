@@ -72,8 +72,9 @@ const OFFICIAL_API_BASE = 'https://remote.ymzcc.com/dsh-remote'
 // 改由浏览器打开官网授权页,用户在网页登录/注册并确认后,插件轮询换 token(见 /server/oauth/*)。
 const OAUTH_CLIENT_ID = 'dsh-plugin-desktop'
 
-// 官方服务器默认地址(自建服务器模式下「面板链接」自适应为 https://<host>/p/<remotePort>/)
-const PANEL_URL = 'https://remote.ymzcc.com/p/17901/'
+// 面板链接不再设默认地址:自建模式自适应为 https://<host>/p/<remotePort>/,
+// 官方模式为 /dsh-remote/p/<uid>/;两者都不可用时返回 null,绝不回退写死端口。
+// 历史:17901 是作者开发机的 frp 端口,硬编码曾导致未登录用户拿到别人的面板链接(502)。
 
 // 手机 App 长期配对服务端(OpenResty 反代 /pair/api/,X-Pair-Auth 由反代注入)
 const PAIR_ISSUE_URL = 'https://remote.ymzcc.com/pair/api/issue'
@@ -167,7 +168,7 @@ function applyOfficialSession(j) {
 // 面板链接自适应:自建模式 = https://<host>/p/<remotePort>/;
 // 官方多用户(已登录)= uid 稳定链接 /dsh-remote/p/<uid>/(端口变化也不失效,
 // 服务端按 uid 解析当前端口;App 长期配对存这个,重启换端口后仍能连回自己机器);
-// 都没有 = 官方默认(作者机器 17901,行为与历史完全一致)。
+// 都没有 = null(绝不回退写死端口,防止未登录用户指向别人的机器)。
 function uidPanelBase() {
   try {
     const sec = readSecrets()
@@ -183,18 +184,18 @@ function effectivePanelUrl() {
     const sec = readSecrets()
     if (sec && sec.server_mode === 'selfhost' && sec.ssh_host) {
       const host = String(sec.ssh_host).replace(/^https?:\/\//, '').replace(/\/+$/, '')
-      const rp = Number(sec.frp_remote_port) || 17901
-      if (host) return 'https://' + host + '/p/' + rp + '/'
+      const rp = Number(sec.frp_remote_port)
+      if (host && rp > 0) return 'https://' + host + '/p/' + rp + '/'
     }
     if (sec && sec.server_mode === 'official' && sec.server_uid) {
       const uidBase = uidPanelBase()
       if (uidBase) return uidBase
       if (sec.server_panel_url) return String(sec.server_panel_url)
-      const rp = Number(sec.frp_remote_port) || 0
+      const rp = Number(sec.frp_remote_port)
       if (rp > 0) return 'https://remote.ymzcc.com/p/' + rp + '/'
     }
   } catch {}
-  return PANEL_URL
+  return null
 }
 
 // 把闸机生成的端口形态链接重写成 uid 稳定形态。App 扫码/配对拿到的一律是
@@ -971,7 +972,8 @@ export function apply(ctx, config = {}) {
                 sec.server_mode = 'selfhost'
                 sec.ssh_host = host
                 sec.frp_server_port = Number.isFinite(port) && port > 0 ? port : 17000
-                sec.frp_remote_port = Number.isFinite(remotePort) && remotePort > 0 ? remotePort : 17901
+                sec.frp_remote_port = Number.isFinite(remotePort) && remotePort > 0 ? remotePort : undefined
+                if (!sec.frp_remote_port) delete sec.frp_remote_port
                 // token 留空 = 保持现有 token(不清空);填了才覆盖
                 if (token) sec.frp_token = token
               } else {
@@ -1000,7 +1002,7 @@ export function apply(ctx, config = {}) {
               mode: 'selfhost',
               host: sec.ssh_host || '',
               port: Number(sec.frp_server_port) || 17000,
-              remotePort: Number(sec.frp_remote_port) || 17901,
+              remotePort: Number(sec.frp_remote_port) || 0,
               hasToken: !!sec.frp_token,
               version: VERSION,
             })
@@ -1193,5 +1195,5 @@ export function apply(ctx, config = {}) {
       } catch (e) { /* ignore */ }
     }
   }, 'dshremote: release tunnel on DSH exit')
-  ctx.logger.info('dshremote: host half ready (panel %s)', PANEL_URL)
+  ctx.logger.info('dshremote: host half ready')
 }

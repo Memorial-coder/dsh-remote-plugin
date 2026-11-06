@@ -41,7 +41,6 @@ function cmpVersion(a, b) {
 }
 var OFFICIAL_API_BASE = "https://remote.ymzcc.com/dsh-remote";
 var OAUTH_CLIENT_ID = "dsh-plugin-desktop";
-var PANEL_URL = "https://remote.ymzcc.com/p/17901/";
 var UPDATE_MANIFEST_URL = "https://remote.ymzcc.com/dsh-remote/version.json";
 function atomicWrite(file, data) {
   const tmp = file + ".tmp";
@@ -130,19 +129,19 @@ function effectivePanelUrl() {
     const sec = readSecrets();
     if (sec && sec.server_mode === "selfhost" && sec.ssh_host) {
       const host = String(sec.ssh_host).replace(/^https?:\/\//, "").replace(/\/+$/, "");
-      const rp = Number(sec.frp_remote_port) || 17901;
-      if (host) return "https://" + host + "/p/" + rp + "/";
+      const rp = Number(sec.frp_remote_port);
+      if (host && rp > 0) return "https://" + host + "/p/" + rp + "/";
     }
     if (sec && sec.server_mode === "official" && sec.server_uid) {
       const uidBase = uidPanelBase();
       if (uidBase) return uidBase;
       if (sec.server_panel_url) return String(sec.server_panel_url);
-      const rp = Number(sec.frp_remote_port) || 0;
+      const rp = Number(sec.frp_remote_port);
       if (rp > 0) return "https://remote.ymzcc.com/p/" + rp + "/";
     }
   } catch {
   }
-  return PANEL_URL;
+  return null;
 }
 function toUidUrl(url) {
   const base = uidPanelBase();
@@ -886,7 +885,8 @@ function apply(ctx, config = {}) {
               sec2.server_mode = "selfhost";
               sec2.ssh_host = host;
               sec2.frp_server_port = Number.isFinite(port) && port > 0 ? port : 17e3;
-              sec2.frp_remote_port = Number.isFinite(remotePort) && remotePort > 0 ? remotePort : 17901;
+              sec2.frp_remote_port = Number.isFinite(remotePort) && remotePort > 0 ? remotePort : void 0;
+              if (!sec2.frp_remote_port) delete sec2.frp_remote_port;
               if (token) sec2.frp_token = token;
             } else {
               sec2.server_mode = "official";
@@ -911,7 +911,7 @@ function apply(ctx, config = {}) {
             mode: "selfhost",
             host: sec.ssh_host || "",
             port: Number(sec.frp_server_port) || 17e3,
-            remotePort: Number(sec.frp_remote_port) || 17901,
+            remotePort: Number(sec.frp_remote_port) || 0,
             hasToken: !!sec.frp_token,
             version: VERSION
           });
@@ -1089,7 +1089,7 @@ function apply(ctx, config = {}) {
       }
     };
   }, "dshremote: release tunnel on DSH exit");
-  ctx.logger.info("dshremote: host half ready (panel %s)", PANEL_URL);
+  ctx.logger.info("dshremote: host half ready");
 }
 export {
   apply,

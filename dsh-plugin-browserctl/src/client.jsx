@@ -2869,7 +2869,7 @@ function ConfigPanel({ t, onClose, onSaved }) {
   const [mode, setMode] = useState('official')
   const [host, setHost] = useState('')
   const [port, setPort] = useState('17000')
-  const [remotePort, setRemotePort] = useState('17901')
+  const [remotePort, setRemotePort] = useState('')
   const [token, setToken] = useState('')
   const [saving, setSaving] = useState('') // '' | 'loading' | 'done'
   const [err, setErr] = useState('')
@@ -2887,7 +2887,7 @@ function ConfigPanel({ t, onClose, onSaved }) {
         if (j.mode === 'selfhost') {
           setHost(j.host || '')
           setPort(String(j.port || 17000))
-          setRemotePort(String(j.remotePort || 17901))
+          setRemotePort(j.remotePort ? String(j.remotePort) : '')
         }
       })
       .catch(() => {})
@@ -2904,7 +2904,7 @@ function ConfigPanel({ t, onClose, onSaved }) {
       params.set('mode', 'selfhost')
       params.set('host', h)
       params.set('port', String(parseInt(port, 10) || 17000))
-      if (remotePort.trim()) params.set('remotePort', String(parseInt(remotePort, 10) || 17901))
+      if (remotePort.trim()) params.set('remotePort', String(parseInt(remotePort, 10) || ''))
       if (token) params.set('token', token)
     } else {
       params.set('mode', 'official')
@@ -3268,6 +3268,8 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
   const [loginPrompt, setLoginPrompt] = useState(false)
   // 顶栏账号按钮的登录态(登录后显示邮箱)
   const [acctMe, setAcctMe] = useState(null)
+  // 当前连接模式(official/selfhost),用于判断未登录时是否显示二维码
+  const [cfgMode, setCfgMode] = useState('official')
   const panel = useRef(null)
   const { data, error, expiresAt, status, refresh } = useQr(open, reloadToken, uses)
   const left = useCountdown(expiresAt)
@@ -3288,6 +3290,13 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
     } catch { setAcctMe(null) }
   }
   useEffect(() => { if (open) loadAcctMe() }, [open, reloadToken])
+  // 加载连接模式(用于判断未登录时是否隐藏二维码)
+  useEffect(() => {
+    if (!open) return
+    fetch(API_P + '/browserctl/api/config', { cache: 'no-store' })
+      .then(r => r.json().then(j => { if (j && j.mode) setCfgMode(j.mode) }).catch(() => {}))
+      .catch(() => {})
+  }, [open])
   const startChain = async () => {
     // 官方模式且未登录 → 弹提示先去登录,不直接启动
     try {
@@ -3472,6 +3481,13 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
           {tab === 'connect' && (
             <>
               {data && data.svg ? (
+                cfgMode === 'official' && !acctMe ? (
+                  <div className="dshBrowserCtlQrBox" style={{ height: 128, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <span style={{ color: '#666', fontSize: 12, padding: '0 14px', textAlign: 'center' }}>
+                      {t('loginRequiredDesc')}
+                    </span>
+                  </div>
+                ) : (
                 <div>
                   <div className="dshBrowserCtlQrBox">
                     <img alt={t('qrAlt')} src={'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(data.svg)} />
@@ -3495,6 +3511,7 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
                     </p>
                   ) : null}
                 </div>
+                )
               ) : (
                 <div className="dshBrowserCtlQrBox" style={{ height: 128 }}>
                   {busy === 'start' ? (
@@ -3509,7 +3526,7 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
                   )}
                 </div>
               )}
-              {data && (
+              {data && !(cfgMode === 'official' && !acctMe) && (
                 <div className="dshBrowserCtlUrlRow">
                   <div className="dshBrowserCtlUrl" title={data.url}>{data.url}</div>
                   <Button variant="ghost" size="sm" onClick={() => {
@@ -3517,7 +3534,7 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
                   }}>{copied ? t('copied') : t('copyLink')}</Button>
                 </div>
               )}
-              {data && data.grant && (
+              {data && data.grant && !(cfgMode === 'official' && !acctMe) && (
                 <div className="dshBrowserCtlUrlRow" style={{ marginTop: 6, gap: 6 }}>
                   <span style={{ fontSize: 12, color: 'var(--dsw-alias-label-tertiary,#8b8f98)', whiteSpace: 'nowrap' }}>{t('pairUsesLabel')}</span>
                   <select
@@ -3549,16 +3566,19 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
                 <Button variant="secondary" size="sm" disabled={gating} onClick={refreshAll}>
                   {busy === 'refresh' ? t('refresh') + '…' : t('refresh')}
                 </Button>
+                {data && data.panel && !(cfgMode === 'official' && !acctMe) && (
+                  <Button variant="primary" size="sm" disabled={gating} onClick={() => window.open(data.panel, '_blank')}>{t('openPanel')}</Button>
+                )}
+                {data && !data.panel && !(cfgMode === 'official' && !acctMe) && (
+                  <span style={{ fontSize: 12, color: 'var(--dsw-alias-label-tertiary,#8b8f98)', display: 'inline-flex', alignItems: 'center' }}>{t('loginRequired')}</span>
+                )}
                 {data && (
-                  <>
-                    <Button variant="primary" size="sm" disabled={gating} onClick={() => window.open(data.panel || data.url, '_blank')}>{t('openPanel')}</Button>
-                    <Button variant="secondary" size="sm" disabled={gating} onClick={stopChain}
+                  <Button variant="secondary" size="sm" disabled={gating} onClick={stopChain}
                       style={{ color: 'var(--dsw-alias-state-error-primary,#e5655c)' }}>
                       {busy === 'stop'
                         ? (<><span className="dshBrowserCtlSpinner" aria-hidden="true" /> {t('stopping')}</>)
                         : t('stopCtl')}
                     </Button>
-                  </>
                 )}
               </div>
             </>

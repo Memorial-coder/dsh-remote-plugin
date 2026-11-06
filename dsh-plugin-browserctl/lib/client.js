@@ -2746,7 +2746,7 @@ function ConfigPanel({ t, onClose, onSaved }) {
   const [mode, setMode] = (0, import_react.useState)("official");
   const [host, setHost] = (0, import_react.useState)("");
   const [port, setPort] = (0, import_react.useState)("17000");
-  const [remotePort, setRemotePort] = (0, import_react.useState)("17901");
+  const [remotePort, setRemotePort] = (0, import_react.useState)("");
   const [token, setToken] = (0, import_react.useState)("");
   const [saving, setSaving] = (0, import_react.useState)("");
   const [err, setErr] = (0, import_react.useState)("");
@@ -2769,7 +2769,7 @@ function ConfigPanel({ t, onClose, onSaved }) {
       if (j.mode === "selfhost") {
         setHost(j.host || "");
         setPort(String(j.port || 17e3));
-        setRemotePort(String(j.remotePort || 17901));
+        setRemotePort(j.remotePort ? String(j.remotePort) : "");
       }
     }).catch(() => {
     });
@@ -2790,7 +2790,7 @@ function ConfigPanel({ t, onClose, onSaved }) {
       params.set("mode", "selfhost");
       params.set("host", h);
       params.set("port", String(parseInt(port, 10) || 17e3));
-      if (remotePort.trim()) params.set("remotePort", String(parseInt(remotePort, 10) || 17901));
+      if (remotePort.trim()) params.set("remotePort", String(parseInt(remotePort, 10) || ""));
       if (token) params.set("token", token);
     } else {
       params.set("mode", "official");
@@ -3108,6 +3108,7 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
   const [accountOpen, setAccountOpen] = (0, import_react.useState)(false);
   const [loginPrompt, setLoginPrompt] = (0, import_react.useState)(false);
   const [acctMe, setAcctMe] = (0, import_react.useState)(null);
+  const [cfgMode, setCfgMode] = (0, import_react.useState)("official");
   const panel = (0, import_react.useRef)(null);
   const { data, error, expiresAt, status, refresh } = useQr(open, reloadToken, uses);
   const left = useCountdown(expiresAt);
@@ -3136,6 +3137,14 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
   (0, import_react.useEffect)(() => {
     if (open) loadAcctMe();
   }, [open, reloadToken]);
+  (0, import_react.useEffect)(() => {
+    if (!open) return;
+    fetch(API_P + "/browserctl/api/config", { cache: "no-store" }).then((r) => r.json().then((j) => {
+      if (j && j.mode) setCfgMode(j.mode);
+    }).catch(() => {
+    })).catch(() => {
+    });
+  }, [open]);
   const startChain = async () => {
     try {
       const c = await fetch(API_P + "/browserctl/api/config", { cache: "no-store" }).then((r) => r.json()).catch(() => ({}));
@@ -3331,7 +3340,7 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
       )) }),
       /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlTabBody", children: [
         tab === "connect" && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
-          data && data.svg ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [
+          data && data.svg ? cfgMode === "official" && !acctMe ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlQrBox", style: { height: 128, display: "flex", alignItems: "center", justifyContent: "center" }, children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: { color: "#666", fontSize: 12, padding: "0 14px", textAlign: "center" }, children: t("loginRequiredDesc") }) }) : /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [
             /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlQrBox", children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("img", { alt: t("qrAlt"), src: "data:image/svg+xml;charset=utf-8," + encodeURIComponent(data.svg) }) }),
             /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { style: {
               margin: "4px 0 0",
@@ -3362,14 +3371,14 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
             /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlSpinner", "aria-hidden": "true" }),
             t("starting")
           ] }) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: { color: "#666", fontSize: 12, padding: "0 14px", textAlign: "center" }, children: error ? t("statusNoSecret") : t("statusLoading") }) }),
-          data && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlUrlRow", children: [
+          data && !(cfgMode === "official" && !acctMe) && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlUrlRow", children: [
             /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlUrl", title: data.url, children: data.url }),
             /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "ghost", size: "sm", onClick: () => {
               navigator.clipboard?.writeText(data.url).then(() => setCopied(true)).catch(() => {
               });
             }, children: copied ? t("copied") : t("copyLink") })
           ] }),
-          data && data.grant && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlUrlRow", style: { marginTop: 6, gap: 6 }, children: [
+          data && data.grant && !(cfgMode === "official" && !acctMe) && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlUrlRow", style: { marginTop: 6, gap: 6 }, children: [
             /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: { fontSize: 12, color: "var(--dsw-alias-label-tertiary,#8b8f98)", whiteSpace: "nowrap" }, children: t("pairUsesLabel") }),
             /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
               "select",
@@ -3399,24 +3408,23 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
               t("starting")
             ] }) : t("startCtl") }),
             /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "secondary", size: "sm", disabled: gating, onClick: refreshAll, children: busy === "refresh" ? t("refresh") + "\u2026" : t("refresh") }),
-            data && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
-              /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "primary", size: "sm", disabled: gating, onClick: () => window.open(data.panel || data.url, "_blank"), children: t("openPanel") }),
-              /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-                import_dsh_client_ui_primitives.Button,
-                {
-                  variant: "secondary",
-                  size: "sm",
-                  disabled: gating,
-                  onClick: stopChain,
-                  style: { color: "var(--dsw-alias-state-error-primary,#e5655c)" },
-                  children: busy === "stop" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
-                    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlSpinner", "aria-hidden": "true" }),
-                    " ",
-                    t("stopping")
-                  ] }) : t("stopCtl")
-                }
-              )
-            ] })
+            data && data.panel && !(cfgMode === "official" && !acctMe) && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "primary", size: "sm", disabled: gating, onClick: () => window.open(data.panel, "_blank"), children: t("openPanel") }),
+            data && !data.panel && !(cfgMode === "official" && !acctMe) && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: { fontSize: 12, color: "var(--dsw-alias-label-tertiary,#8b8f98)", display: "inline-flex", alignItems: "center" }, children: t("loginRequired") }),
+            data && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+              import_dsh_client_ui_primitives.Button,
+              {
+                variant: "secondary",
+                size: "sm",
+                disabled: gating,
+                onClick: stopChain,
+                style: { color: "var(--dsw-alias-state-error-primary,#e5655c)" },
+                children: busy === "stop" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
+                  /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlSpinner", "aria-hidden": "true" }),
+                  " ",
+                  t("stopping")
+                ] }) : t("stopCtl")
+              }
+            )
           ] })
         ] }),
         tab === "devices" && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(DevicesSection, { t, reloadToken, onRefresh: () => setReloadToken((x) => x + 1), disabled: gating }),
