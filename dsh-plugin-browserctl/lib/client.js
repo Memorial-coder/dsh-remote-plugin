@@ -38,6 +38,18 @@ var ABOUT_LINKS = {
   github: "https://github.com/Memorial-coder/dsh-remote-plugin",
   app: "https://github.com/Memorial-coder/dsh-remote-plugin/releases/latest"
 };
+function apiPrefix() {
+  try {
+    const p = String(typeof location !== "undefined" && location.pathname || "");
+    let m = /^\/p\/(1[6-9]\d{4})(?=\/|$)/.exec(p);
+    if (m) return "/p/" + m[1];
+    m = /^\/dsh-remote\/p\/([a-z0-9]{8,32})(?=\/|$)/.exec(p);
+    if (m) return "/dsh-remote/p/" + m[1];
+  } catch {
+  }
+  return "";
+}
+var API_P = apiPrefix();
 var LEGAL_VERSION = "2026-11-01";
 var LEGAL_EFFECTIVE = "2026\u5E7411\u67081\u65E5";
 var LEGAL_AGE = "\u672C\u5DE5\u5177\u4EC5\u9762\u5411\u5E74\u6EE1 18 \u5468\u5C81\u7684\u7528\u6237";
@@ -1410,7 +1422,7 @@ function useQr(open, reloadToken, uses) {
     setError(null);
     async function load() {
       try {
-        const r = await fetch("/browserctl/api/pair?uses=" + usesRef.current, { method: "POST", cache: "no-store" });
+        const r = await fetch(API_P + "/browserctl/api/pair?uses=" + usesRef.current, { method: "POST", cache: "no-store" });
         const tx = await r.text();
         let j;
         try {
@@ -1427,7 +1439,7 @@ function useQr(open, reloadToken, uses) {
         return;
       } catch (e1) {
         try {
-          const r2 = await fetch("/browserctl/api/qr", { cache: "no-store" });
+          const r2 = await fetch(API_P + "/browserctl/api/qr", { cache: "no-store" });
           const tx2 = await r2.text();
           let j2;
           try {
@@ -1462,7 +1474,7 @@ function useQr(open, reloadToken, uses) {
     let alive = true;
     const tick = async () => {
       try {
-        const r = await fetch("/browserctl/api/pair-status?g=" + encodeURIComponent(data.grant), { cache: "no-store" });
+        const r = await fetch(API_P + "/browserctl/api/pair-status?g=" + encodeURIComponent(data.grant), { cache: "no-store" });
         const j = await r.json();
         if (!alive || !j || !j.ok) return;
         const remaining = j.exists ? j.remaining | 0 : 0;
@@ -1613,7 +1625,7 @@ function DevicesSection({ t, reloadToken, onRefresh, disabled }) {
   const anyBusy = disabled || busy;
   (0, import_react.useEffect)(() => {
     let alive = true;
-    fetch("/browserctl/api/totp", { cache: "no-store" }).then((r) => r.text().then((tx) => {
+    fetch(API_P + "/browserctl/api/totp", { cache: "no-store" }).then((r) => r.text().then((tx) => {
       try {
         return JSON.parse(tx);
       } catch {
@@ -1696,14 +1708,14 @@ function DevicesSection({ t, reloadToken, onRefresh, disabled }) {
     setKickMsg("");
     const body = JSON.stringify(dev ? { dev } : {});
     try {
-      let r = await fetch(dev ? "/browserctl-gate/kick" : "/browserctl-gate/kick-all", {
+      let r = await fetch(dev ? API_P + "/browserctl-gate/kick" : API_P + "/browserctl-gate/kick-all", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body
       }).catch(() => null);
       if (!r || !r.ok) {
         const q = dev ? "?dev=" + encodeURIComponent(dev) : "";
-        r = await fetch("/browserctl/api/totp-kick" + q, { cache: "no-store" }).catch(() => null);
+        r = await fetch(API_P + "/browserctl/api/totp-kick" + q, { cache: "no-store" }).catch(() => null);
       }
       if (r && r.ok) {
         setKickMsg(dev ? "\u5DF2\u8E22\u51FA\u8BBE\u5907" : "\u5168\u90E8\u8E22\u4E0B\u7EBF\u6210\u529F");
@@ -1729,14 +1741,14 @@ function DevicesSection({ t, reloadToken, onRefresh, disabled }) {
     setBanning(dev || ip || "");
     setBanMsg("");
     try {
-      let r = await fetch("/browserctl-gate/blacklist", {
+      let r = await fetch(API_P + "/browserctl-gate/blacklist", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ dev, ip, name: name || "\u672A\u77E5", reason: "\u7BA1\u7406\u5458\u5C01\u7981" })
       }).catch(() => null);
       if (!r || !r.ok) {
         const q = new URLSearchParams({ dev: dev || "", ip: ip || "", name: name || "\u672A\u77E5", reason: "\u7BA1\u7406\u5458\u5C01\u7981" }).toString();
-        r = await fetch("/browserctl/api/blacklist-add?" + q, { cache: "no-store" }).catch(() => null);
+        r = await fetch(API_P + "/browserctl/api/blacklist-add?" + q, { cache: "no-store" }).catch(() => null);
       }
       const ok = !!(r && r.ok);
       setBanOk(ok);
@@ -1866,9 +1878,9 @@ function LogCard({ t, reloadToken }) {
   const [events, setEvents] = (0, import_react.useState)(null);
   (0, import_react.useEffect)(() => {
     let alive = true;
-    fetch("/browserctl-gate/events", { cache: "no-store" }).then((r) => r.ok ? r.json() : Promise.reject()).then((j) => {
+    fetch(API_P + "/browserctl-gate/events", { cache: "no-store" }).then((r) => r.ok ? r.json() : Promise.reject()).then((j) => {
       if (alive) setEvents(Array.isArray(j.events) ? j.events : []);
-    }).catch(() => fetch("/browserctl/api/totp", { cache: "no-store" }).then((r) => r.json()).then((j) => {
+    }).catch(() => fetch(API_P + "/browserctl/api/totp", { cache: "no-store" }).then((r) => r.json()).then((j) => {
       if (alive) setEvents(Array.isArray(j.events) ? j.events : []);
     }).catch(() => {
       if (alive) setEvents([]);
@@ -1908,7 +1920,7 @@ function BlacklistCard({ t, reloadToken, disabled }) {
   const anyBusy = disabled || busy;
   (0, import_react.useEffect)(() => {
     let alive = true;
-    fetch("/browserctl-gate/blacklist", { cache: "no-store" }).then((r) => r.ok ? r.json() : Promise.reject()).then((j) => {
+    fetch(API_P + "/browserctl-gate/blacklist", { cache: "no-store" }).then((r) => r.ok ? r.json() : Promise.reject()).then((j) => {
       if (alive) setData(Array.isArray(j.blacklist) ? j.blacklist : []);
     }).catch(() => {
       if (alive) setData([]);
@@ -1921,13 +1933,13 @@ function BlacklistCard({ t, reloadToken, disabled }) {
   async function unban(ip) {
     setBusy(true);
     try {
-      let r = await fetch("/browserctl-gate/blacklist/remove", {
+      let r = await fetch(API_P + "/browserctl-gate/blacklist/remove", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ ip })
       }).catch(() => null);
       if (!r || !r.ok) {
-        r = await fetch("/browserctl/api/blacklist-remove?ip=" + encodeURIComponent(ip), { cache: "no-store" }).catch(() => null);
+        r = await fetch(API_P + "/browserctl/api/blacklist-remove?ip=" + encodeURIComponent(ip), { cache: "no-store" }).catch(() => null);
       }
       if (r && r.ok) setData((d) => (d || []).filter((x) => x.ip !== ip));
     } catch {
@@ -1965,7 +1977,7 @@ function AppPairCard({ t, reloadToken }) {
   async function load() {
     setLoading(true);
     try {
-      const r = await fetch("/browserctl/api/pair-long", { cache: "no-store" });
+      const r = await fetch(API_P + "/browserctl/api/pair-long", { cache: "no-store" });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) {
         setData({ error: j && j.error || "HTTP " + r.status });
@@ -1982,9 +1994,29 @@ function AppPairCard({ t, reloadToken }) {
       setLoading(false);
     }
   }
+  (0, import_react.useEffect)(() => {
+    if (!data || !data.grant) return;
+    let alive = true;
+    const tick = async () => {
+      try {
+        const r = await fetch(API_P + "/browserctl/api/pair-status?g=" + encodeURIComponent(data.grant), { cache: "no-store" });
+        const j = await r.json();
+        if (!alive || !j || !j.ok) return;
+        const remaining = j.exists ? j.remaining | 0 : 0;
+        if (remaining <= 0) load();
+      } catch {
+      }
+    };
+    tick();
+    const id = setInterval(tick, 1500);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
+  }, [data]);
   async function loadDevices() {
     try {
-      const r = await fetch("/browserctl/api/totp", { cache: "no-store" });
+      const r = await fetch(API_P + "/browserctl/api/totp", { cache: "no-store" });
       const j = await r.json().catch(() => ({}));
       const list = Array.isArray(j?.sessions) ? j.sessions : [];
       setSessions(list.filter((s) => kindOf(s) === "app"));
@@ -1997,13 +2029,13 @@ function AppPairCard({ t, reloadToken }) {
     setKickMsg("");
     const body = JSON.stringify({ dev });
     try {
-      let r = await fetch("/browserctl-gate/kick", {
+      let r = await fetch(API_P + "/browserctl-gate/kick", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body
       }).catch(() => null);
       if (!r || !r.ok) {
-        r = await fetch("/browserctl/api/totp-kick?dev=" + encodeURIComponent(dev), { cache: "no-store" }).catch(() => null);
+        r = await fetch(API_P + "/browserctl/api/totp-kick?dev=" + encodeURIComponent(dev), { cache: "no-store" }).catch(() => null);
       }
       if (r && r.ok) {
         setKickMsg("\u5DF2\u89E3\u9664\u8BE5\u8BBE\u5907\u914D\u5BF9");
@@ -2153,7 +2185,7 @@ function IosGuideCard({ t, reloadToken }) {
     let alive = true;
     setLoading(true);
     setError("");
-    fetch("/browserctl/api/link?ttl=" + ttl + "&uses=" + uses, { cache: "no-store" }).then(async (r) => {
+    fetch(API_P + "/browserctl/api/link?ttl=" + ttl + "&uses=" + uses, { cache: "no-store" }).then(async (r) => {
       const j = await r.json().catch(() => ({}));
       if (!alive) return;
       if (!r.ok || !j.url) {
@@ -2294,7 +2326,7 @@ function TotpCard({ t, reloadToken, onRefresh, disabled }) {
   const anyBusy = disabled || busy;
   (0, import_react.useEffect)(() => {
     let alive = true;
-    fetch("/browserctl/api/totp", { cache: "no-store" }).then((r) => r.text().then((tx) => {
+    fetch(API_P + "/browserctl/api/totp", { cache: "no-store" }).then((r) => r.text().then((tx) => {
       try {
         return JSON.parse(tx);
       } catch {
@@ -2312,7 +2344,7 @@ function TotpCard({ t, reloadToken, onRefresh, disabled }) {
     setBusy(true);
     try {
       const q = new URLSearchParams({ enabled: enable ? "1" : "0", reset: reset ? "1" : "0" }).toString();
-      const r = await fetch("/browserctl/api/totp-toggle?" + q, { cache: "no-store" });
+      const r = await fetch(API_P + "/browserctl/api/totp-toggle?" + q, { cache: "no-store" });
       let j = {};
       try {
         j = await r.json();
@@ -2329,7 +2361,7 @@ function TotpCard({ t, reloadToken, onRefresh, disabled }) {
     setBusy(true);
     try {
       const q = dev ? "?dev=" + encodeURIComponent(dev) : "";
-      await fetch("/browserctl/api/totp-kick" + q, { cache: "no-store" });
+      await fetch(API_P + "/browserctl/api/totp-kick" + q, { cache: "no-store" });
       onRefresh();
     } finally {
       setBusy(false);
@@ -2417,7 +2449,7 @@ function PushCard({ t, reloadToken }) {
   const system = !!(cfg && cfg.system);
   (0, import_react.useEffect)(() => {
     let alive = true;
-    fetch("/browserctl-gate/push-config", { cache: "no-store" }).then((r) => r.text().then((tx) => {
+    fetch(API_P + "/browserctl-gate/push-config", { cache: "no-store" }).then((r) => r.text().then((tx) => {
       try {
         return JSON.parse(tx);
       } catch {
@@ -2449,7 +2481,7 @@ function PushCard({ t, reloadToken }) {
         enabled: which === "enabled" ? next ? "1" : "0" : enabled ? "1" : "0",
         system: which === "system" ? next ? "1" : "0" : system ? "1" : "0"
       }).toString();
-      const r = await fetch("/browserctl-gate/push-config?" + q, { method: "POST", cache: "no-store" });
+      const r = await fetch(API_P + "/browserctl-gate/push-config?" + q, { method: "POST", cache: "no-store" });
       const j = await r.json().catch(() => ({}));
       if (r.ok && j.ok) {
         setCfg((c) => ({ ...c || {}, enabled: !!j.enabled, system: !!j.system, since: j.since || c && c.since || 0 }));
@@ -2468,7 +2500,7 @@ function PushCard({ t, reloadToken }) {
     setToast(null);
     try {
       const q = new URLSearchParams({ kind: "test", title: t("pushTestTitle"), body: t("pushTestBody") }).toString();
-      const r = await fetch("/browserctl-gate/notify?" + q, { cache: "no-store" });
+      const r = await fetch(API_P + "/browserctl-gate/notify?" + q, { cache: "no-store" });
       const j = await r.json().catch(() => ({}));
       setToast({ text: r.ok && j.ok ? t("pushTestOk") : j && j.error || t("pushTestFail"), ok: !!(r.ok && j.ok) });
     } catch {
@@ -2481,7 +2513,7 @@ function PushCard({ t, reloadToken }) {
     if (polling) return;
     setPolling(true);
     try {
-      const r = await fetch("/browserctl-gate/push-poll?last=0", { cache: "no-store" });
+      const r = await fetch(API_P + "/browserctl-gate/push-poll?last=0", { cache: "no-store" });
       const j = await r.json().catch(() => ({}));
       if (r.ok && j.ok) {
         setItems(Array.isArray(j.items) ? j.items.slice(0, 10) : []);
@@ -2600,7 +2632,7 @@ function AboutPanel({ t, onClose }) {
     setCheckState("loading");
     setCheckResult(null);
     try {
-      const r = await fetch("/browserctl/api/update-check", { cache: "no-store" });
+      const r = await fetch(API_P + "/browserctl/api/update-check", { cache: "no-store" });
       const j = await r.json().catch(() => ({}));
       setCheckResult(j);
     } catch (e) {
@@ -2720,7 +2752,7 @@ function ConfigPanel({ t, onClose, onSaved }) {
   const [err, setErr] = (0, import_react.useState)("");
   (0, import_react.useEffect)(() => {
     let alive = true;
-    fetch("/browserctl/api/config", { cache: "no-store" }).then((r) => r.text().then((tx) => {
+    fetch(API_P + "/browserctl/api/config", { cache: "no-store" }).then((r) => r.text().then((tx) => {
       try {
         return JSON.parse(tx);
       } catch {
@@ -2765,7 +2797,7 @@ function ConfigPanel({ t, onClose, onSaved }) {
     }
     setSaving("loading");
     try {
-      const r = await fetch("/browserctl/api/config?" + params.toString(), { method: "POST", cache: "no-store" });
+      const r = await fetch(API_P + "/browserctl/api/config?" + params.toString(), { method: "POST", cache: "no-store" });
       const j = await r.json().catch(() => ({}));
       if (!r.ok || j.error) {
         setErr(j.error || "HTTP " + r.status);
@@ -2860,7 +2892,7 @@ function OfficialAccountCard({ t, onSaved }) {
   const [copiedOauth, setCopiedOauth] = (0, import_react.useState)(false);
   const loadAcct = async () => {
     try {
-      const r = await fetch("/browserctl/api/server/me", { cache: "no-store" });
+      const r = await fetch(API_P + "/browserctl/api/server/me", { cache: "no-store" });
       const j = await r.json().catch(() => ({}));
       if (j && j.loggedIn) {
         setAcct({ email: j.email, remotePort: j.remotePort, status: j.status });
@@ -2886,9 +2918,9 @@ function OfficialAccountCard({ t, onSaved }) {
   (0, import_react.useEffect)(() => () => clearPoll(), []);
   const restartTunnel = async () => {
     try {
-      await fetch("/browserctl/api/stop", { method: "POST", cache: "no-store" });
+      await fetch(API_P + "/browserctl/api/stop", { method: "POST", cache: "no-store" });
       await new Promise((r) => setTimeout(r, 1500));
-      await fetch("/browserctl/api/ensure", { method: "POST", cache: "no-store" });
+      await fetch(API_P + "/browserctl/api/ensure", { method: "POST", cache: "no-store" });
       return true;
     } catch (e) {
       return false;
@@ -2897,7 +2929,7 @@ function OfficialAccountCard({ t, onSaved }) {
   const openAuthPage = async (url) => {
     if (!url) return false;
     try {
-      const r = await fetch("/browserctl/api/server/oauth/open?url=" + encodeURIComponent(url), { method: "POST", cache: "no-store" });
+      const r = await fetch(API_P + "/browserctl/api/server/oauth/open?url=" + encodeURIComponent(url), { method: "POST", cache: "no-store" });
       const j = await r.json().catch(() => ({}));
       if (!r.ok || !j.ok) {
         setErr(j && j.error || t("configAcctOauthOpenFail"));
@@ -2922,7 +2954,7 @@ function OfficialAccountCard({ t, onSaved }) {
     const pd = pendingRef.current;
     if (!pd) return;
     try {
-      const r = await fetch("/browserctl/api/server/oauth/poll?device_code=" + encodeURIComponent(pd.deviceCode), { method: "POST", cache: "no-store" });
+      const r = await fetch(API_P + "/browserctl/api/server/oauth/poll?device_code=" + encodeURIComponent(pd.deviceCode), { method: "POST", cache: "no-store" });
       const j = await r.json().catch(() => ({}));
       if (j && j.ok) {
         clearPoll();
@@ -2961,7 +2993,7 @@ function OfficialAccountCard({ t, onSaved }) {
     setMsg("");
     setBusy("begin");
     try {
-      const r = await fetch("/browserctl/api/server/oauth/begin", { method: "POST", cache: "no-store" });
+      const r = await fetch(API_P + "/browserctl/api/server/oauth/begin", { method: "POST", cache: "no-store" });
       const j = await r.json().catch(() => ({}));
       if (!r.ok || !j.ok) {
         setErr(j.error || "HTTP " + r.status);
@@ -2995,7 +3027,7 @@ function OfficialAccountCard({ t, onSaved }) {
     setMsg("");
     setBusy("logout");
     try {
-      await fetch("/browserctl/api/server/logout", { method: "POST", cache: "no-store" });
+      await fetch(API_P + "/browserctl/api/server/logout", { method: "POST", cache: "no-store" });
       setAcct(null);
       setMsg(t("configAcctLoggedOut"));
       onSaved();
@@ -3094,7 +3126,7 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
   });
   const loadAcctMe = async () => {
     try {
-      const r = await fetch("/browserctl/api/server/me", { cache: "no-store" });
+      const r = await fetch(API_P + "/browserctl/api/server/me", { cache: "no-store" });
       const j = await r.json().catch(() => ({}));
       setAcctMe(j && j.loggedIn ? j : null);
     } catch {
@@ -3106,9 +3138,9 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
   }, [open, reloadToken]);
   const startChain = async () => {
     try {
-      const c = await fetch("/browserctl/api/config", { cache: "no-store" }).then((r) => r.json()).catch(() => ({}));
+      const c = await fetch(API_P + "/browserctl/api/config", { cache: "no-store" }).then((r) => r.json()).catch(() => ({}));
       if (c && c.mode === "official") {
-        const m = await fetch("/browserctl/api/server/me", { cache: "no-store" }).then((r) => r.json()).catch(() => ({}));
+        const m = await fetch(API_P + "/browserctl/api/server/me", { cache: "no-store" }).then((r) => r.json()).catch(() => ({}));
         if (!(m && m.loggedIn)) {
           setLoginPrompt(true);
           return;
@@ -3117,25 +3149,51 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
     } catch {
     }
     run("start", async () => {
-      try {
-        await fetch("/browserctl/api/ensure", { cache: "no-store" });
-      } catch (e) {
-        console.error("[browserctl] ensure \u8BF7\u6C42\u5931\u8D25:", e);
+      let lastErr = "";
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          const r = await fetch(API_P + "/browserctl/api/ensure", { cache: "no-store" });
+          const j = await r.json().catch(() => ({}));
+          if (j && (j.ok || j.pending)) {
+            lastErr = "";
+            break;
+          }
+          lastErr = j && j.error || "HTTP " + r.status;
+        } catch (e) {
+          lastErr = String(e && e.message || e);
+        }
+        if (attempt < 3) await new Promise((r) => setTimeout(r, attempt * 1e3));
       }
+      if (!lastErr) {
+        const deadline = Date.now() + 12e3;
+        while (Date.now() < deadline) {
+          let fwd = false;
+          try {
+            const r = await fetch(API_P + "/browserctl/api/status", { cache: "no-store" });
+            const j = await r.json().catch(() => ({}));
+            fwd = !!j.forwarder;
+          } catch {
+            fwd = false;
+          }
+          if (fwd) break;
+          await new Promise((r) => setTimeout(r, 300));
+        }
+      }
+      if (lastErr) console.error("[browserctl] ensure \u5168\u90E8\u91CD\u8BD5\u5931\u8D25:", lastErr);
       await new Promise((r) => setTimeout(r, 600));
       setReloadToken((x) => x + 1);
     });
   };
   const stopChain = () => run("stop", async () => {
     try {
-      await fetch("/browserctl/api/stop", { cache: "no-store" });
+      await fetch(API_P + "/browserctl/api/stop", { cache: "no-store" });
     } catch {
     }
     const deadline = Date.now() + 12e3;
     for (; ; ) {
       let fwd = true;
       try {
-        const r = await fetch("/browserctl/api/status", { cache: "no-store" });
+        const r = await fetch(API_P + "/browserctl/api/status", { cache: "no-store" });
         const j = await r.json();
         fwd = !!j.forwarder;
       } catch {
@@ -3178,7 +3236,7 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
   (0, import_react.useEffect)(() => {
     if (!open) return;
     let alive = true;
-    const beat = () => fetch("/browserctl-gate/heartbeat", { cache: "no-store" }).catch(() => {
+    const beat = () => fetch(API_P + "/browserctl-gate/heartbeat", { cache: "no-store" }).catch(() => {
     });
     beat().then(() => {
       if (alive) setTimeout(() => setReloadToken((x) => x + 1), 400);
@@ -3406,7 +3464,7 @@ function BrowserCtlButton({ wide, useStore, actions, t }) {
       "aria-expanded": open,
       icon: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(CtlIcon, { size: wide ? 16 : 18 }),
       onClick: () => {
-        fetch("/browserctl/api/ensure", { cache: "no-store" }).catch(() => {
+        fetch(API_P + "/browserctl/api/ensure", { cache: "no-store" }).catch(() => {
         });
         actions.open();
       },

@@ -14,6 +14,25 @@ const ABOUT_LINKS = {
   app: 'https://github.com/Memorial-coder/dsh-remote-plugin/releases/latest',
 }
 
+// ---------- API 路径前缀(远程访问适配) ----------
+// 面板不只跑在本机(127.0.0.1:<dsh端口>),还会被手机/外网浏览器经隧道访问,页面带路径前缀:
+//   /p/<port>/...            → nginx 多用户块(按端口查 registry 验签后转发闸机)
+//   /dsh-remote/p/<uid>/...  → 官网服务端 uid 稳定代理(按 uid 解析当前端口转发)
+// 本插件所有 fetch 都是绝对路径('/browserctl/api/*'、'/browserctl-gate/*'),不加前缀会
+// 落到域名根路径的静态反代 location(proxy_pass 指向生成时的固定端口)→ 端口一变就 502,
+// 表现为「桌面正常、扫码进远控端后面板全部接口 502」。所以请求统一带上页面自身的前缀。
+function apiPrefix() {
+  try {
+    const p = String((typeof location !== 'undefined' && location.pathname) || '')
+    let m = /^\/p\/(1[6-9]\d{4})(?=\/|$)/.exec(p)
+    if (m) return '/p/' + m[1]
+    m = /^\/dsh-remote\/p\/([a-z0-9]{8,32})(?=\/|$)/.exec(p)
+    if (m) return '/dsh-remote/p/' + m[1]
+  } catch {}
+  return '' // 本机直连(桌面)无前缀
+}
+const API_P = apiPrefix()
+
 // ---------- 用户协议 / 隐私政策(「关于」面板内点击展开,参照桃源乡 legalDocuments 结构) ----------
 const LEGAL_VERSION = '2026-11-01'
 const LEGAL_EFFECTIVE = '2026年11月1日'
@@ -1389,7 +1408,7 @@ function useQr(open, reloadToken, uses) {
     setError(null)
     async function load() {
       try {
-        const r = await fetch('/browserctl/api/pair?uses=' + usesRef.current, { method: 'POST', cache: 'no-store' })
+        const r = await fetch(API_P + '/browserctl/api/pair?uses=' + usesRef.current, { method: 'POST', cache: 'no-store' })
         const tx = await r.text()
         let j
         try { j = JSON.parse(tx) } catch { throw new Error('路由未加载(HTTP ' + r.status + ');请重启 DSH 后重试') }
@@ -1402,7 +1421,7 @@ function useQr(open, reloadToken, uses) {
         return
       } catch (e1) {
         try {
-          const r2 = await fetch('/browserctl/api/qr', { cache: 'no-store' })
+          const r2 = await fetch(API_P + '/browserctl/api/qr', { cache: 'no-store' })
           const tx2 = await r2.text()
           let j2
           try { j2 = JSON.parse(tx2) } catch { throw new Error('路由未加载(HTTP ' + r2.status + ');请重启 DSH 后重试') }
@@ -1433,7 +1452,7 @@ function useQr(open, reloadToken, uses) {
     let alive = true
     const tick = async () => {
       try {
-        const r = await fetch('/browserctl/api/pair-status?g=' + encodeURIComponent(data.grant), { cache: 'no-store' })
+        const r = await fetch(API_P + '/browserctl/api/pair-status?g=' + encodeURIComponent(data.grant), { cache: 'no-store' })
         const j = await r.json()
         if (!alive || !j || !j.ok) return
         const remaining = j.exists ? (j.remaining | 0) : 0
@@ -1551,7 +1570,7 @@ function DevicesSection({ t, reloadToken, onRefresh, disabled }) {
   const anyBusy = disabled || busy
   useEffect(() => {
     let alive = true
-    fetch('/browserctl/api/totp', { cache: 'no-store' })
+    fetch(API_P + '/browserctl/api/totp', { cache: 'no-store' })
       .then(r => r.text().then(tx => { try { return JSON.parse(tx) } catch { return { error: 'HTTP ' + r.status } } }))
       .then(j => { if (alive) setData(j) })
       .catch(() => {})
@@ -1636,14 +1655,14 @@ function DevicesSection({ t, reloadToken, onRefresh, disabled }) {
     // 失败回退插件本地端点(参数走查询串,绕开 body 被排空的问题)。
     const body = JSON.stringify(dev ? { dev } : {})
     try {
-      let r = await fetch(dev ? '/browserctl-gate/kick' : '/browserctl-gate/kick-all', {
+      let r = await fetch(dev ? API_P + '/browserctl-gate/kick' : API_P + '/browserctl-gate/kick-all', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body,
       }).catch(() => null)
       if (!r || !r.ok) {
         const q = dev ? '?dev=' + encodeURIComponent(dev) : ''
-        r = await fetch('/browserctl/api/totp-kick' + q, { cache: 'no-store' }).catch(() => null)
+        r = await fetch(API_P + '/browserctl/api/totp-kick' + q, { cache: 'no-store' }).catch(() => null)
       }
       if (r && r.ok) {
         setKickMsg(dev ? '已踢出设备' : '全部踢下线成功')
@@ -1673,14 +1692,14 @@ function DevicesSection({ t, reloadToken, onRefresh, disabled }) {
     setBanMsg('')
     try {
       // 与解禁同思路:闸机端点失败时回退插件本地端点(查询串参数)
-      let r = await fetch('/browserctl-gate/blacklist', {
+      let r = await fetch(API_P + '/browserctl-gate/blacklist', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ dev, ip, name: name || '未知', reason: '管理员封禁' }),
       }).catch(() => null)
       if (!r || !r.ok) {
         const q = new URLSearchParams({ dev: dev || '', ip: ip || '', name: name || '未知', reason: '管理员封禁' }).toString()
-        r = await fetch('/browserctl/api/blacklist-add?' + q, { cache: 'no-store' }).catch(() => null)
+        r = await fetch(API_P + '/browserctl/api/blacklist-add?' + q, { cache: 'no-store' }).catch(() => null)
       }
       const ok = !!(r && r.ok)
       setBanOk(ok)
@@ -1852,10 +1871,10 @@ function LogCard({ t, reloadToken }) {
   useEffect(() => {
     let alive = true
     // 优先闸机端点(公网面板同源可达,无需 DSH 重启);本机直开面板回退到插件 API。
-    fetch('/browserctl-gate/events', { cache: 'no-store' })
+    fetch(API_P + '/browserctl-gate/events', { cache: 'no-store' })
       .then(r => (r.ok ? r.json() : Promise.reject()))
       .then(j => { if (alive) setEvents(Array.isArray(j.events) ? j.events : []) })
-      .catch(() => fetch('/browserctl/api/totp', { cache: 'no-store' })
+      .catch(() => fetch(API_P + '/browserctl/api/totp', { cache: 'no-store' })
         .then(r => r.json())
         .then(j => { if (alive) setEvents(Array.isArray(j.events) ? j.events : []) })
         .catch(() => { if (alive) setEvents([]) }))
@@ -1908,7 +1927,7 @@ function BlacklistCard({ t, reloadToken, disabled }) {
   const anyBusy = disabled || busy
   useEffect(() => {
     let alive = true
-    fetch('/browserctl-gate/blacklist', { cache: 'no-store' })
+    fetch(API_P + '/browserctl-gate/blacklist', { cache: 'no-store' })
       .then(r => r.ok ? r.json() : Promise.reject())
       .then(j => { if (alive) setData(Array.isArray(j.blacklist) ? j.blacklist : []) })
       .catch(() => { if (alive) setData([]) })
@@ -1919,13 +1938,13 @@ function BlacklistCard({ t, reloadToken, disabled }) {
     setBusy(true)
     try {
       // 本地面板无 bc-gate cookie + DSH 排空请求体:闸机端点失败时回退插件本地端点(查询串参数)
-      let r = await fetch('/browserctl-gate/blacklist/remove', {
+      let r = await fetch(API_P + '/browserctl-gate/blacklist/remove', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ ip }),
       }).catch(() => null)
       if (!r || !r.ok) {
-        r = await fetch('/browserctl/api/blacklist-remove?ip=' + encodeURIComponent(ip), { cache: 'no-store' })
+        r = await fetch(API_P + '/browserctl/api/blacklist-remove?ip=' + encodeURIComponent(ip), { cache: 'no-store' })
           .catch(() => null)
       }
       if (r && r.ok) setData(d => (d || []).filter(x => x.ip !== ip))
@@ -1983,7 +2002,7 @@ function AppPairCard({ t, reloadToken }) {
   async function load() {
     setLoading(true)
     try {
-      const r = await fetch('/browserctl/api/pair-long', { cache: 'no-store' })
+      const r = await fetch(API_P + '/browserctl/api/pair-long', { cache: 'no-store' })
       const j = await r.json().catch(() => ({}))
       if (!r.ok) {
         setData({ error: (j && j.error) || ('HTTP ' + r.status) })
@@ -2001,9 +2020,27 @@ function AppPairCard({ t, reloadToken }) {
     }
   }
 
+  // 轮询长期配对码状态:检测到有人扫码(剩余次数用尽) → 自动换新码
+  useEffect(() => {
+    if (!data || !data.grant) return
+    let alive = true
+    const tick = async () => {
+      try {
+        const r = await fetch(API_P + '/browserctl/api/pair-status?g=' + encodeURIComponent(data.grant), { cache: 'no-store' })
+        const j = await r.json()
+        if (!alive || !j || !j.ok) return
+        const remaining = j.exists ? (j.remaining | 0) : 0
+        if (remaining <= 0) load()
+      } catch {}
+    }
+    tick()
+    const id = setInterval(tick, 1500)
+    return () => { alive = false; clearInterval(id) }
+  }, [data])
+
   async function loadDevices() {
     try {
-      const r = await fetch('/browserctl/api/totp', { cache: 'no-store' })
+      const r = await fetch(API_P + '/browserctl/api/totp', { cache: 'no-store' })
       const j = await r.json().catch(() => ({}))
       const list = Array.isArray(j?.sessions) ? j.sessions : []
       // 只显示通过「App 配对」绑定的手机（kind=app;旧会话没 kind,按名字兜底）
@@ -2017,13 +2054,13 @@ function AppPairCard({ t, reloadToken }) {
     setKickMsg('')
     const body = JSON.stringify({ dev })
     try {
-      let r = await fetch('/browserctl-gate/kick', {
+      let r = await fetch(API_P + '/browserctl-gate/kick', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body,
       }).catch(() => null)
       if (!r || !r.ok) {
-        r = await fetch('/browserctl/api/totp-kick?dev=' + encodeURIComponent(dev), { cache: 'no-store' }).catch(() => null)
+        r = await fetch(API_P + '/browserctl/api/totp-kick?dev=' + encodeURIComponent(dev), { cache: 'no-store' }).catch(() => null)
       }
       if (r && r.ok) {
         setKickMsg('已解除该设备配对')
@@ -2205,7 +2242,7 @@ function IosGuideCard({ t, reloadToken }) {
     let alive = true
     setLoading(true)
     setError('')
-    fetch('/browserctl/api/link?ttl=' + ttl + '&uses=' + uses, { cache: 'no-store' })
+    fetch(API_P + '/browserctl/api/link?ttl=' + ttl + '&uses=' + uses, { cache: 'no-store' })
       .then(async r => {
         const j = await r.json().catch(() => ({}))
         if (!alive) return
@@ -2344,7 +2381,7 @@ function TotpCard({ t, reloadToken, onRefresh, disabled }) {
   const anyBusy = disabled || busy
   useEffect(() => {
     let alive = true
-    fetch('/browserctl/api/totp', { cache: 'no-store' })
+    fetch(API_P + '/browserctl/api/totp', { cache: 'no-store' })
       .then(r => r.text().then(tx => { try { return JSON.parse(tx) } catch { return { error: 'HTTP ' + r.status } } }))
       .then(j => { if (alive) setData(j) })
       .catch(() => {})
@@ -2356,7 +2393,7 @@ function TotpCard({ t, reloadToken, onRefresh, disabled }) {
     try {
       // DSH webServer 排空请求体:参数走查询串
       const q = new URLSearchParams({ enabled: enable ? '1' : '0', reset: reset ? '1' : '0' }).toString()
-      const r = await fetch('/browserctl/api/totp-toggle?' + q, { cache: 'no-store' })
+      const r = await fetch(API_P + '/browserctl/api/totp-toggle?' + q, { cache: 'no-store' })
       let j = {}
       try { j = await r.json() } catch { j = { ok: false, error: 'HTTP ' + r.status } }
       if (j.ok) onRefresh()
@@ -2370,7 +2407,7 @@ function TotpCard({ t, reloadToken, onRefresh, disabled }) {
     setBusy(true)
     try {
       const q = dev ? '?dev=' + encodeURIComponent(dev) : ''
-      await fetch('/browserctl/api/totp-kick' + q, { cache: 'no-store' })
+      await fetch(API_P + '/browserctl/api/totp-kick' + q, { cache: 'no-store' })
       onRefresh()
     } finally {
       setBusy(false)
@@ -2484,7 +2521,7 @@ function PushCard({ t, reloadToken }) {
   // 读 push-config 初始化开关
   useEffect(() => {
     let alive = true
-    fetch('/browserctl-gate/push-config', { cache: 'no-store' })
+    fetch(API_P + '/browserctl-gate/push-config', { cache: 'no-store' })
       .then(r => r.text().then(tx => { try { return JSON.parse(tx) } catch { return { error: 'HTTP ' + r.status } } }))
       .then(j => {
         if (!alive) return
@@ -2513,7 +2550,7 @@ function PushCard({ t, reloadToken }) {
         enabled: which === 'enabled' ? (next ? '1' : '0') : (enabled ? '1' : '0'),
         system: which === 'system' ? (next ? '1' : '0') : (system ? '1' : '0'),
       }).toString()
-      const r = await fetch('/browserctl-gate/push-config?' + q, { method: 'POST', cache: 'no-store' })
+      const r = await fetch(API_P + '/browserctl-gate/push-config?' + q, { method: 'POST', cache: 'no-store' })
       const j = await r.json().catch(() => ({}))
       if (r.ok && j.ok) {
         setCfg(c => ({ ...(c || {}), enabled: !!j.enabled, system: !!j.system, since: j.since || (c && c.since) || 0 }))
@@ -2534,7 +2571,7 @@ function PushCard({ t, reloadToken }) {
     setToast(null)
     try {
       const q = new URLSearchParams({ kind: 'test', title: t('pushTestTitle'), body: t('pushTestBody') }).toString()
-      const r = await fetch('/browserctl-gate/notify?' + q, { cache: 'no-store' })
+      const r = await fetch(API_P + '/browserctl-gate/notify?' + q, { cache: 'no-store' })
       const j = await r.json().catch(() => ({}))
       setToast({ text: (r.ok && j.ok) ? t('pushTestOk') : ((j && j.error) || t('pushTestFail')), ok: !!(r.ok && j.ok) })
     } catch {
@@ -2549,7 +2586,7 @@ function PushCard({ t, reloadToken }) {
     if (polling) return
     setPolling(true)
     try {
-      const r = await fetch('/browserctl-gate/push-poll?last=0', { cache: 'no-store' })
+      const r = await fetch(API_P + '/browserctl-gate/push-poll?last=0', { cache: 'no-store' })
       const j = await r.json().catch(() => ({}))
       if (r.ok && j.ok) {
         setItems(Array.isArray(j.items) ? j.items.slice(0, 10) : [])
@@ -2689,7 +2726,7 @@ function AboutPanel({ t, onClose }) {
     setCheckState('loading')
     setCheckResult(null)
     try {
-      const r = await fetch('/browserctl/api/update-check', { cache: 'no-store' })
+      const r = await fetch(API_P + '/browserctl/api/update-check', { cache: 'no-store' })
       const j = await r.json().catch(() => ({}))
       setCheckResult(j)
     } catch (e) {
@@ -2840,7 +2877,7 @@ function ConfigPanel({ t, onClose, onSaved }) {
   // 打开时读取当前配置(官方模式不返回 host/port/token,仅 selfhost 返回)
   useEffect(() => {
     let alive = true
-    fetch('/browserctl/api/config', { cache: 'no-store' })
+    fetch(API_P + '/browserctl/api/config', { cache: 'no-store' })
       .then(r => r.text().then(tx => { try { return JSON.parse(tx) } catch { return { error: 'HTTP ' + r.status } } }))
       .then(j => {
         if (!alive) return
@@ -2874,7 +2911,7 @@ function ConfigPanel({ t, onClose, onSaved }) {
     }
     setSaving('loading')
     try {
-      const r = await fetch('/browserctl/api/config?' + params.toString(), { method: 'POST', cache: 'no-store' })
+      const r = await fetch(API_P + '/browserctl/api/config?' + params.toString(), { method: 'POST', cache: 'no-store' })
       const j = await r.json().catch(() => ({}))
       if (!r.ok || j.error) {
         setErr(j.error || ('HTTP ' + r.status))
@@ -2982,7 +3019,7 @@ function OfficialAccountCard({ t, onSaved }) {
 
   const loadAcct = async () => {
     try {
-      const r = await fetch('/browserctl/api/server/me', { cache: 'no-store' })
+      const r = await fetch(API_P + '/browserctl/api/server/me', { cache: 'no-store' })
       const j = await r.json().catch(() => ({}))
       if (j && j.loggedIn) {
         setAcct({ email: j.email, remotePort: j.remotePort, status: j.status })
@@ -3005,9 +3042,9 @@ function OfficialAccountCard({ t, onSaved }) {
 
   const restartTunnel = async () => {
     try {
-      await fetch('/browserctl/api/stop', { method: 'POST', cache: 'no-store' })
+      await fetch(API_P + '/browserctl/api/stop', { method: 'POST', cache: 'no-store' })
       await new Promise(r => setTimeout(r, 1500))
-      await fetch('/browserctl/api/ensure', { method: 'POST', cache: 'no-store' })
+      await fetch(API_P + '/browserctl/api/ensure', { method: 'POST', cache: 'no-store' })
       return true
     } catch (e) {
       return false
@@ -3017,7 +3054,7 @@ function OfficialAccountCard({ t, onSaved }) {
   const openAuthPage = async (url) => {
     if (!url) return false
     try {
-      const r = await fetch('/browserctl/api/server/oauth/open?url=' + encodeURIComponent(url), { method: 'POST', cache: 'no-store' })
+      const r = await fetch(API_P + '/browserctl/api/server/oauth/open?url=' + encodeURIComponent(url), { method: 'POST', cache: 'no-store' })
       const j = await r.json().catch(() => ({}))
       if (!r.ok || !j.ok) {
         setErr((j && j.error) || t('configAcctOauthOpenFail'))
@@ -3043,7 +3080,7 @@ function OfficialAccountCard({ t, onSaved }) {
     const pd = pendingRef.current
     if (!pd) return
     try {
-      const r = await fetch('/browserctl/api/server/oauth/poll?device_code=' + encodeURIComponent(pd.deviceCode), { method: 'POST', cache: 'no-store' })
+      const r = await fetch(API_P + '/browserctl/api/server/oauth/poll?device_code=' + encodeURIComponent(pd.deviceCode), { method: 'POST', cache: 'no-store' })
       const j = await r.json().catch(() => ({}))
       if (j && j.ok) {
         clearPoll()
@@ -3078,7 +3115,7 @@ function OfficialAccountCard({ t, onSaved }) {
     setErr(''); setMsg('')
     setBusy('begin')
     try {
-      const r = await fetch('/browserctl/api/server/oauth/begin', { method: 'POST', cache: 'no-store' })
+      const r = await fetch(API_P + '/browserctl/api/server/oauth/begin', { method: 'POST', cache: 'no-store' })
       const j = await r.json().catch(() => ({}))
       if (!r.ok || !j.ok) {
         setErr(j.error || ('HTTP ' + r.status))
@@ -3113,7 +3150,7 @@ function OfficialAccountCard({ t, onSaved }) {
     setErr(''); setMsg('')
     setBusy('logout')
     try {
-      await fetch('/browserctl/api/server/logout', { method: 'POST', cache: 'no-store' })
+      await fetch(API_P + '/browserctl/api/server/logout', { method: 'POST', cache: 'no-store' })
       setAcct(null)
       setMsg(t('configAcctLoggedOut'))
       onSaved()
@@ -3245,7 +3282,7 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
   })
   const loadAcctMe = async () => {
     try {
-      const r = await fetch('/browserctl/api/server/me', { cache: 'no-store' })
+      const r = await fetch(API_P + '/browserctl/api/server/me', { cache: 'no-store' })
       const j = await r.json().catch(() => ({}))
       setAcctMe(j && j.loggedIn ? j : null)
     } catch { setAcctMe(null) }
@@ -3254,14 +3291,43 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
   const startChain = async () => {
     // 官方模式且未登录 → 弹提示先去登录,不直接启动
     try {
-      const c = await fetch('/browserctl/api/config', { cache: 'no-store' }).then(r => r.json()).catch(() => ({}))
+      const c = await fetch(API_P + '/browserctl/api/config', { cache: 'no-store' }).then(r => r.json()).catch(() => ({}))
       if (c && c.mode === 'official') {
-        const m = await fetch('/browserctl/api/server/me', { cache: 'no-store' }).then(r => r.json()).catch(() => ({}))
+        const m = await fetch(API_P + '/browserctl/api/server/me', { cache: 'no-store' }).then(r => r.json()).catch(() => ({}))
         if (!(m && m.loggedIn)) { setLoginPrompt(true); return }
       }
     } catch {}
     run('start', async () => {
-      try { await fetch('/browserctl/api/ensure', { cache: 'no-store' }) } catch (e) { console.error('[browserctl] ensure 请求失败:', e) }
+      // Phase 1: 触发 ensure（偶发网络抖动/端口竞争时最多重试 3 次）
+      let lastErr = ''
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          const r = await fetch(API_P + '/browserctl/api/ensure', { cache: 'no-store' })
+          const j = await r.json().catch(() => ({}))
+          if (j && (j.ok || j.pending)) { lastErr = ''; break }
+          lastErr = (j && j.error) || ('HTTP ' + r.status)
+        } catch (e) {
+          lastErr = String((e && e.message) || e)
+        }
+        if (attempt < 3) await new Promise(r => setTimeout(r, attempt * 1000))
+      }
+      // Phase 2: ensure 已接受（ok 或 pending），轮询直到 3080 真正就绪
+      // 避免 ensure 返回 pending 但隧道还在后台构建中(claim-port/start/探活),
+      // 立即刷新导致 QR 获取失败显示"闸机未运行"、用户以为要再点一次。
+      if (!lastErr) {
+        const deadline = Date.now() + 12000
+        while (Date.now() < deadline) {
+          let fwd = false
+          try {
+            const r = await fetch(API_P + '/browserctl/api/status', { cache: 'no-store' })
+            const j = await r.json().catch(() => ({}))
+            fwd = !!j.forwarder
+          } catch { fwd = false }
+          if (fwd) break
+          await new Promise(r => setTimeout(r, 300))
+        }
+      }
+      if (lastErr) console.error('[browserctl] ensure 全部重试失败:', lastErr)
       await new Promise(r => setTimeout(r, 600))
       setReloadToken(x => x + 1)
     })
@@ -3269,14 +3335,14 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
   const stopChain = () => run('stop', async () => {
     // 停止浏览器控制:关闭整个穿透隧道(fwd/frpc/watchdog 全部结束),
     // 公网面板 URL 立即不可访问。
-    try { await fetch('/browserctl/api/stop', { cache: 'no-store' }) } catch {}
+    try { await fetch(API_P + '/browserctl/api/stop', { cache: 'no-store' }) } catch {}
     // stop 是分离进程,命令返回时闸机可能还没关完(端口未释放)。
     // 必须轮询等到 3080 真正关闭再刷新二维码,否则旧二维码不消失、开始按钮不出现。
     const deadline = Date.now() + 12000
     for (;;) {
       let fwd = true
       try {
-        const r = await fetch('/browserctl/api/status', { cache: 'no-store' })
+        const r = await fetch(API_P + '/browserctl/api/status', { cache: 'no-store' })
         const j = await r.json()
         fwd = !!j.forwarder
       } catch { fwd = false }
@@ -3309,7 +3375,7 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
   useEffect(() => {
     if (!open) return
     let alive = true
-    const beat = () => fetch('/browserctl-gate/heartbeat', { cache: 'no-store' }).catch(() => {})
+    const beat = () => fetch(API_P + '/browserctl-gate/heartbeat', { cache: 'no-store' }).catch(() => {})
     beat().then(() => { if (alive) setTimeout(() => setReloadToken(x => x + 1), 400) })
     const hb = setInterval(beat, 120000)
     return () => { alive = false; clearInterval(hb) }
@@ -3566,7 +3632,7 @@ function BrowserCtlButton({ wide, useStore, actions, t }) {
         icon={<CtlIcon size={wide ? 16 : 18} />}
         onClick={() => {
           // 点按钮时顺手拉起隧道(不阻塞打开弹窗)
-          fetch('/browserctl/api/ensure', { cache: 'no-store' }).catch(() => {})
+          fetch(API_P + '/browserctl/api/ensure', { cache: 'no-store' }).catch(() => {})
           actions.open()
         }}
       >

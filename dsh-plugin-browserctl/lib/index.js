@@ -167,7 +167,7 @@ function secretLink() {
 function runBrowserctl(args) {
   const script = SCRIPT_PATH;
   if (!existsSync(script)) return { started: false, error: "browserctl.py \u4E0D\u5B58\u5728: " + script };
-  const creationflags = process.platform === "win32" ? 8 | 512 | 16777216 : 0;
+  const creationflags = process.platform === "win32" ? 8 | 512 | 16777216 | 134217728 : 0;
   const child = spawn("python", [script, ...args], {
     cwd: path.dirname(script),
     stdio: "ignore",
@@ -184,7 +184,7 @@ function runBrowserctlAsync(args, timeoutMs = 8e3) {
       resolve({ started: false, error: "browserctl.py \u4E0D\u5B58\u5728: " + script });
       return;
     }
-    const creationflags = process.platform === "win32" ? 8 | 512 | 16777216 : 0;
+    const creationflags = process.platform === "win32" ? 8 | 512 | 16777216 | 134217728 : 0;
     let done = false;
     const child = spawn("python", [script, ...args], {
       cwd: path.dirname(script),
@@ -597,7 +597,7 @@ function apply(ctx, config = {}) {
           } catch (e) {
             svg = "";
           }
-          sendJson(res, 200, { ok: true, url: uidUrl, svg, long: true, ttl: j.ttl || 0, panel: effectivePanelUrl(), kind: j.kind || "long_pair" });
+          sendJson(res, 200, { ok: true, url: uidUrl, svg, long: true, ttl: j.ttl || 0, panel: effectivePanelUrl(), kind: j.kind || "long_pair", grant: j.grant || "", uses: j.uses || 1, remaining: j.remaining || 1 });
         } catch (e) {
           sendJson(res, 503, { error: "\u65E0\u6CD5\u8FDE\u63A5\u6D4F\u89C8\u5668\u63A7\u5236\u95F8\u673A:" + String(e && e.message || e) + ' (\u5148\u70B9"\u5F00\u59CB\u63A7\u5236"\u542F\u52A8\u96A7\u9053)' });
         }
@@ -1005,7 +1005,12 @@ function apply(ctx, config = {}) {
       const script = path.join(ROOT, "win_push.py");
       if (!existsSync(script)) return void 0;
       try {
-        const child = spawn("python", [script], { cwd: ROOT, stdio: "ignore" });
+        const child = spawn("python", [script], {
+          cwd: ROOT,
+          stdio: "ignore",
+          windowsHide: true
+          // 防 CMD 窗口弹出(win_push 是控制台程序,不隐藏会闪黑框)
+        });
         child.on("error", () => {
         });
         return () => {
@@ -1030,16 +1035,21 @@ function apply(ctx, config = {}) {
         if (ensureRunning) return;
         ensureRunning = (async () => {
           try {
-            for (let attempt = 1; attempt <= 4; attempt++) {
+            for (let attempt = 1; attempt <= 10; attempt++) {
               try {
                 const r = await buildTunnel();
-                if (r && r.forwarder) return r;
+                if (r && r.forwarder) {
+                  ctx.logger.info("dshremote: \u81EA\u52A8\u5EFA\u96A7\u9053\u6210\u529F(\u7B2C %d \u6B21\u5C1D\u8BD5,forwarder=%s)", attempt, r.forwarder);
+                  return r;
+                }
+                ctx.logger.warn("dshremote: \u81EA\u52A8\u5EFA\u96A7\u9053 forwarder \u672A\u5C31\u7EEA(\u7B2C %d \u6B21\u5C1D\u8BD5)", attempt);
               } catch (e) {
+                ctx.logger.warn("dshremote: \u81EA\u52A8\u5EFA\u96A7\u9053\u5931\u8D25(\u7B2C %d \u6B21\u5C1D\u8BD5):%s", attempt, String(e && e.message || e));
               }
-              if (attempt < 4) await new Promise((res) => setTimeout(res, 5e3));
+              if (attempt < 10) await new Promise((res) => setTimeout(res, 5e3));
             }
           } catch (e) {
-            console.error("[browserctl] \u542F\u52A8\u81EA\u52A8\u5EFA\u96A7\u9053\u5931\u8D25:", e);
+            ctx.logger.error("dshremote: \u542F\u52A8\u81EA\u52A8\u5EFA\u96A7\u9053\u5F02\u5E38:", e);
           } finally {
             ensureRunning = null;
           }
@@ -1068,7 +1078,10 @@ function apply(ctx, config = {}) {
             cwd: path.dirname(SCRIPT_PATH),
             stdio: "ignore",
             detached: true,
-            windowsHide: true
+            windowsHide: true,
+            // CREATE_BREAKAWAY_FROM_JOB | CREATE_NO_WINDOW:跳出作业对象不被连坐杀,
+            // 且不弹 CMD 窗口
+            creationflags: process.platform === "win32" ? 16777216 | 134217728 : 0
           }).unref();
         } catch (e) {
         }
