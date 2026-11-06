@@ -497,6 +497,88 @@ function runBrowserctlAsync(args, timeoutMs = 8000) {
   })
 }
 
+// ---- 提权启动/停止(Windows UAC) -------------------------------------------
+// 什么时候真的需要提权(其它情况别用,提权解决不了目录混用/端口不一致):
+//   1) Defender / 安全软件把 frpc.exe 按 PUA 拦掉 → WinError 5「拒绝访问」;
+//   2) 残留的 fwd/frpc/watch 是上一次以管理员身份起来的,普通权限杀不掉 → 一直重复;
+//   3) 核心目录在需要管理员写权限的路径下(状态文件 replace 失败 WinError 5)。
+// 做法:让 Windows 自己弹 UAC,用户点「是」后以管理员身份跑 `browserctl.py <action>`。
+// 用户点「否」/ 没弹出来时按取消返回,绝不静默当成成功。
+const PS_EXE = 'powershell.exe'
+
+function _psQuote(s) {
+  return "'" + String(s).replace(/'/g, "''") + "'"
+}
+
+/** 以管理员身份运行 browserctl.py <action>;返回 {ok,pid} / {ok:false,error} / {ok:true,pending}。 */
+function runElevated(action = 'start') {
+  if (process.platform !== 'win32') {
+    return Promise.resolve({ ok: false, error: '提权启动只支持 Windows(当前平台 ' + process.platform + ')' })
+  }
+  if (!ROOT) return Promise.resolve({ ok: false, error: coreNotFoundError() })
+  if (!existsSync(SCRIPT_PATH)) {
+    return Promise.resolve({ ok: false, error: 'browserctl.py 不存在: ' + SCRIPT_PATH })
+  }
+  const py = resolvePython()
+  if (py.missing) return Promise.resolve({ ok: false, error: PY_NOT_FOUND })
+  // 用 Start-Process -Verb RunAs 走 Windows 自己的 UAC 流程;参数逐个单引号引用,
+  // 路径里有空格/中文都不会被拆。(这里不能用 spawn 的 shell:false 直接提权,
+  // CreateProcess 没有「顺便帮我弹 UAC」的开关。)
+  const argList = [...py.pre, SCRIPT_PATH, action].map(_psQuote).join(',')
+  const cmd = "$ErrorActionPreference='Stop'; try { "
+    + '$p = Start-Process -FilePath ' + _psQuote(py.cmd)
+    + ' -ArgumentList @(' + argList + ')'
+    + ' -WorkingDirectory ' + _psQuote(path.dirname(SCRIPT_PATH))
+    + ' -Verb RunAs -WindowStyle Hidden -PassThru; '
+    + "Write-Output ('ELEVATED_PID=' + $p.Id) } "
+    + "catch { Write-Output ('ELEVATE_ERROR=' + $_.Exception.Message); exit 3 }"
+  return new Promise((resolve) => {
+    let out = ''
+    let err = ''
+    let done = false
+    let timer = null
+    const finish = (v) => {
+      if (done) return
+      done = true
+      if (timer) clearTimeout(timer)
+      resolve(v)
+    }
+    let child = null
+    try {
+      child = spawn(PS_EXE, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', cmd], {
+        windowsHide: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      })
+    } catch (e) {
+      finish({ ok: false, error: '无法调用 PowerShell: ' + String((e && e.message) || e) })
+      return
+    }
+    child.stdout.on('data', (d) => { out += String(d) })
+    child.stderr.on('data', (d) => { err += String(d) })
+    child.on('error', (e) => finish({ ok: false, error: '无法调用 PowerShell: ' + String((e && e.message) || e) }))
+    // UAC 对话框没人点的时候不能把面板永远卡在 loading:90s 后按「未确认」返回。
+    timer = setTimeout(() => {
+      try { child.kill() } catch {}
+      finish({ ok: true, pending: true })
+    }, 90000)
+    child.on('exit', (code) => {
+      const m = /ELEVATED_PID=(\d+)/.exec(out)
+      if (code === 0 && m) {
+        finish({ ok: true, elevated: true, pid: Number(m[1]) })
+        return
+      }
+      const reason = (/ELEVATE_ERROR=(.+)/.exec(out) || [])[1] || err.trim() || out.trim()
+      finish({
+        ok: false,
+        canceled: code === 3,
+        error: reason
+          ? ('提权被拒绝或执行失败:' + reason)
+          : '提权被取消(UAC 对话框没有确认)。',
+      })
+    })
+  })
+}
+
 function totpWrite(enabled, reset) {
   const st = readState()
   if (enabled && (reset || !st.totp_secret)) {
@@ -906,6 +988,25 @@ export function apply(ctx, config = {}) {
             console.error('[browserctl] release-port 异常:', e)
           }
           sendJson(res, 200, runBrowserctl(['stop']))
+          return
+        }
+        if (route === '/browserctl/api/elevate') {
+          // 提权启动/停止:只有「点按钮」才会走到这里(前端在启动失败后给出按钮),
+          // 不会自动弹 UAC。start 时按普通启动同一套门禁(官方模式要先登录),
+          // 否则用户绕过登录直接提权起隧道,公网入口拿不到端口。
+          const action = (url.searchParams.get('action') || 'start').toLowerCase()
+          if (action !== 'start' && action !== 'stop') {
+            sendJson(res, 400, { ok: false, error: 'action 只能是 start 或 stop' })
+            return
+          }
+          const r = await runElevated(action)
+          // 提权进程是分离的:这里只回「UAC 结果」,是否真的起来由前端轮询 /status 判断。
+          sendJson(res, r.ok ? 200 : (r.canceled ? 409 : 500), {
+            ...r,
+            action,
+            forwarder: await portOpen(3080),
+            tunnel: tunnelReady().tunnel,
+          })
           return
         }
         if (route === '/browserctl/api/qr') {
@@ -1343,12 +1444,15 @@ export function apply(ctx, config = {}) {
               remotePort: Number(sec.frp_remote_port) || 0,
               hasToken: !!sec.frp_token,
               version: VERSION,
+              // 前端据此决定要不要给「以管理员身份启动」按钮(只有 Windows 才有 UAC)
+              canElevate: process.platform === 'win32',
             })
           } else {
             sendJson(res, 200, {
               mode: 'official',
               account: sec.server_uid ? { email: sec.server_email || '', uid: sec.server_uid, remotePort: Number(sec.frp_remote_port) || null } : null,
               version: VERSION,
+              canElevate: process.platform === 'win32',
             })
           }
           return

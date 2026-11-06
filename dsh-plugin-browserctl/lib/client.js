@@ -3114,6 +3114,8 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
   const [accountOpen, setAccountOpen] = (0, import_react.useState)(false);
   const [loginPrompt, setLoginPrompt] = (0, import_react.useState)(false);
   const [startErr, setStartErr] = (0, import_react.useState)("");
+  const [canElevate, setCanElevate] = (0, import_react.useState)(false);
+  const [elevNeed, setElevNeed] = (0, import_react.useState)("");
   const [acctMe, setAcctMe] = (0, import_react.useState)(null);
   const [cfgMode, setCfgMode] = (0, import_react.useState)("official");
   const panel = (0, import_react.useRef)(null);
@@ -3148,6 +3150,7 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
     if (!open) return;
     fetch(API_P + "/browserctl/api/config", { cache: "no-store" }).then((r) => r.json().then((j) => {
       if (j && j.mode) setCfgMode(j.mode);
+      if (j && typeof j.canElevate === "boolean") setCanElevate(j.canElevate);
     }).catch(() => {
     })).catch(() => {
     });
@@ -3216,6 +3219,7 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
       }
       if (lastErr) console.error("[browserctl] ensure \u5168\u90E8\u91CD\u8BD5\u5931\u8D25:", lastErr);
       setStartErr(lastErr);
+      setElevNeed(lastErr ? "start" : "");
       await new Promise((r) => setTimeout(r, 600));
       setReloadToken((x) => x + 1);
     });
@@ -3226,6 +3230,7 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
     } catch {
     }
     const deadline = Date.now() + 12e3;
+    let still = false;
     for (; ; ) {
       let fwd = true;
       try {
@@ -3236,10 +3241,57 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
         fwd = false;
       }
       if (!fwd) break;
-      if (Date.now() >= deadline) break;
+      if (Date.now() >= deadline) {
+        still = true;
+        break;
+      }
       await new Promise((r) => setTimeout(r, 300));
     }
+    setElevNeed(still ? "stop" : "");
+    if (still) setStartErr(t("elevateStopHint"));
     await new Promise((r) => setTimeout(r, 200));
+    setReloadToken((x) => x + 1);
+  });
+  const elevateChain = (requested) => run("elevate", async () => {
+    const act = requested === "stop" ? "stop" : "start";
+    let lastErr = "";
+    try {
+      const r = await fetch(API_P + "/browserctl/api/elevate?action=" + act, { cache: "no-store" });
+      const j = await r.json().catch(() => ({}));
+      if (!j || !j.ok) lastErr = j && j.error || "HTTP " + r.status;
+    } catch (e) {
+      lastErr = String(e && e.message || e);
+    }
+    if (!lastErr) {
+      const wantUp = act === "start";
+      const deadline = Date.now() + 45e3;
+      let fwd = !wantUp;
+      while (Date.now() < deadline) {
+        try {
+          const j = await fetch(API_P + "/browserctl/api/status", { cache: "no-store" }).then((x) => x.json());
+          fwd = !!j.forwarder;
+          const tun = j.tunnel;
+          const tunnelOk = !tun || tun.ok !== false;
+          if (wantUp ? fwd && tunnelOk : !fwd) break;
+          if (wantUp && j.startError) {
+            lastErr = String(j.startError);
+            break;
+          }
+        } catch {
+          fwd = false;
+        }
+        await new Promise((r) => setTimeout(r, 400));
+      }
+      if (!lastErr && wantUp && !fwd) {
+        lastErr = "\u63D0\u6743\u542F\u52A8\u540E 45 \u79D2\u5185\u95F8\u673A(3080)\u4ECD\u672A\u5C31\u7EEA,\u8BF7\u67E5\u770B browserctl_start.log \u4E0E browserctl_fwd.log\u3002";
+      }
+      if (!lastErr && !wantUp && fwd) {
+        lastErr = "\u63D0\u6743\u505C\u6B62\u540E\u95F8\u673A(3080)\u4ECD\u5728\u8FD0\u884C,\u8BF7\u67E5\u770B browserctl_fwd.log\u3002";
+      }
+    }
+    setStartErr(lastErr);
+    setElevNeed(lastErr ? act : "");
+    await new Promise((r) => setTimeout(r, 400));
     setReloadToken((x) => x + 1);
   });
   (0, import_react.useEffect)(() => {
@@ -3456,6 +3508,26 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
             /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "ghost", size: "sm", disabled: gating, onClick: refresh, children: t("pairSwap") })
           ] }),
           /* @__PURE__ */ (0, import_jsx_runtime.jsx)(IosGuideCard, { t, reloadToken }),
+          elevNeed && canElevate && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { style: {
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: 6,
+            margin: "8px 0 0",
+            flex: "0 0 auto"
+          }, children: [
+            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: {
+              fontSize: 11,
+              lineHeight: 1.5,
+              textAlign: "center",
+              color: "var(--dsw-alias-state-error-primary,#e5655c)"
+            }, children: elevNeed === "stop" ? t("elevateStopHint") : t("elevateHint") }),
+            /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "secondary", size: "sm", disabled: gating, onClick: () => elevateChain(elevNeed), children: busy === "elevate" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
+              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlSpinner", "aria-hidden": "true" }),
+              " ",
+              t("elevating")
+            ] }) : elevNeed === "stop" ? t("elevateStop") : t("elevateStart") })
+          ] }),
           /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlActions", children: [
             !data && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "primary", size: "sm", disabled: gating, onClick: startChain, children: busy === "start" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
               /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlSpinner", "aria-hidden": "true" }),
@@ -3639,6 +3711,11 @@ function apply(ctx) {
       starting: "\u6B63\u5728\u542F\u52A8\u96A7\u9053\u2026",
       stopCtl: "\u505C\u6B62\u63A7\u5236",
       stopping: "\u6B63\u5728\u505C\u6B62\u2026",
+      elevateStart: "\u4EE5\u7BA1\u7406\u5458\u8EAB\u4EFD\u542F\u52A8",
+      elevateStop: "\u4EE5\u7BA1\u7406\u5458\u8EAB\u4EFD\u505C\u6B62",
+      elevating: "\u7B49\u5F85\u63D0\u6743\u786E\u8BA4\u2026",
+      elevateHint: "\u82E5\u5931\u8D25\u539F\u56E0\u662F\u6740\u8F6F\u62E6\u4E86 frpc.exe \u6216\u88AB\u6743\u9650\u6321\u4F4F,\u70B9\u4E0B\u9762\u6309\u94AE\u7528\u7BA1\u7406\u5458\u6743\u9650\u91CD\u8BD5(Windows \u4F1A\u5F39 UAC \u786E\u8BA4\u6846)\u3002",
+      elevateStopHint: "\u505C\u6B62\u6CA1\u751F\u6548:\u8FD9\u5957\u8FDB\u7A0B\u53EF\u80FD\u4EE5\u7BA1\u7406\u5458\u8EAB\u4EFD\u5728\u8DD1,\u666E\u901A\u6743\u9650\u6740\u4E0D\u6389\u3002",
       copyLink: "\u590D\u5236\u94FE\u63A5",
       copied: "\u5DF2\u590D\u5236",
       refresh: "\u5237\u65B0\u4E8C\u7EF4\u7801",
@@ -3827,6 +3904,11 @@ function apply(ctx) {
       starting: "Starting tunnel\u2026",
       stopCtl: "Stop control",
       stopping: "Stopping\u2026",
+      elevateStart: "Start as administrator",
+      elevateStop: "Stop as administrator",
+      elevating: "Waiting for elevation\u2026",
+      elevateHint: "If antivirus blocked frpc.exe or permissions got in the way, retry with administrator rights below (Windows will show a UAC prompt).",
+      elevateStopHint: "Stop did not take effect: these processes may be running as administrator.",
       copyLink: "Copy link",
       copied: "Copied",
       refresh: "Refresh QR",

@@ -3282,6 +3282,11 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
   // 启动失败的具体原因(如「找不到 Python」)。以前只 console.error,界面什么都不显示,
   // 用户只看到「点了没反应」,所以这里必须把原因原样呈现出来。
   const [startErr, setStartErr] = useState('')
+  // 提权(UAC)通道是否可用(只有 Windows 有);以及「该用提权补偿哪个动作」:
+  // '' 不需要 / 'start' 启动失败后重试 / 'stop' 普通权限停不掉。
+  // 提权按钮只在失败之后出现,点击才弹 UAC,绝不在启动时自动弹。
+  const [canElevate, setCanElevate] = useState(false)
+  const [elevNeed, setElevNeed] = useState('')
   // 顶栏账号按钮的登录态(登录后显示邮箱)
   const [acctMe, setAcctMe] = useState(null)
   // 当前连接模式(official/selfhost),用于判断未登录时是否显示二维码
@@ -3310,7 +3315,10 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
   useEffect(() => {
     if (!open) return
     fetch(API_P + '/browserctl/api/config', { cache: 'no-store' })
-      .then(r => r.json().then(j => { if (j && j.mode) setCfgMode(j.mode) }).catch(() => {}))
+      .then(r => r.json().then(j => {
+        if (j && j.mode) setCfgMode(j.mode)
+        if (j && typeof j.canElevate === 'boolean') setCanElevate(j.canElevate)
+      }).catch(() => {}))
       .catch(() => {})
   }, [open])
   const startChain = async () => {
@@ -3380,6 +3388,10 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
       }
       if (lastErr) console.error('[browserctl] ensure 全部重试失败:', lastErr)
       setStartErr(lastErr)
+      // 启动失败后把「以管理员身份启动」的入口放出来(典型原因:Defender/杀软按 PUA 拦
+      // frpc.exe 导致 WinError 5 拒绝访问、状态文件被管理员进程占用)。只有用户点按钮
+      // 才弹 UAC,不是启动时自动弹。
+      setElevNeed(lastErr ? 'start' : '')
       await new Promise(r => setTimeout(r, 600))
       setReloadToken(x => x + 1)
     })
@@ -3391,6 +3403,7 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
     // stop 是分离进程,命令返回时闸机可能还没关完(端口未释放)。
     // 必须轮询等到 3080 真正关闭再刷新二维码,否则旧二维码不消失、开始按钮不出现。
     const deadline = Date.now() + 12000
+    let still = false
     for (;;) {
       let fwd = true
       try {
@@ -3399,10 +3412,55 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
         fwd = !!j.forwarder
       } catch { fwd = false }
       if (!fwd) break
-      if (Date.now() >= deadline) break
+      if (Date.now() >= deadline) { still = true; break }
       await new Promise(r => setTimeout(r, 300))
     }
+    // 12 秒了闸机还在跑:最常见原因是这套 fwd/frpc 是「以管理员身份」起的,
+    // 普通权限的 DSH 杀不掉它(OpenProcess 拒绝访问 → taskkill 失败但没人报错)。
+    // 这种情况下只能再走一次 UAC 提权停止。
+    setElevNeed(still ? 'stop' : '')
+    if (still) setStartErr(t('elevateStopHint'))
     await new Promise(r => setTimeout(r, 200))
+    setReloadToken(x => x + 1)
+  })
+  // 提权启动/停止:只在用户点按钮后触发,requested 是 'start' 或 'stop'。
+  // 提权进程是分离的,接口只回 UAC 的结果;真正是否起来由这里轮询 /status 判断。
+  const elevateChain = (requested) => run('elevate', async () => {
+    const act = requested === 'stop' ? 'stop' : 'start'
+    let lastErr = ''
+    try {
+      const r = await fetch(API_P + '/browserctl/api/elevate?action=' + act, { cache: 'no-store' })
+      const j = await r.json().catch(() => ({}))
+      if (!j || !j.ok) lastErr = (j && j.error) || ('HTTP ' + r.status)
+    } catch (e) {
+      lastErr = String((e && e.message) || e)
+    }
+    if (!lastErr) {
+      // 管理员进程起来后要重新读 state:start 等 3080 + tunnel 都就绪,stop 等 3080 关闭。
+      const wantUp = act === 'start'
+      const deadline = Date.now() + 45000
+      let fwd = !wantUp
+      while (Date.now() < deadline) {
+        try {
+          const j = await fetch(API_P + '/browserctl/api/status', { cache: 'no-store' }).then(x => x.json())
+          fwd = !!j.forwarder
+          const tun = j.tunnel
+          const tunnelOk = !tun || tun.ok !== false
+          if (wantUp ? (fwd && tunnelOk) : !fwd) break
+          if (wantUp && j.startError) { lastErr = String(j.startError); break }
+        } catch { fwd = false }
+        await new Promise(r => setTimeout(r, 400))
+      }
+      if (!lastErr && wantUp && !fwd) {
+        lastErr = '提权启动后 45 秒内闸机(3080)仍未就绪,请查看 browserctl_start.log 与 browserctl_fwd.log。'
+      }
+      if (!lastErr && !wantUp && fwd) {
+        lastErr = '提权停止后闸机(3080)仍在运行,请查看 browserctl_fwd.log。'
+      }
+    }
+    setStartErr(lastErr)
+    setElevNeed(lastErr ? act : '')
+    await new Promise(r => setTimeout(r, 400))
     setReloadToken(x => x + 1)
   })
 
@@ -3616,6 +3674,24 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
                 </div>
               )}
               <IosGuideCard t={t} reloadToken={reloadToken} />
+              {elevNeed && canElevate && (
+                <div style={{
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
+                  margin: '8px 0 0', flex: '0 0 auto',
+                }}>
+                  <span style={{
+                    fontSize: 11, lineHeight: 1.5, textAlign: 'center',
+                    color: 'var(--dsw-alias-state-error-primary,#e5655c)',
+                  }}>
+                    {elevNeed === 'stop' ? t('elevateStopHint') : t('elevateHint')}
+                  </span>
+                  <Button variant="secondary" size="sm" disabled={gating} onClick={() => elevateChain(elevNeed)}>
+                    {busy === 'elevate'
+                      ? (<><span className="dshBrowserCtlSpinner" aria-hidden="true" /> {t('elevating')}</>)
+                      : (elevNeed === 'stop' ? t('elevateStop') : t('elevateStart'))}
+                  </Button>
+                </div>
+              )}
               <div className="dshBrowserCtlActions">
                 {!data && (
                   <Button variant="primary" size="sm" disabled={gating} onClick={startChain}>
@@ -3825,6 +3901,11 @@ export function apply(ctx) {
       starting: '正在启动隧道…',
       stopCtl: '停止控制',
       stopping: '正在停止…',
+      elevateStart: '以管理员身份启动',
+      elevateStop: '以管理员身份停止',
+      elevating: '等待提权确认…',
+      elevateHint: '若失败原因是杀软拦了 frpc.exe 或被权限挡住,点下面按钮用管理员权限重试(Windows 会弹 UAC 确认框)。',
+      elevateStopHint: '停止没生效:这套进程可能以管理员身份在跑,普通权限杀不掉。',
       copyLink: '复制链接',
       copied: '已复制',
       refresh: '刷新二维码',
@@ -4013,6 +4094,11 @@ export function apply(ctx) {
       starting: 'Starting tunnel…',
       stopCtl: 'Stop control',
       stopping: 'Stopping…',
+      elevateStart: 'Start as administrator',
+      elevateStop: 'Stop as administrator',
+      elevating: 'Waiting for elevation…',
+      elevateHint: 'If antivirus blocked frpc.exe or permissions got in the way, retry with administrator rights below (Windows will show a UAC prompt).',
+      elevateStopHint: 'Stop did not take effect: these processes may be running as administrator.',
       copyLink: 'Copy link',
       copied: 'Copied',
       refresh: 'Refresh QR',

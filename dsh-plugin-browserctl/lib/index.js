@@ -4952,6 +4952,72 @@ function runBrowserctlAsync(args, timeoutMs = 8e3) {
     });
   });
 }
+var PS_EXE = "powershell.exe";
+function _psQuote(s) {
+  return "'" + String(s).replace(/'/g, "''") + "'";
+}
+function runElevated(action = "start") {
+  if (process.platform !== "win32") {
+    return Promise.resolve({ ok: false, error: "\u63D0\u6743\u542F\u52A8\u53EA\u652F\u6301 Windows(\u5F53\u524D\u5E73\u53F0 " + process.platform + ")" });
+  }
+  if (!ROOT) return Promise.resolve({ ok: false, error: coreNotFoundError() });
+  if (!existsSync(SCRIPT_PATH)) {
+    return Promise.resolve({ ok: false, error: "browserctl.py \u4E0D\u5B58\u5728: " + SCRIPT_PATH });
+  }
+  const py = resolvePython();
+  if (py.missing) return Promise.resolve({ ok: false, error: PY_NOT_FOUND });
+  const argList = [...py.pre, SCRIPT_PATH, action].map(_psQuote).join(",");
+  const cmd = "$ErrorActionPreference='Stop'; try { $p = Start-Process -FilePath " + _psQuote(py.cmd) + " -ArgumentList @(" + argList + ") -WorkingDirectory " + _psQuote(path.dirname(SCRIPT_PATH)) + " -Verb RunAs -WindowStyle Hidden -PassThru; Write-Output ('ELEVATED_PID=' + $p.Id) } catch { Write-Output ('ELEVATE_ERROR=' + $_.Exception.Message); exit 3 }";
+  return new Promise((resolve) => {
+    let out = "";
+    let err = "";
+    let done = false;
+    let timer = null;
+    const finish = (v) => {
+      if (done) return;
+      done = true;
+      if (timer) clearTimeout(timer);
+      resolve(v);
+    };
+    let child = null;
+    try {
+      child = spawn(PS_EXE, ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", cmd], {
+        windowsHide: true,
+        stdio: ["ignore", "pipe", "pipe"]
+      });
+    } catch (e) {
+      finish({ ok: false, error: "\u65E0\u6CD5\u8C03\u7528 PowerShell: " + String(e && e.message || e) });
+      return;
+    }
+    child.stdout.on("data", (d) => {
+      out += String(d);
+    });
+    child.stderr.on("data", (d) => {
+      err += String(d);
+    });
+    child.on("error", (e) => finish({ ok: false, error: "\u65E0\u6CD5\u8C03\u7528 PowerShell: " + String(e && e.message || e) }));
+    timer = setTimeout(() => {
+      try {
+        child.kill();
+      } catch {
+      }
+      finish({ ok: true, pending: true });
+    }, 9e4);
+    child.on("exit", (code) => {
+      const m = /ELEVATED_PID=(\d+)/.exec(out);
+      if (code === 0 && m) {
+        finish({ ok: true, elevated: true, pid: Number(m[1]) });
+        return;
+      }
+      const reason = (/ELEVATE_ERROR=(.+)/.exec(out) || [])[1] || err.trim() || out.trim();
+      finish({
+        ok: false,
+        canceled: code === 3,
+        error: reason ? "\u63D0\u6743\u88AB\u62D2\u7EDD\u6216\u6267\u884C\u5931\u8D25:" + reason : "\u63D0\u6743\u88AB\u53D6\u6D88(UAC \u5BF9\u8BDD\u6846\u6CA1\u6709\u786E\u8BA4)\u3002"
+      });
+    });
+  });
+}
 function totpWrite(enabled, reset) {
   const st = readState();
   if (enabled && (reset || !st.totp_secret)) {
@@ -5286,6 +5352,21 @@ function apply(ctx, config = {}) {
           console.error("[browserctl] release-port \u5F02\u5E38:", e);
         }
         sendJson(res, 200, runBrowserctl(["stop"]));
+        return;
+      }
+      if (route === "/browserctl/api/elevate") {
+        const action = (url.searchParams.get("action") || "start").toLowerCase();
+        if (action !== "start" && action !== "stop") {
+          sendJson(res, 400, { ok: false, error: "action \u53EA\u80FD\u662F start \u6216 stop" });
+          return;
+        }
+        const r = await runElevated(action);
+        sendJson(res, r.ok ? 200 : r.canceled ? 409 : 500, {
+          ...r,
+          action,
+          forwarder: await portOpen(3080),
+          tunnel: tunnelReady().tunnel
+        });
         return;
       }
       if (route === "/browserctl/api/qr") {
@@ -5749,13 +5830,16 @@ function apply(ctx, config = {}) {
             port: Number(sec.frp_server_port) || 17e3,
             remotePort: Number(sec.frp_remote_port) || 0,
             hasToken: !!sec.frp_token,
-            version: VERSION
+            version: VERSION,
+            // 前端据此决定要不要给「以管理员身份启动」按钮(只有 Windows 才有 UAC)
+            canElevate: process.platform === "win32"
           });
         } else {
           sendJson(res, 200, {
             mode: "official",
             account: sec.server_uid ? { email: sec.server_email || "", uid: sec.server_uid, remotePort: Number(sec.frp_remote_port) || null } : null,
-            version: VERSION
+            version: VERSION,
+            canElevate: process.platform === "win32"
           });
         }
         return;
