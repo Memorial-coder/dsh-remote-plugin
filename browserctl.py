@@ -41,6 +41,7 @@ import select
 import sys
 import threading
 import time
+import traceback
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -2290,6 +2291,7 @@ class GateHandler(BaseHTTPRequestHandler):
 
     def _send(self, code, body, content_type="text/html; charset=utf-8", headers=None):
         data = body.encode() if isinstance(body, str) else body
+        self._responded = True  # 供 _handle 兜底判断"是否已经回过响应"
         self.send_response(code)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(data)))
@@ -2737,6 +2739,13 @@ class GateHandler(BaseHTTPRequestHandler):
         if streaming and panel_root_html \
                 and (not upstream_len or upstream_len <= self.MAX_CACHEABLE_BYTES):
             streaming = False
+        # 移动端工具条(返回/视口调整)也注入到非根 HTML 页面,不只是面板首页
+        is_html_doc = (resp.status == 200
+                       and "text/html" in dict((k.lower(), v) for k, v in resp_headers).get("content-type", "")
+                       and not panel_root_html)
+        if streaming and is_html_doc \
+                and (not upstream_len or upstream_len <= self.MAX_CACHEABLE_BYTES):
+            streaming = False
         # SSE 并发上限:必须在发头之前判定,超限直接 503
         rh = dict((k.lower(), v) for k, v in resp_headers)
         sse_mode = ("event-stream" in rh.get("content-type", "") and not rh.get("content-encoding"))
@@ -2756,6 +2765,8 @@ class GateHandler(BaseHTTPRequestHandler):
             data = resp.read()
             if panel_root_html:
                 data = self._inject_pwa_tags(data)  # 在压缩前注入,ETag 才覆盖注入后的字节
+            elif is_html_doc:
+                data = self._inject_pwa_tags(data, toolbar_only=True)  # 非根页面只注工具条
             if resp.status == 200:
                 cache_ctl = self._cache_policy(self.path)
                 # 本次响应要种设备 Cookie(2FA-off 首次登记):内容与常规请求不同,不缓存不 304
@@ -2771,7 +2782,7 @@ class GateHandler(BaseHTTPRequestHandler):
                     self.send_header("Cache-Control", cache_ctl)
                     self.send_header("ETag", etag)
                     self.send_header("Vary", "Accept-Encoding")
-                    if panel_root_html:
+                    if panel_root_html or is_html_doc:
                         # App(无工具条)与浏览器(有工具条)注入的 HTML 不同,缓存条目按 UA 分开
                         self.send_header("Vary", "Accept-Encoding, User-Agent")
                     self.end_headers()
@@ -2782,12 +2793,12 @@ class GateHandler(BaseHTTPRequestHandler):
                                 if k.lower() not in ("cache-control", "expires", "pragma")]
                 resp_headers.append(("Cache-Control", cache_ctl))
                 resp_headers.append(("ETag", etag))
-                if panel_root_html:
+                if panel_root_html or is_html_doc:
                     resp_headers.append(("Vary", "Accept-Encoding, User-Agent"))
                 elif not any(k.lower() == "vary" for k, _ in resp_headers):
                     resp_headers.append(("Vary", "Accept-Encoding"))
-                # 内容寻址静态资源(非面板根)存进压缩缓存,下次命中不再走上游
-                if not panel_root_html and self.command == "GET" and not extra_set_cookie:
+                # 内容寻址静态资源(非面板根、非注入过工具条的 HTML)存进压缩缓存
+                if not panel_root_html and not is_html_doc and self.command == "GET" and not extra_set_cookie:
                     self._asset_cache_put(self.path, resp_headers, data, etag)
         elif resp.status == 200:
             # 流式(chunked)响应拿不到完整正文,算不了 ETag,但缓存头照样能给:
@@ -3070,7 +3081,10 @@ color:#fff;text-decoration:none;font-size:14px}
     def _gate_long_pair_claim(self):
         """长期配对 claim:登记设备会话 + 种 30 天 bc-gate cookie + 302 进面板。
         服务端设备注册表形成三端验证(手机 devid → 公网 nginx → 本地闸机)。
-        同一 devid 的手机重复扫码时复用已有 dev,不重复计数。"""
+        同一 devid 的手机重复扫码时复用已有 dev,不重复计数。
+        注意:无论服务端注册成功与否,必须给手机发 302+Cookie。
+        _server_register_device 已加固(捕获 BaseException),此处的 try/finally
+        是第二道防线,防止新增的 SystemExit/异常静默杀死处理线程→502。"""
         # 先消费挂起的"踢全部"(gate_kick_seq 变更):claim 端点不经过 _gate_ok,
         # 若不先处理,新会话会在下一个面板请求被 _process_kicks 清掉,
         # 表现为"重新配对也没用、一直 403"。
@@ -3099,9 +3113,7 @@ color:#fff;text-decoration:none;font-size:14px}
                               "since": now, "ts": now}
         _device_ensure(_device_key({"dev": dev, "devid": devid_q}), _sessions[dev])
         _dump_sessions()
-        _append_event("pair", "手机 App 长期配对成功 IP=%s UA=%s" % (ip, ua[:40]))
-        # 向公网服务器注册设备(三端验证关键环节)
-        _server_register_device(dev, name + (" devid=" + devid_q if devid_q else ""), ip, ua)
+        # 先准备 Cookie 和重定向(即使后面注册失败,手机也要拿到 302+Cookie)
         st = gate_state()
         secret = st.get("link_secret")
         if not secret:
@@ -3112,6 +3124,12 @@ color:#fff;text-decoration:none;font-size:14px}
                     % (GATE_COOKIE, cookie, GATE_MAX_AGE)),
                    ("Referrer-Policy", "no-referrer"),
                    ("Location", "../..")]
+        # 服务端注册(官方模式没有 SSH 凭据,必然失败;已加固为静默失败)
+        try:
+            _server_register_device(dev, name + (" devid=" + devid_q if devid_q else ""), ip, ua)
+        except BaseException as e:
+            print("[gate] 服务端注册异常(不影响配对): %s" % e, flush=True)
+        _append_event("pair", "手机 App 长期配对成功 IP=%s UA=%s" % (ip, ua[:40]))
         self._send(302, "redirecting…", "text/html; charset=utf-8", headers=headers)
 
     def _gate_bootstrap(self):
@@ -3737,9 +3755,10 @@ color:#fff;text-decoration:none;font-size:14px}
                    headers=[("Cache-Control", "no-cache")])
         return True
 
-    def _inject_pwa_tags(self, html):
+    def _inject_pwa_tags(self, html, toolbar_only=False):
         """往面板根 HTML 的 <head> 里塞 PWA 标签(manifest/apple-touch-icon/meta/SW 注册)
         和移动端工具条(返回/全屏/视口,见 _MOBILE_TOOLBAR_JS,仅触屏设备自行显示)。
+        toolbar_only=True 时只注入工具条,跳过 PWA 标签(用于非根 HTML 页面)。
         App(UA 含 DshRemote/)不注入工具条——App 有自己的原生导航,不需要悬浮按钮。
         全部用相对路径:面板无论从 /p/<port>/ 还是 /dsh-remote/p/<uid>/(uid 稳定配对)
         打开,都解析到当前前缀下的本闸机静态资源 —— 端口变化后 PWA 图标/SW 照常工作。
@@ -3747,16 +3766,21 @@ color:#fff;text-decoration:none;font-size:14px}
         # App 不注入移动端工具条(返回/全屏/视口),App 自有原生导航
         ua = (self.headers.get("User-Agent") or "").lower()
         is_app = "dshremote/" in ua
-        tags = (
-            b'<meta name="apple-mobile-web-app-capable" content="yes">'
-            b'<meta name="mobile-web-app-capable" content="yes">'
-            b'<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">'
-            b'<meta name="theme-color" content="#121316">'
-            b'<link rel="manifest" href="manifest.webmanifest">'
-            b'<link rel="apple-touch-icon" href="icon-180.png">'
-            b'<script>try{navigator.serviceWorker&&navigator.serviceWorker.register("sw.js")}catch(e){}</script>'
-            + (b"" if is_app else _MOBILE_TOOLBAR_TAG)
-        )
+        if toolbar_only:
+            if is_app:
+                return html
+            tags = _MOBILE_TOOLBAR_TAG
+        else:
+            tags = (
+                b'<meta name="apple-mobile-web-app-capable" content="yes">'
+                b'<meta name="mobile-web-app-capable" content="yes">'
+                b'<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">'
+                b'<meta name="theme-color" content="#121316">'
+                b'<link rel="manifest" href="manifest.webmanifest">'
+                b'<link rel="apple-touch-icon" href="icon-180.png">'
+                b'<script>try{navigator.serviceWorker&&navigator.serviceWorker.register("sw.js")}catch(e){}</script>'
+                + (b"" if is_app else _MOBILE_TOOLBAR_TAG)
+            )
         idx = html.lower().find(b"<head")
         if idx < 0:
             return html
@@ -3764,8 +3788,9 @@ color:#fff;text-decoration:none;font-size:14px}
         if end < 0:
             return html
         html = html[:end + 1] + tags + html[end + 1:]
-        # 加载动效:在 </body> 前插入全屏 spinner(非 App 才注入)
-        if not is_app:
+        # 加载动效:在 </body> 前插入全屏 spinner(仅根页 + 非 App 注入;
+        # 非根页是站内跳转,再盖一层开屏会闪一下,工具条本身已够用)
+        if not is_app and not toolbar_only:
             body_end = html.lower().find(b"</body>")
             if body_end >= 0:
                 html = html[:body_end] + _LOADING_SPLASH_TAG + html[body_end:]
@@ -3774,6 +3799,34 @@ color:#fff;text-decoration:none;font-size:14px}
     # ---- 请求入口 ----
 
     def _handle(self):
+        """请求总入口:任何未预期异常都必须变成 5xx + 本地日志,不能静默断连。
+
+        socketserver 的 process_request_thread 只兜 Exception 且不打印 traceback,
+        所以一旦 handler 里冒出 Exception 之外的异常(BaseException 子类,例如
+        _ssh() 在主机密钥未固定时抛的 SystemExit),线程会静默死亡:不返回响应、
+        不打印堆栈 → 公网侧只看到 TCP 被断开,表现为 502 socket hang up,
+        手机端则显示"配对已失效或未授权"(2026-11-06 同学实测)。
+        这里统一兜住并记录,以后同类问题一眼能从日志看到。"""
+        self._responded = False
+        try:
+            self._dispatch()
+        except (BrokenPipeError, ConnectionResetError):
+            pass  # 客户端提前断开,正常现象
+        except BaseException as e:
+            try:
+                print("[gate] 请求处理异常 %s %s: %r" % (self.command, self.path, e), flush=True)
+                traceback.print_exc()
+                _append_event("error", "请求异常 %s %s: %s"
+                              % (self.command, self.path, str(e)[:120]))
+            except BaseException:
+                pass
+            if not self._responded:
+                try:
+                    self._send(500, "<h1>500</h1><p>闸机内部错误,详见本地 browserctl_fwd.log。</p>")
+                except BaseException:
+                    pass
+
+    def _dispatch(self):
         # 面板 PWA 静态资源:公网路径已由 nginx 做过 Cookie 门禁,直接返回
         if self.command in ("GET", "HEAD") and self._serve_pwa():
             return
@@ -4509,14 +4562,15 @@ def _server_read_registry():
 
 
 def _server_write_registry(registry):
-    """SSH 写入服务端设备注册表。失败静默,不抛异常。
+    """SSH 写入服务端设备注册表。返回 True=确实写成功,False=静默失败。
 
     目录先 mkdir -p;权限 644(容器内 worker 需要能读,文件不在站点根目录下)。
     """
     try:
         s = _ssh()
     except BaseException:
-        return
+        return False
+    okay = False
     try:
         data = json.dumps(registry, ensure_ascii=False, indent=2)
         _run(s, "mkdir -p %s" % DEVICE_REGISTRY_DIR)
@@ -4524,6 +4578,7 @@ def _server_write_registry(registry):
         with sftp.open(DEVICE_REGISTRY_PATH, "w") as f:
             f.write(data)
         _run(s, "chmod 644 %s" % DEVICE_REGISTRY_PATH)
+        okay = True
     except BaseException as e:
         print("[gate] 服务端注册表写入失败: %s" % e, flush=True)
     finally:
@@ -4531,6 +4586,7 @@ def _server_write_registry(registry):
             s.close()
         except BaseException:
             pass
+    return okay
 
 
 def _server_migrate_registry():
@@ -4553,21 +4609,43 @@ def _server_migrate_registry():
         s.close()
 
 
+def _srv_registry_enabled():
+    """服务端设备注册表只在自建模式有意义(它靠 SSH 直接改服务器上的 registry.json)。
+
+    官方托管模式下用户没有服务器 SSH 凭据,这一步必然失败,而且 _ssh() 在主机密钥
+    未固定时会抛 SystemExit(BaseException),曾经穿透 except Exception 把处理线程
+    静默杀死 → 公网 502 socket hang up,手机端表现为"配对已失效或未授权"。
+    直接跳过既避免这个坑,也省掉每次配对白等 0.5–15 秒的 SSH 超时。"""
+    try:
+        return load_secrets().get("server_mode") == "selfhost"
+    except BaseException:
+        return False
+
+
 def _server_register_device(dev, name, ip, ua):
-    """向服务端注册表添加/更新设备。失败静默,不抛异常。"""
+    """向服务端注册表添加/更新设备。失败静默,不抛异常。
+    只有真正写成功才打印成功行——以前无论成败都打"服务端注册设备",
+    日志会显示配对成功,而实际上服务器注册表里什么都没有。"""
+    if not _srv_registry_enabled():
+        return False
     try:
         reg = _server_read_registry()
         reg[dev] = {"name": name, "ip": str(ip)[:39],
                      "ua": (ua or "")[:60], "paired_at": time.time(),
                      "revoked": False}
-        _server_write_registry(reg)
-        print("[gate] 服务端注册设备 %s (%s)" % (dev, name), flush=True)
+        if _server_write_registry(reg):
+            print("[gate] 服务端注册设备 %s (%s)" % (dev, name), flush=True)
+            return True
+        return False
     except BaseException as e:
         print("[gate] 服务端注册失败(可能 SSH 未连通): %s" % e, flush=True)
+        return False
 
 
 def _server_unregister_device(dev):
     """从服务端注册表删除设备。失败静默,不抛异常。"""
+    if not _srv_registry_enabled():
+        return
     try:
         reg = _server_read_registry()
         if dev in reg:

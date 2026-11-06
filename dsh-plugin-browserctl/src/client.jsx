@@ -3329,15 +3329,31 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
       // 立即刷新导致 QR 获取失败显示"闸机未运行"、用户以为要再点一次。
       if (!lastErr) {
         const deadline = Date.now() + 12000
+        let fwd = false
         while (Date.now() < deadline) {
-          let fwd = false
           try {
             const r = await fetch(API_P + '/browserctl/api/status', { cache: 'no-store' })
             const j = await r.json().catch(() => ({}))
             fwd = !!j.forwarder
+            if (fwd) break
+            // 后台 ensure 已经失败:立刻取回原因,不用空等到超时
+            if (j.startError) { lastErr = String(j.startError); break }
           } catch { fwd = false }
-          if (fwd) break
           await new Promise(r => setTimeout(r, 300))
+        }
+        // 等满 12 秒还没起来:再探一次把原因取回来(以前这里直接放弃,
+        // 面板就永远停在"隧道正在建立",用户看不到任何失败原因)
+        if (!lastErr && !fwd) {
+          try {
+            const r = await fetch(API_P + '/browserctl/api/status', { cache: 'no-store' })
+            const j = await r.json().catch(() => ({}))
+            lastErr = String(j.startError || '')
+              || '本机闸机(127.0.0.1:3080)在 12 秒内没有就绪。\n'
+               + '请查看 kit 目录下的 browserctl_start.log 与 browserctl_fwd.log;\n'
+               + '最常见原因是安全软件拦截 frpc.exe(详见 INSTALL.md 常见问题第 1 条)。'
+          } catch {
+            lastErr = '本机闸机(127.0.0.1:3080)在 12 秒内没有就绪,请查看 kit 目录下的日志文件。'
+          }
         }
       }
       if (lastErr) console.error('[browserctl] ensure 全部重试失败:', lastErr)

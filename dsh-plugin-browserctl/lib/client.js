@@ -3177,17 +3177,30 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
       }
       if (!lastErr) {
         const deadline = Date.now() + 12e3;
+        let fwd = false;
         while (Date.now() < deadline) {
-          let fwd = false;
           try {
             const r = await fetch(API_P + "/browserctl/api/status", { cache: "no-store" });
             const j = await r.json().catch(() => ({}));
             fwd = !!j.forwarder;
+            if (fwd) break;
+            if (j.startError) {
+              lastErr = String(j.startError);
+              break;
+            }
           } catch {
             fwd = false;
           }
-          if (fwd) break;
           await new Promise((r) => setTimeout(r, 300));
+        }
+        if (!lastErr && !fwd) {
+          try {
+            const r = await fetch(API_P + "/browserctl/api/status", { cache: "no-store" });
+            const j = await r.json().catch(() => ({}));
+            lastErr = String(j.startError || "") || "\u672C\u673A\u95F8\u673A(127.0.0.1:3080)\u5728 12 \u79D2\u5185\u6CA1\u6709\u5C31\u7EEA\u3002\n\u8BF7\u67E5\u770B kit \u76EE\u5F55\u4E0B\u7684 browserctl_start.log \u4E0E browserctl_fwd.log;\n\u6700\u5E38\u89C1\u539F\u56E0\u662F\u5B89\u5168\u8F6F\u4EF6\u62E6\u622A frpc.exe(\u8BE6\u89C1 INSTALL.md \u5E38\u89C1\u95EE\u9898\u7B2C 1 \u6761)\u3002";
+          } catch {
+            lastErr = "\u672C\u673A\u95F8\u673A(127.0.0.1:3080)\u5728 12 \u79D2\u5185\u6CA1\u6709\u5C31\u7EEA,\u8BF7\u67E5\u770B kit \u76EE\u5F55\u4E0B\u7684\u65E5\u5FD7\u6587\u4EF6\u3002";
+          }
         }
       }
       if (lastErr) console.error("[browserctl] ensure \u5168\u90E8\u91CD\u8BD5\u5931\u8D25:", lastErr);

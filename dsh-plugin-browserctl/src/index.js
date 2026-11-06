@@ -10,7 +10,7 @@
 import { spawn, spawnSync } from 'node:child_process'
 import crypto from 'node:crypto'
 import net from 'node:net'
-import { existsSync, readdirSync, readFileSync, writeFileSync, renameSync, rmSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, writeFileSync, renameSync, rmSync, openSync, closeSync, truncateSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import QRCode from 'qrcode'
@@ -51,6 +51,10 @@ const VERSION = '1.0.0'
 let sessionTunnel = false
 // ensure 并发互斥:快速连点「开始控制」时只让一个真正执行,其余返回 pending
 let ensureRunning = null
+// 上一次 ensure 的失败原因。ensure 是后台跑的(前端拿到的是 pending),
+// 前端随后轮询 /browserctl/api/status;失败时若不在 status 里透出来,
+// 面板就会永远停在"隧道正在建立",用户完全看不到原因(同学实测反馈)。
+let lastEnsureError = ''
 
 // 语义化版本比较:相等 0、a>b 正、a<b 负(容忍 'v' 前缀,按数字段逐段比)
 function cmpVersion(a, b) {
@@ -296,6 +300,32 @@ export function resolvePython() {
   return _pyResolved
 }
 
+// browserctl.py CLI 的 stdout/stderr 落盘文件。以前 `stdio: 'ignore'` 把
+// browserctl 里精心写的 _spawn_error_help()(WinError 5 / 未找到 frpc.exe /
+// 端口被占用 等中文指引)全部丢掉了,面板点「开启」失败时用户什么都看不到。
+// 现在写到 kit 目录下的 browserctl_start.log,失败时把尾部摘要透给面板。
+const START_LOG = path.join(path.dirname(SCRIPT_PATH), 'browserctl_start.log')
+const START_LOG_MAX = 256 * 1024
+
+function startLogFd() {
+  try {
+    // 超过上限先清空,别让日志无限涨
+    if (existsSync(START_LOG) && statSync(START_LOG).size > START_LOG_MAX) {
+      truncateSync(START_LOG, 0)
+    }
+    return openSync(START_LOG, 'a')
+  } catch { return null }
+}
+
+/** 读启动日志尾部,给面板显示失败原因用。最多取最后 n 行。 */
+function startLogTail(n = 25) {
+  try {
+    const txt = readFileSync(START_LOG, 'utf8')
+    const lines = txt.split(/\r?\n/).filter(l => l.trim())
+    return lines.slice(-n).join('\n')
+  } catch { return '' }
+}
+
 function runBrowserctl(args) {
   const script = SCRIPT_PATH
   if (!existsSync(script)) return { started: false, error: 'browserctl.py 不存在: ' + script }
@@ -304,12 +334,15 @@ function runBrowserctl(args) {
   const creationflags = process.platform === 'win32'
     ? (0x00000008 | 0x00000200 | 0x01000000 | 0x08000000) // DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB | CREATE_NO_WINDOW
     : 0
+  const fd = startLogFd()
   const child = spawn(py.cmd, [...py.pre, script, ...args], {
     cwd: path.dirname(script),
-    stdio: 'ignore',
+    // 有 fd 就把子进程输出落盘(失败原因可回读);拿不到 fd 才退回忽略
+    stdio: fd === null ? 'ignore' : ['ignore', fd, fd],
     detached: true,
     creationflags,
   })
+  if (fd !== null) { try { closeSync(fd) } catch {} }
   // 必须有 error 监听:ChildProcess 的 'error' 事件无人监听会抛成未捕获异常,
   // 可能连带把 DSH 主进程搞崩(旧代码在这里是裸 spawn)。
   child.on('error', () => {})
@@ -433,8 +466,7 @@ function readDevices() {
 
 function totpUri(secret) {
   return 'otpauth://totp/DshRemote:DeepSeekPanel?secret=' + secret +
-    '&issuer=DshRemote&algorithm=SHA1&digits=6&period=30'
-}
+    '&issuer=DshRemote&algorithm=SHA1&digits=6&period=30'}
 
 function portOpen(port) {
   return new Promise((resolve) => {
@@ -503,8 +535,24 @@ async function buildTunnel() {
     if (fwd) break
     await new Promise(r => setTimeout(r, 400))
   }
+  if (!fwd) {
+    // 15 秒还没起来 = 真的失败了(最常见:Defender 拦 frpc.exe → WinError 5),
+    // 以前这里照样回 ok:true,面板就永远停在"隧道正在建立",用户完全无从排查。
+    const tail = startLogTail(25)
+    return {
+      ok: false,
+      started: true,
+      forwarder: false,
+      error: '本机闸机(127.0.0.1:3080)启动失败。\n'
+        + '最常见原因:Windows Defender / 安全软件把 frpc.exe 判为 PUA 拒绝执行(WinError 5 拒绝访问)。\n'
+        + '处理:在 kit 目录右键用 PowerShell 运行 fix-antivirus.ps1,或按 INSTALL.md「常见问题」第 1 条操作。\n'
+        + '详见 browserctl_start.log 与 browserctl_fwd.log。'
+        + (tail ? '\n\n— 启动日志尾部 —\n' + tail : ''),
+      logTail: tail,
+    }
+  }
   sessionTunnel = true
-  return { ok: true, ...result, forwarder: fwd }
+  return { ok: true, ...result, forwarder: true }
 }
 
 async function qrSvg(text) {
@@ -654,12 +702,14 @@ export function apply(ctx, config = {}) {
           const inFlight = (async () => {
             try {
               const r = await buildTunnel()
-              // 起不来(找不到 Python / 脚本缺失)时用 503,前端才会走错误分支把原因显示出来
+              // 起不来(找不到 Python / 脚本缺失 / 闸机 15s 没就绪)时用 503,前端才会走错误分支把原因显示出来
               const code = r && r.ok === false ? 503 : 200
+              lastEnsureError = r && r.ok === false ? String(r.error || '') : ''
               sendJson(res, code, { ...r, link: secretLink() })
             } catch (e) {
               console.error('[browserctl] ensure 异常:', e)
-              sendJson(res, 503, { ok: false, error: '启动失败:' + String((e && e.message) || e) })
+              lastEnsureError = '启动失败:' + String((e && e.message) || e)
+              sendJson(res, 503, { ok: false, error: lastEnsureError })
             } finally {
               ensureRunning = null
             }
@@ -669,7 +719,9 @@ export function apply(ctx, config = {}) {
         }
         if (route === '/browserctl/api/status') {
           const fwd = await portOpen(3080)
-          sendJson(res, 200, { forwarder: fwd, link: secretLink() })
+          // 闸机没起来时把上次 ensure 的失败原因一并给出,前端才能显示真正的原因
+          sendJson(res, 200, { forwarder: fwd, link: secretLink(),
+                               startError: fwd ? '' : lastEnsureError })
           return
         }
         if (route === '/browserctl/api/stop') {

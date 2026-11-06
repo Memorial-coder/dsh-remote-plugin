@@ -2,7 +2,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import crypto from "node:crypto";
 import net from "node:net";
-import { existsSync, readdirSync, readFileSync, writeFileSync, renameSync, rmSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync, renameSync, rmSync, openSync, closeSync, truncateSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import QRCode from "qrcode";
@@ -29,6 +29,7 @@ function adminHeaders() {
 var VERSION = "1.0.0";
 var sessionTunnel = false;
 var ensureRunning = null;
+var lastEnsureError = "";
 function cmpVersion(a, b) {
   const pa = String(a || "").replace(/^v/i, "").split(".").map((x) => Number(x) || 0);
   const pb = String(b || "").replace(/^v/i, "").split(".").map((x) => Number(x) || 0);
@@ -219,18 +220,47 @@ function resolvePython() {
   _pyResolved = { cmd: "python", pre: [], missing: true };
   return _pyResolved;
 }
+var START_LOG = path.join(path.dirname(SCRIPT_PATH), "browserctl_start.log");
+var START_LOG_MAX = 256 * 1024;
+function startLogFd() {
+  try {
+    if (existsSync(START_LOG) && statSync(START_LOG).size > START_LOG_MAX) {
+      truncateSync(START_LOG, 0);
+    }
+    return openSync(START_LOG, "a");
+  } catch {
+    return null;
+  }
+}
+function startLogTail(n = 25) {
+  try {
+    const txt = readFileSync(START_LOG, "utf8");
+    const lines = txt.split(/\r?\n/).filter((l) => l.trim());
+    return lines.slice(-n).join("\n");
+  } catch {
+    return "";
+  }
+}
 function runBrowserctl(args) {
   const script = SCRIPT_PATH;
   if (!existsSync(script)) return { started: false, error: "browserctl.py \u4E0D\u5B58\u5728: " + script };
   const py = resolvePython();
   if (py.missing) return { started: false, error: PY_NOT_FOUND };
   const creationflags = process.platform === "win32" ? 8 | 512 | 16777216 | 134217728 : 0;
+  const fd = startLogFd();
   const child = spawn(py.cmd, [...py.pre, script, ...args], {
     cwd: path.dirname(script),
-    stdio: "ignore",
+    // 有 fd 就把子进程输出落盘(失败原因可回读);拿不到 fd 才退回忽略
+    stdio: fd === null ? "ignore" : ["ignore", fd, fd],
     detached: true,
     creationflags
   });
+  if (fd !== null) {
+    try {
+      closeSync(fd);
+    } catch {
+    }
+  }
   child.on("error", () => {
   });
   child.unref();
@@ -407,8 +437,18 @@ async function buildTunnel() {
     if (fwd) break;
     await new Promise((r) => setTimeout(r, 400));
   }
+  if (!fwd) {
+    const tail = startLogTail(25);
+    return {
+      ok: false,
+      started: true,
+      forwarder: false,
+      error: "\u672C\u673A\u95F8\u673A(127.0.0.1:3080)\u542F\u52A8\u5931\u8D25\u3002\n\u6700\u5E38\u89C1\u539F\u56E0:Windows Defender / \u5B89\u5168\u8F6F\u4EF6\u628A frpc.exe \u5224\u4E3A PUA \u62D2\u7EDD\u6267\u884C(WinError 5 \u62D2\u7EDD\u8BBF\u95EE)\u3002\n\u5904\u7406:\u5728 kit \u76EE\u5F55\u53F3\u952E\u7528 PowerShell \u8FD0\u884C fix-antivirus.ps1,\u6216\u6309 INSTALL.md\u300C\u5E38\u89C1\u95EE\u9898\u300D\u7B2C 1 \u6761\u64CD\u4F5C\u3002\n\u8BE6\u89C1 browserctl_start.log \u4E0E browserctl_fwd.log\u3002" + (tail ? "\n\n\u2014 \u542F\u52A8\u65E5\u5FD7\u5C3E\u90E8 \u2014\n" + tail : ""),
+      logTail: tail
+    };
+  }
   sessionTunnel = true;
-  return { ok: true, ...result, forwarder: fwd };
+  return { ok: true, ...result, forwarder: true };
 }
 async function qrSvg(text) {
   return QRCode.toString(text, {
@@ -514,10 +554,12 @@ function apply(ctx, config = {}) {
           try {
             const r = await buildTunnel();
             const code = r && r.ok === false ? 503 : 200;
+            lastEnsureError = r && r.ok === false ? String(r.error || "") : "";
             sendJson(res, code, { ...r, link: secretLink() });
           } catch (e) {
             console.error("[browserctl] ensure \u5F02\u5E38:", e);
-            sendJson(res, 503, { ok: false, error: "\u542F\u52A8\u5931\u8D25:" + String(e && e.message || e) });
+            lastEnsureError = "\u542F\u52A8\u5931\u8D25:" + String(e && e.message || e);
+            sendJson(res, 503, { ok: false, error: lastEnsureError });
           } finally {
             ensureRunning = null;
           }
@@ -527,7 +569,11 @@ function apply(ctx, config = {}) {
       }
       if (route === "/browserctl/api/status") {
         const fwd = await portOpen(3080);
-        sendJson(res, 200, { forwarder: fwd, link: secretLink() });
+        sendJson(res, 200, {
+          forwarder: fwd,
+          link: secretLink(),
+          startError: fwd ? "" : lastEnsureError
+        });
         return;
       }
       if (route === "/browserctl/api/stop") {
