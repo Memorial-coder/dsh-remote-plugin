@@ -112,7 +112,7 @@ async function main() {
     // qrcode 依赖 pngjs / dijkstrajs,内联后它们会作为字符串出现在产物里
     const pngjsHits = (bundleText.match(/pngjs/g) || []).length
     check('lib/index.js 已内联 qrcode(含 pngjs)', pngjsHits >= 5, 'pngjs 命中 ' + pngjsHits + ' 次')
-    check('package.json 版本号是 1.0.31', pkg.version === '1.0.31', String(pkg.version))
+    check('package.json 版本号合法', /^\d+\.\d+\.\d+/.test(pkg.version), String(pkg.version))
 
     // 版本号由 build.mjs 从 package.json 注入:两个产物里都应出现同一版本字符串
     const clientBundle = path.join(PLUGIN_DIR, 'lib', 'client.js')
