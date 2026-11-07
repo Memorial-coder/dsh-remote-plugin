@@ -178,7 +178,10 @@ async function main() {
       logger: { info() {}, warn() {}, error() {} },
     }
     modC.apply(ctx)
-    check('注册了 /browserctl/api 前缀路由', typeof routes['/browserctl/api'] === 'function')
+    // 路由前缀随插件身份变化(正式版 /browserctl/api,带后缀的副本 /browserctl-xxx/api),
+    // 这里按实际注册的那个取,避免身份不同的副本跑 layout 时误报「路由未注册」。
+    const API = Object.keys(routes).find(p => /^\/browserctl(-[a-z0-9]+)?\/api$/.test(p))
+    check('注册了 /browserctl/api 前缀路由', !!API && typeof routes[API] === 'function')
 
     writeState({ tunnel_ok: false, tunnel_error: '隧道未连通: frpc 未注册远端端口', frpc_pid: 0, remote_port: 0 })
     const call = (routePath) => new Promise((resolve) => {
@@ -197,24 +200,24 @@ async function main() {
           resolve({ status, json })
         },
       }
-      Promise.resolve(routes['/browserctl/api'](req, res))
+      Promise.resolve(routes[API](req, res))
         .catch(() => resolve({ status: 0, json: null }))
     })
 
-    for (const p of ['/browserctl/api/qr', '/browserctl/api/link', '/browserctl/api/pair', '/browserctl/api/pair-long']) {
+    for (const p of [API + '/qr', API + '/link', API + '/pair', API + '/pair-long']) {
       const out = await call(p)
       check(p + ' → 503', out.status === 503, 'status=' + out.status)
       const err = String((out.json && out.json.error) || '')
       check(p + ' 返回可读原因', err.startsWith('隧道未建立：') && err.includes('frpc 未注册远端端口'), err)
     }
 
-    const st1 = await call('/browserctl/api/status')
+    const st1 = await call(API + '/status')
     check('status.tunnel.ok === false', !!(st1.json && st1.json.tunnel && st1.json.tunnel.ok === false))
     check('status.tunnel.error 透传原因', !!(st1.json && st1.json.tunnel && String(st1.json.tunnel.error).includes('frpc 未注册远端端口')))
     check('status.tunnel.port === 0', !!(st1.json && st1.json.tunnel && st1.json.tunnel.port === 0))
 
     writeState({ tunnel_ok: true, tunnel_error: '', frpc_pid: process.pid, remote_port: 17901 })
-    const st2 = await call('/browserctl/api/status')
+    const st2 = await call(API + '/status')
     check('隧道就绪后 status.tunnel.ok === true', !!(st2.json && st2.json.tunnel && st2.json.tunnel.ok === true))
     check('status.tunnel.port 回传远端端口', !!(st2.json && st2.json.tunnel && st2.json.tunnel.port === 17901))
   } finally {
