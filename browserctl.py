@@ -46,7 +46,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import zlib
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -2338,12 +2338,14 @@ class GateHandler(BaseHTTPRequestHandler):
 
     def send_response(self, code, message=None):
         """去掉默认 Server 指纹头(只发状态行 + Date)。"""
+        self._resp_status = int(code)  # 逐请求日志记录状态码
         self.log_request(code)
         self.send_response_only(code, message)
         self.send_header("Date", self.date_time_string())
 
     def _send(self, code, body, content_type="text/html; charset=utf-8", headers=None):
         data = body.encode() if isinstance(body, str) else body
+        self._resp_bytes = len(data)  # 逐请求日志记录字节数
         self._responded = True  # 供 _handle 兜底判断"是否已经回过响应"
         self.send_response(code)
         self.send_header("Content-Type", content_type)
@@ -2531,6 +2533,9 @@ class GateHandler(BaseHTTPRequestHandler):
         # WebSocket 升级后这条连接承载的是 WS 帧,中继结束必须物理断开,
         # 不能回到 keep-alive 请求循环(否则下一轮会把 WS 帧当 HTTP 请求行解析)。
         self.close_connection = True
+        self._resp_status = 0
+        self._resp_bytes = 0
+        _t0 = time.time()
         with _gate_lock:
             if _ws_active >= MAX_WS_CONCURRENT:
                 self._send(503, "WS 并发已满", "text/plain")
@@ -2541,6 +2546,10 @@ class GateHandler(BaseHTTPRequestHandler):
         finally:
             with _gate_lock:
                 _ws_active -= 1
+            try:
+                _reqlog_record(self, _t0, is_ws=True)
+            except Exception:
+                pass
 
     def _relay_ws_inner(self):
         port = resolve_dsh()
@@ -2682,6 +2691,19 @@ class GateHandler(BaseHTTPRequestHandler):
         return None
 
     def _proxy(self, extra_set_cookie=None):
+        """反代 DSH：计时并记录逐请求日志（New API 风格使用详情）。"""
+        self._resp_status = 0
+        self._resp_bytes = 0
+        _t0 = time.time()
+        try:
+            self._proxy_inner(extra_set_cookie)
+        finally:
+            try:
+                _reqlog_record(self, _t0)
+            except Exception:
+                pass
+
+    def _proxy_inner(self, extra_set_cookie=None):
         port = resolve_dsh()
         if not port:
             self._send(502, "<h1>502</h1><p>DeepSeek 助手未在本机运行。</p>")
@@ -2721,6 +2743,7 @@ class GateHandler(BaseHTTPRequestHandler):
                 for k, v in hit["headers"]:
                     self.send_header(k, v)
                 self.end_headers()
+                self._resp_bytes = len(hit["data"])  # 逐请求日志字节数
                 try:
                     self.wfile.write(hit["data"])
                 except (BrokenPipeError, ConnectionResetError, OSError):
@@ -2919,6 +2942,7 @@ class GateHandler(BaseHTTPRequestHandler):
                         with write_lock:
                             self.wfile.write(("%x\r\n" % len(chunk)).encode() + chunk + b"\r\n")
                             self.wfile.flush()
+                            self._resp_bytes += len(chunk)  # 逐请求日志字节数
                     stream_done.set()  # 先停保活再发终止符,防止终止符后出现游离帧
                     with write_lock:
                         self.wfile.write(b"0\r\n\r\n")
@@ -2928,6 +2952,7 @@ class GateHandler(BaseHTTPRequestHandler):
                     stream_done.set()
             else:
                 stream_drained = True
+                self._resp_bytes = len(data)  # 逐请求日志字节数
                 self.wfile.write(data)
         except (BrokenPipeError, ConnectionResetError, OSError):
             pass
@@ -4013,6 +4038,10 @@ def gate_serve():
         while True:
             time.sleep(2)
             try:
+                # 心跳(按真实流逝时间累计)：必须在本进程跑，_sessions 在这里才是活的
+                # （看门狗是独立进程、_sessions 恒空，放那里永远不会上报——历史 bug）。
+                _gate_heartbeat_tick()
+                _reqlog_flush_tick()
                 _process_kicks()
                 _prune_bootstrap()   # 丢弃已过期的引导链接使用计数
                 # 清理老旧会话:超过 10 分钟未收到心跳的设备自动移除
@@ -4136,14 +4165,18 @@ def _port_open(port, timeout=1.0):
 
 
 # ---- 闸机心跳（阶段4：时长计量，契约 docs/notes/签到与时长后台增强计划.md §2.5）----
-# 由看门狗每 5s 调一次：有活跃会话就累计秒数，每 60s 向服务器 POST 一次，
+# 由 fwd 进程的 housekeeping 每 2s 调一次：按真实流逝时间累计（不是固定 +5），
+# 每 60s 向服务器 POST 一次（即使 acc==0 也发——既是保活，也让服务器自愈端口租约），
 # 服务器据此扣减该用户余额并记录设备明细。完全静默失败，绝不拖垮闸机主流程。
+# 注意：必须跑在 gate_serve 的 housekeeping 里，_sessions 才是在线设备表；
+# 看门狗是独立进程、_sessions 恒空，放那里永远不会上报（历史 bug）。
 _heartbeat_acc = 0.0
 _heartbeat_next = 0.0
+_heartbeat_last = 0.0  # 上次 tick 的墙钟，用于按真实流逝时间累计
 
 
 def _gate_heartbeat_tick():
-    global _heartbeat_acc, _heartbeat_next
+    global _heartbeat_acc, _heartbeat_next, _heartbeat_last
     try:
         st = read_state()
         port = int(st.get("remote_port") or 0)
@@ -4152,8 +4185,14 @@ def _gate_heartbeat_tick():
         if port <= 0 or not secret:
             _heartbeat_acc = 0.0
             _heartbeat_next = 0.0
+            _heartbeat_last = 0.0
             return
         now = time.time()
+        # 按真实流逝时间累计：housekeeping 每 2s 调一次 → dt≈2s；挂起/休眠后钳制 30s
+        dt = 0.0
+        if _heartbeat_last > 0:
+            dt = min(max(now - _heartbeat_last, 0.0), 30.0)
+        _heartbeat_last = now
         # 10 秒内有过请求的设备算「在用」
         active = False
         devices = []
@@ -4168,14 +4207,13 @@ def _gate_heartbeat_tick():
                         "ua": str(info.get("ua") or "")[:200],
                     })
         if active:
-            _heartbeat_acc += 5.0
+            _heartbeat_acc += dt
         if now < _heartbeat_next:
             return
         _heartbeat_next = now + 60
         acc = int(_heartbeat_acc)
         _heartbeat_acc = 0.0
-        if acc <= 0:
-            return
+        # 即使 acc==0 也上报：既是保活，也让服务器 verifyGateSecret 自愈端口租约
         payload = json.dumps({
             "port": port,
             "secret": secret,
@@ -4192,6 +4230,89 @@ def _gate_heartbeat_tick():
             r.read()
     except Exception:
         pass
+
+
+# 逐请求日志（New API 风格）：fwd 进程缓冲，周期批量上报 /api/gate/requests。
+_reqlog_lock = threading.Lock()
+_reqlog_buf = deque(maxlen=2000)  # 待上报行（新→旧）
+_reqlog_last_flush = 0.0
+REQLOG_FLUSH_EVERY = 20.0     # 每 20s 上报一批
+REQLOG_MAX_BATCH = 300
+
+
+def _reqlog_record(self, t0, is_ws=False):
+    """记录一个反代/WS 请求条目到缓冲（fwd 进程内，失败静默）。"""
+    try:
+        st = gate_state()
+        port = int(st.get("remote_port") or 0)
+        if port <= 0:
+            return
+        dev = self._gate_cookie_dev() or ""
+        info = None
+        if dev:
+            with _gate_lock:
+                info = _sessions.get(dev)
+        ms = int((time.time() - t0) * 1000)
+        _kind = str((info or {}).get("kind") or "")
+        row = {
+            "ts": int(time.time() * 1000),
+            "dev": dev[:64],
+            "devName": str((info or {}).get("name") or "")[:120],
+            "kind": ("ws" if is_ws else (_kind or ""))[:16],
+            "ip": (self._client_ip() or "")[:64],
+            "method": "WS" if is_ws else (self.command or "").upper()[:12],
+            "path": (self.path or "")[:512],
+            "status": getattr(self, "_resp_status", 0) or 0,
+            "ms": ms,
+            "bytes": getattr(self, "_resp_bytes", 0) or 0,
+        }
+        with _reqlog_lock:
+            _reqlog_buf.append(row)
+    except Exception:
+        pass
+
+
+def _reqlog_flush_tick():
+    """周期触发：每 REQLOG_FLUSH_EVERY 秒把缓冲批量上报。失败回填(有界)，不丢但不无限涨。"""
+    global _reqlog_last_flush
+    now = time.time()
+    if now - _reqlog_last_flush < REQLOG_FLUSH_EVERY:
+        return
+    _reqlog_last_flush = now
+    try:
+        st = read_state()
+        port = int(st.get("remote_port") or 0)
+        secret = st.get("link_secret")
+        if port <= 0 or not secret:
+            return
+        with _reqlog_lock:
+            if not _reqlog_buf:
+                return
+            batch = list(_reqlog_buf)
+            _reqlog_buf.clear()
+        if not batch:
+            return
+        payload = json.dumps({
+            "port": port,
+            "secret": secret,
+            "requests": batch[:REQLOG_MAX_BATCH],
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            "https://%s/dsh-remote/api/gate/requests" % public_host(),
+            data=payload,
+            headers={"Content-Type": "application/json", "User-Agent": "browserctl-reqlog/1"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=8) as r:
+            r.read()
+    except Exception:
+        # 上报失败：回填（deque 有界，不会无限增长），下个周期重试
+        try:
+            with _reqlog_lock:
+                for r_ in reversed(batch):
+                    _reqlog_buf.appendleft(r_)
+        except Exception:
+            pass
 
 
 def _gate_balance_allowed():
@@ -4220,7 +4341,8 @@ def cmd_watch():
     """看门狗:巡检闸机与 frpc,死了就拉起。由 start 以分离进程常驻。
     指数退避:连续拉起失败时 12s→30s→60s→5min→15min,防止崩溃风暴;
     巡检一轮发现一切正常即复位。
-    同时每 5s 累计在线秒数、每 60s 向服务器上报闸机心跳(阶段4 时长计量)。"""
+    ⚠️ 心跳计量不在本进程跑——_sessions 只有 fwd(gate_serve)是活的,
+    心跳在 fwd 的 housekeeping 里(见 _gate_heartbeat_tick)。"""
     backoff = [12, 30, 60, 300, 900]
     failures = 0
     # 启动即自报 pid 到 state,避免 ensure_watchdog 因读到旧(已死)pid 反复拉起副本
@@ -4233,7 +4355,6 @@ def cmd_watch():
     while True:
         time.sleep(5)
         try:
-            _gate_heartbeat_tick()
             st = read_state()
             need = []
             if not _port_open(FWD_PORT):
