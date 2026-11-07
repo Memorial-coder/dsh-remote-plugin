@@ -68,6 +68,100 @@ FWD_LOG = HERE / "browserctl_fwd.log"
 FRPC_LOG = HERE / "browserctl_frpc.log"
 
 PUBLIC_HOST = "remote.ymzcc.com"
+
+
+def _pick_free_port(preferred=3080):
+    """在 preferred..preferred+9 里挑第一个能 bind 的本地端口(被别的程序/另一份副本占了就顺延)。"""
+    for port in range(int(preferred), int(preferred) + 10):
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            # Windows 上不能带 SO_REUSEADDR:那会让 bind 成功"抢"走别人已监听的端口
+            s.bind(("127.0.0.1", port))
+            return port
+        except OSError:
+            continue
+        finally:
+            s.close()
+    raise SystemExit("本地端口 %d-%d 全部被占用,闸机无法启动" % (int(preferred), int(preferred) + 9))
+
+
+def _select_fwd_port():
+    """确定本次闸机端口:① 已有闸机在跑 → 用 state 里那个;② 否则从 state/默认值往后挑空闲端口。
+    结果写回 state.fwd_port 并注入 BC_FWD_PORT,子进程(fwd/watch)读同一个值。"""
+    global FWD_PORT
+    st = read_state()
+    cur = int(st.get("fwd_port") or 0)
+    pid = st.get("fwd_pid")
+    # 端口还开着就复用(pid 存活 或 压根没记录都算):不要因为找不到 pid 就顺延开第二份,
+    # 否则上一份(可能提权)没杀掉时,两份闸机同时写同一个 state 互相覆盖 → 隧道一会好一会坏
+    # (2026-11-07 实测「frpc 进程未运行」间歇失败就是这原因)。
+    # 例外:pid 记录过但已死、端口还被占 → 可能是别的程序占了我们旧端口,这时才顺延新端口。
+    if cur and _port_open(cur) and (not pid or _pid_alive(pid)):
+        FWD_PORT = cur
+        os.environ["BC_FWD_PORT"] = str(cur)
+        return cur
+    base = int(os.environ.get("BC_FWD_PORT") or cur or 3080)
+    port = _pick_free_port(base)
+    FWD_PORT = port
+    os.environ["BC_FWD_PORT"] = str(port)
+    if cur != port:
+        # 字段级写:只落 fwd_port(kb/06 第 24 条);cmd_start 持 _ctl_lock 时
+        # 别的进程(旧看门狗)仍可能并发写 state,不能整份快照回写。
+        update_state(lambda s: {**s, "fwd_port": port})
+    return port
+
+
+def _elevated_taskkill(pids):
+    """用 Windows UAC 以管理员身份一次性 taskkill 指定 pid 列表。
+    弹窗用户点「是」→ 成功;点「否」/超时/失败 → 返回 False(绝不静默当成功)。"""
+    if not pids:
+        return True
+    pids = [int(p) for p in pids if p]
+    if not pids:
+        return True
+    pid_args = " ".join("/PID %d" % p for p in pids)
+    # 单个 UAC 弹窗一次杀全部;ArgumentList 用单个字符串(全是数字/开关,无空格问题)
+    script = ("Start-Process -FilePath 'taskkill.exe' -ArgumentList "
+              "'%s /T /F' -Verb RunAs -WindowStyle Hidden -Wait; "
+              "Write-Output ('EXIT=' + $LASTEXITCODE)" % pid_args)
+    try:
+        subprocess.run(["powershell", "-NoProfile", "-Command", script],
+                       capture_output=True, text=True, timeout=120,
+                       creationflags=CREATE_NO_WINDOW)
+    except Exception:
+        return False
+    return not any(_pid_alive(p) for p in pids)
+
+
+def _clean_elevated_leftovers():
+    """cmd_start 持锁时调用:上次以管理员身份启动的提权进程普通权限杀不掉,
+    这里自动请求管理员权限(UAC)一次清掉,避免残留闸机/看门狗/frpc 占端口、
+    两份闸机互相覆盖 state → 插件间歇报「frpc 进程未运行」(2026-11-07 实测)。"""
+    st = read_state()
+    pids = [int(p) for p in (st.get("elevated_leftovers") or [])
+            if p and _pid_alive(int(p))]
+    if not pids:
+        # 字段级写:只清 elevated_leftovers(kb/06 第 24 条)
+        update_state(lambda s: {k: v for k, v in s.items() if k != "elevated_leftovers"})
+        return
+    print("检测到上次以管理员身份启动的残留进程(pid=%s),正在请求管理员权限清理..."
+          % pids, flush=True)
+    print("如果弹出 UAC 窗口,请点「是」;点「否」则残留进程会继续占着端口。", flush=True)
+    if _elevated_taskkill(pids):
+        print("已通过管理员权限清理: %s" % pids, flush=True)
+        dead_keys = set()
+        for p in pids:
+            for key in ("frpc_pid", "fwd_pid", "watchdog_pid"):
+                if st.get(key) == p:
+                    dead_keys.add(key)
+        dead_keys.add("elevated_leftovers")
+        # 字段级写:只 pop 清掉进程对应的 pid 键 + elevated_leftovers
+        update_state(lambda s: {k: v for k, v in s.items() if k not in dead_keys})
+    else:
+        print("[警告] 管理员清理未完成(可能被取消);残留进程仍会占着端口,"
+              "可再点一次「开始控制」重试,或手动用任务管理器结束。", flush=True)
+
+
 AUTHORITY = "127.0.0.1"  # nginx 侧统一改写 Host/Origin 为 loopback,栅栏无条件放行
 FWD_PORT = 3080
 REMOTE_PORT = 17901
@@ -179,6 +273,7 @@ def _state_lock_file():
 class _StateLock:
     def __enter__(self):
         self.fh = open(_state_lock_file(), "a+")
+        self.locked = False
         try:
             if os.name == "nt":
                 import msvcrt
@@ -186,19 +281,23 @@ class _StateLock:
             else:
                 import fcntl
                 fcntl.flock(self.fh.fileno(), fcntl.LOCK_EX)
-        except Exception:
-            pass
+            self.locked = True
+        except Exception as e:
+            # 锁失败(等锁超时/文件系统异常)不能静默:此刻的读-改-写已退化成
+            # 无锁窗口,并发覆盖正是 kb/06 第 24 条症状的来源。打点日志便于归因。
+            print("[警告] state 文件锁加锁失败(%r),本次写入退化为无锁窗口" % (e,), flush=True)
         return self
 
     def __exit__(self, *exc):
         try:
-            if os.name == "nt":
-                import msvcrt
-                self.fh.seek(0)
-                msvcrt.locking(self.fh.fileno(), msvcrt.LK_UNLCK, 1)
-            else:
-                import fcntl
-                fcntl.flock(self.fh.fileno(), fcntl.LOCK_UN)
+            if self.locked:
+                if os.name == "nt":
+                    import msvcrt
+                    self.fh.seek(0)
+                    msvcrt.locking(self.fh.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(self.fh.fileno(), fcntl.LOCK_UN)
         except Exception:
             pass
         try:
@@ -269,10 +368,12 @@ def probe_dsh(port, timeout=2.0):
 def detect_port():
     for p in dsh_candidates():
         if probe_dsh(p):
-            st = read_state()
-            if st.get("dsh_port") != p:
-                st["dsh_port"] = p
-                write_state(st)
+            # 字段级写:只更新 dsh_port(kb/06 第 24 条)。这里是热路径
+            # (反代每个请求都可能调 resolve_dsh→detect_port),旧整份快照回写
+            # 会把 DSH 重启瞬间其它线程/进程写的 frpc_pid/tunnel_ok 覆盖回旧值;
+            # 端口没变时完全不写,热路径零 state IO。
+            if read_state().get("dsh_port") != p:
+                update_state(lambda s: {**s, "dsh_port": p})
             return p
     raise SystemExit("未探测到 DSH Web 端口;请确认 DeepSeek 助手已启动")
 
@@ -315,6 +416,12 @@ def mint_cookie(days=COOKIE_LIFETIME_DAYS):
 
 GATE_COOKIE = "bc-gate"
 GATE_PREFIX = "/browserctl-gate/"
+# 同一台机器上可以并存「正式版」和「测试副本」两份插件,它们各自拉起一个闸机进程
+# (端口由 _select_fwd_port 自动避让,互不干扰)。测试副本的插件 host 用的是
+# /browserctl-test-gate/ 前缀,而闸机这边的端点实现是同一套,所以路由入口同时认两个前缀。
+# 只影响「路由匹配」这一层:_serve_gate() 内部按后缀分发,鉴权(X-BC-Admin / 2FA 会话)
+# 与业务逻辑完全共用,不会因为换了前缀而放宽任何检查。
+GATE_PREFIXES = (GATE_PREFIX, "/browserctl-test-gate/")
 
 # ---- PWA:面板「添加到主屏幕」静态资源与注入标签(见 _serve_pwa/_inject_pwa_tags) ----
 PWA_DIR = HERE / "browserctl_pwa"
@@ -699,7 +806,7 @@ MAX_SSE_CONCURRENT = 32
 MAX_WS_CONCURRENT = 16
 MAX_HEADER_BYTES = 64 * 1024
 MAX_JSON_BODY_BYTES = 1024 * 1024          # JSON 端点请求体上限(verify/kick/blacklist 都是小对象,1MB 足够)
-MAX_PROXY_BODY_BYTES = 1024 * 1024 * 1024  # 反代透传上限(面板文件上传;nginx client_max_body_size=2048m,闸机收紧到 1GB)
+MAX_PROXY_BODY_BYTES = 256 * 1024 * 1024  # 反代透传上限(APK 上传走专用端点独立限 200MB,不占这里)
 
 # 防爆破表本身有界:攻击者可伪造海量 IP,把 key 表撑到内存耗尽(仿 dsh-mobile
 # BoundedRateLimiter)。表满且全是活跃冻结时,未知 IP 直接拒绝(fail-closed)。
@@ -724,8 +831,11 @@ CLAIM_WINDOW = 60
 def gate_state():
     st = read_state()
     if not st.get("link_secret"):
-        st["link_secret"] = _secrets.token_hex(16)
-        write_state(st)
+        secret = _secrets.token_hex(16)
+        # 字段级写:只落 link_secret(kb/06 第 24 条)。这里在请求热路径上,
+        # 整份快照回写会覆盖并发写者的 frpc_pid/tunnel_ok 等字段。
+        update_state(lambda s: {} if s.get("link_secret") else {**s, "link_secret": secret})
+        st["link_secret"] = secret
     return st
 
 
@@ -1377,6 +1487,38 @@ SYSTEM_EVENT_TITLES = {
 _notifs = []
 _notifs_seq = 0
 _notifs_lock = threading.Lock()
+# 事件日志锁:_append_event 是"读文件→追加→写文件"的非原子序列,
+# 请求线程与 housekeeping 线程并发调用会互相吞事件,用独立锁串行化
+# (与 _notifs_lock/_gate_lock 均无嵌套关系)。
+_events_lock = threading.Lock()
+
+
+def _atomic_write_file(path, text):
+    """通用文本原子写(tmp + os.replace),读方永远见不到半截文件。
+    供 notifs/events/sessions 等运行态小文件复用;state 走 update_state。"""
+    tmp = None
+    try:
+        tmp = Path(str(path) + ".tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+            try:
+                os.fsync(f.fileno())
+            except OSError:
+                pass
+        os.replace(str(tmp), str(path))
+        return True
+    except Exception:
+        try:
+            if tmp is not None:
+                tmp.unlink(missing_ok=True)
+        except Exception:
+            pass
+        return False
+
+
+def _atomic_json_write(path, obj):
+    return _atomic_write_file(path, json.dumps(obj, ensure_ascii=False))
 
 # 设备历史注册表(内存态,持久化到 DEVICES_FILE)
 # 用独立锁保护,避免与 _gate_lock 产生可重入死锁
@@ -1530,7 +1672,7 @@ def _notifs_persist():
     try:
         with _notifs_lock:
             rows = _notifs[-PUSH_PERSIST_MAX:]
-        NOTIFS_FILE.write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
+        _atomic_json_write(NOTIFS_FILE, rows)
     except Exception:
         pass
 
@@ -1562,18 +1704,21 @@ def _push_notify(kind, title, body):
 
 def _append_event(typ, msg):
     """事件日志(环形,最多 _EVENTS_MAX 条):验证/踢出/开关等,插件读走展示。
-    开启 push_system 时,同步把可读系统事件推送到已配对的手机 App。"""
+    开启 push_system 时,同步把可读系统事件推送到已配对的手机 App。
+    读文件→追加→写文件用 _events_lock 串行化:并发调用(请求线程+housekeeping)
+    会互相吞事件;写盘用原子替换,读方(_read_events/插件)见不到半截文件。"""
     try:
-        rows = []
-        try:
-            rows = json.loads(EVENTS_FILE.read_text(encoding="utf-8")) or []
-        except Exception:
+        with _events_lock:
             rows = []
-        if not isinstance(rows, list):
-            rows = []
-        rows.append({"t": int(time.time()), "typ": typ, "msg": msg[:200]})
-        del rows[:-_EVENTS_MAX]
-        EVENTS_FILE.write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
+            try:
+                rows = json.loads(EVENTS_FILE.read_text(encoding="utf-8")) or []
+            except Exception:
+                rows = []
+            if not isinstance(rows, list):
+                rows = []
+            rows.append({"t": int(time.time()), "typ": typ, "msg": msg[:200]})
+            del rows[:-_EVENTS_MAX]
+            _atomic_json_write(EVENTS_FILE, rows)
     except Exception:
         pass
     # 系统安全事件 → 手机推送(push_enabled + push_system 双重控制;_push_notify 再查一次总开关)
@@ -1673,10 +1818,8 @@ def _dump_sessions():
     payload = json.dumps(rows, ensure_ascii=False, indent=1)
     if payload != _last_sessions_payload:
         _last_sessions_payload = payload
-        try:
-            SESSIONS_FILE.write_text(payload, encoding="utf-8")
-        except Exception:
-            pass
+        # 原子替换写:插件/fwd 随时在读这个文件,不能让它读到半截 JSON
+        _atomic_write_file(SESSIONS_FILE, payload)
     # 同步写入设备历史注册表
     _dump_devices()
 
@@ -1927,6 +2070,7 @@ def _process_kicks():
     kicked_any = False
     twofa_off = not st.get("totp_enabled")
     kicked_extra = []
+    ssh_pending = []   # SSH 反注册收集在锁内、执行在锁外(单次 SSH 最多 ~15s)
     if devs:
         with _gate_lock:
             for d in devs:
@@ -1936,7 +2080,7 @@ def _process_kicks():
                     changed = True
                     kicked_any = True
                     _append_event("kick", "踢出设备 %s" % d)
-                    _server_unregister_device(d)
+                    ssh_pending.append(d)
                 kicked_extra.append(d)
         st["gate_kick_devs"] = []
         changed = True
@@ -1945,11 +2089,11 @@ def _process_kicks():
         with _gate_lock:
             if twofa_off:
                 kicked_extra.extend(list(_sessions.keys()))
-            # 通知服务器清除全部设备 + 关闭设备历史条目
+            # 通知服务器清除全部设备 + 关闭设备历史条目(SSH 挪锁外)
             for d in list(_sessions.keys()):
                 info = _sessions[d]
                 _device_close(_device_key({"dev": d, **info}))
-                _server_unregister_device(d)
+                ssh_pending.append(d)
             _sessions.clear()
         changed = True
         kicked_any = True
@@ -1957,9 +2101,19 @@ def _process_kicks():
     if kicked_extra:
         st["gate_kicked_devs"] = _cap_kicked([*(st.get("gate_kicked_devs") or []), *kicked_extra])
         changed = True
-    if changed:
+    # SSH 反注册全部放到 _gate_lock 外执行:失败只继续,不影响本地踢出
+    for d in ssh_pending:
         try:
-            write_state(st)
+            _server_unregister_device(d)
+        except BaseException:
+            pass
+    if changed:
+        # 字段级写:只动 kick 相关键(kb/06 第 24 条)。st 的 gate_kick_devs/gate_kicked_devs
+        # 是本函数真正要写的;frpc_pid/tunnel_ok 等一律保留磁盘当前值。
+        try:
+            update_state(lambda s: {**s,
+                                    "gate_kick_devs": st.get("gate_kick_devs") if devs else s.get("gate_kick_devs"),
+                                    "gate_kicked_devs": st.get("gate_kicked_devs", s.get("gate_kicked_devs"))})
         except Exception:
             pass
     if kicked_any:
@@ -2345,8 +2499,8 @@ class GateHandler(BaseHTTPRequestHandler):
 
     def _send(self, code, body, content_type="text/html; charset=utf-8", headers=None):
         data = body.encode() if isinstance(body, str) else body
-        self._resp_bytes = len(data)  # 逐请求日志记录字节数
         self._responded = True  # 供 _handle 兜底判断"是否已经回过响应"
+        self._resp_bytes = len(data)  # 逐请求日志记录字节数
         self.send_response(code)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(data)))
@@ -2567,7 +2721,9 @@ class GateHandler(BaseHTTPRequestHandler):
         _t0 = time.time()
         with _gate_lock:
             if _ws_active >= MAX_WS_CONCURRENT:
-                self._send(503, "WS 并发已满", "text/plain")
+                # 可行动文案:占用是临时的(断线连接的泵线程最长 75s 超时回收),
+                # 稍后重试即可;不是配置错误,也无需改任何设置。
+                self._send(503, "WS 连接暂时占满,几十秒内自动释放,请稍后重试", "text/plain")
                 return
             _ws_active += 1
         try:
@@ -2612,15 +2768,31 @@ class GateHandler(BaseHTTPRequestHandler):
         remote.sendall(head)
         _ws_write_lock = threading.Lock()
 
+        def _close_sockets():
+            # 任一泵结束后把两端 socket 都物理关闭(不只 SHUT_WR):对端泵阻塞中的
+            # recv/sendall 会立刻以 OSError 退出。半开连接(手机网络突断,无 FIN)
+            # 不再把 WS 槽位占满到 75s 超时 —— PONG 代答之后 DSH 侧不再主动杀连接,
+            # 这里是唯一的确定性回收路径(2026-11-07 审计 G1)。
+            for sock in (remote, self.connection):
+                try:
+                    sock.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+                try:
+                    sock.close()
+                except OSError:
+                    pass
+
         def _send_remote(data):
             # 两个泵线程都可能写 remote,必须串行,否则大块转发和代答帧可能交错
             with _ws_write_lock:
                 remote.sendall(data)
 
         def _ws_pong_for_dsh(payload):
-            # 闸机在 DSH 面前是"客户端":RFC 6455 要求客户端帧必须掩码
+            # 闸机在 DSH 面板前是"客户端":RFC 6455 要求客户端帧必须掩码
             key = os.urandom(4)
-            n = len(payload)
+            n = min(len(payload), 65535)  # 126 长度上限;>65535 会 OverflowError,截断防御
+            payload = payload[:n]
             if n <= 125:
                 headb = bytes([0x8A, 0x80 | n])
             else:
@@ -2695,6 +2867,7 @@ class GateHandler(BaseHTTPRequestHandler):
                     dst.shutdown(socket.SHUT_WR)
                 except OSError:
                     pass
+                _close_sockets()
 
         def pump(src, dst):
             try:
@@ -2710,6 +2883,7 @@ class GateHandler(BaseHTTPRequestHandler):
                     remote.shutdown(socket.SHUT_WR)
                 except OSError:
                     pass
+                _close_sockets()
 
         threads = [threading.Thread(target=_pump_upstream_to_client, args=(remote, self.connection), daemon=True),
                    threading.Thread(target=pump, args=(self.connection, None), daemon=True)]
@@ -2830,10 +3004,18 @@ class GateHandler(BaseHTTPRequestHandler):
         if length:
             # H-02:请求体上限。超过上限不读、直接 413 并断连,
             # 防止攻击者用超大 Content-Length 把闸机内存灌满。
+            # (1GB→256MB:只有面板大文件上传会走这里,而 APK 上传走专用端点
+            # 独立限 200MB(_gate_app_apk_upload);256MB 已覆盖一切合法反代请求,
+            # 把单请求内存峰值压回可控范围。)
             try:
                 n = int(length)
             except ValueError:
                 n = 0
+            if n < 0:
+                # 非法负值:rfile.read(n) 对负数是"读到 EOF",线程会一直挂到 75s 超时
+                self.close_connection = True
+                self._send(400, "<h1>400 Bad Request</h1>")
+                return
             if n > MAX_PROXY_BODY_BYTES:
                 self.close_connection = True
                 self._send(413, "<h1>413 Payload Too Large</h1>")
@@ -2976,7 +3158,7 @@ class GateHandler(BaseHTTPRequestHandler):
             with _gate_lock:
                 if _sse_active >= MAX_SSE_CONCURRENT:
                     _upstream_release(port, conn, reusable=False)  # 响应未消费,不可回池
-                    self._send(503, "SSE 并发已满,请稍后重试", "text/plain")
+                    self._send(503, "SSE 连接暂时占满,几十秒内自动释放,请稍后重试", "text/plain")
                     return
                 _sse_active += 1
         # 非流式:先读全量,再按准确 Content-Length 发头(顺序不能反,否则帧错位)
@@ -3075,10 +3257,10 @@ class GateHandler(BaseHTTPRequestHandler):
                         if not chunk:
                             stream_drained = True
                             break
+                        self._resp_bytes += len(chunk)  # 逐请求日志字节数
                         with write_lock:
                             self.wfile.write(("%x\r\n" % len(chunk)).encode() + chunk + b"\r\n")
                             self.wfile.flush()
-                            self._resp_bytes += len(chunk)  # 逐请求日志字节数
                     stream_done.set()  # 先停保活再发终止符,防止终止符后出现游离帧
                     with write_lock:
                         self.wfile.write(b"0\r\n\r\n")
@@ -3173,7 +3355,13 @@ color:#fff;text-decoration:none;font-size:14px}
             host = (urlsplit(ref).hostname or "").lower()
         except Exception:
             return False
-        return host in ("remote.ymzcc.com", "127.0.0.1", "localhost", "::1")
+        # Referer 主机白名单:官方域名 + 本机;自建部署用 BC_SERVER_ORIGIN 追加
+        # 自己的公网域名(逗号分隔),否则老浏览器(无 Sec-Fetch 头)的写操作会被误拒。
+        allowed = {"remote.ymzcc.com", "127.0.0.1", "localhost", "::1"}
+        extra = (os.environ.get("BC_SERVER_ORIGIN") or "").strip()
+        if extra:
+            allowed.update(h.strip().lower() for h in extra.split(",") if h.strip())
+        return host in allowed
 
     def _pair_url(self, grant, kind="pair"):
         st = read_state()
@@ -3344,8 +3532,10 @@ color:#fff;text-decoration:none;font-size:14px}
         st = gate_state()
         secret = st.get("link_secret")
         if not secret:
-            secret = st["link_secret"] = _secrets.token_hex(16)
-            write_state(st)
+            # gate_state() 已保证非空;这里只防极端竞态(文件刚被清空),同样字段级写
+            secret = _secrets.token_hex(16)
+            update_state(lambda s: {**s, "link_secret": secret})
+            st["link_secret"] = secret
         cookie = gate_mint_cookie(secret, dev, ip, ua)
         headers = [("Set-Cookie", "%s=%s; Max-Age=%d; Path=/; HttpOnly; SameSite=Lax; Secure"
                     % (GATE_COOKIE, cookie, GATE_MAX_AGE)),
@@ -3501,8 +3691,13 @@ color:#fff;text-decoration:none;font-size:14px}
         if path.endswith("/notify"):
             self._gate_push_notify()
             return
-        # 黑名单:列表无需验证(IP 已暴露),增删需验证
+        # 黑名单:列表需通过会话验证(2026-11-07 审计 G6:原"无需验证"会把封禁的
+        # IP 列表公开给任意未过闸请求 —— 虽然这些 IP 已在公网暴露过,但没必要再给
+        # 攻击者一份"你被封了"的确认通道);增删需验证。
         if path.endswith("/blacklist") and self.command == "GET":
+            if not self._gate_ok():
+                self._send_json(401, {"ok": False, "error": "未通过验证"})
+                return
             self._send_json(200, {"ok": True, "blacklist": _read_blacklist()})
             return
         if self.command == "POST":
@@ -3547,7 +3742,7 @@ color:#fff;text-decoration:none;font-size:14px}
         if m:
             self._gate_app_apk_download(m.group(1))
             return
-        if path == GATE_PREFIX.rstrip("/"):
+        if path.rstrip("/") in (GATE_PREFIX.rstrip("/"), "/browserctl-test-gate"):
             self._send(200, GATE_HTML)
             return
         self._send(404, "not found", "text/plain")
@@ -3663,7 +3858,10 @@ color:#fff;text-decoration:none;font-size:14px}
 
     def _gate_app_release_config_write(self):
         """写发布配置(管理员)。"""
-        if not self._gate_ok():
+        # 必须是本机管理员(127.0.0.1 回环 + X-BC-Admin/?at= 令牌),不能只 _gate_ok():
+        # 任意已配对设备(30 天 cookie)改 download_url/最低版本 = App 更新投毒链
+        # (2026-11-07 审计 S2;插件面板不直连本端点,走官方 /api/admin/app/*,无调用方受影响)。
+        if not (self._is_admin_call() and self._gate_ok()):
             self._send_json(401, {"ok": False, "error": "未通过验证"})
             return
         data = self._read_json_body()
@@ -3689,7 +3887,9 @@ color:#fff;text-decoration:none;font-size:14px}
     def _gate_app_apk_upload(self):
         """上传 APK 文件(管理员)。原始字节流 + X-Appk-Filename 头,
         不用 cgi 模块(Python 3.13 已移除;multipart 解析也省了)。上限 200MB。"""
-        if not self._gate_ok():
+        # 同 release-config:已配对会话可上传任意 APK 供无鉴权的 /app/download 分发 = 投毒面,
+        # 收紧为本机管理员(2026-11-07 审计 S2)。
+        if not (self._is_admin_call() and self._gate_ok()):
             self._send_json(401, {"ok": False, "error": "未通过验证"})
             return
         from urllib.parse import urlsplit, parse_qs
@@ -3737,7 +3937,7 @@ color:#fff;text-decoration:none;font-size:14px}
 
     def _gate_app_apk_delete(self, filename):
         """删除已上传的 APK(管理员)。"""
-        if not self._gate_ok():
+        if not (self._is_admin_call() and self._gate_ok()):
             self._send_json(401, {"ok": False, "error": "未通过验证"})
             return
         ok = _app_apk_delete(filename)
@@ -3863,15 +4063,18 @@ color:#fff;text-decoration:none;font-size:14px}
             if dev in _sessions:
                 _sessions.pop(dev, None)
         _dump_sessions()
+        # 字段级写:只动 gate_kicked_devs(kb/06 第 24 条),不回写整份旧快照
         try:
-            write_state(st)
+            update_state(lambda s: {**s, "gate_kicked_devs": st.get("gate_kicked_devs")})
         except Exception:
             pass
         self._send_json(200, {"ok": True})
 
     def _gate_kick_all(self):
         """全部踢下线:立即清空所有会话,但保留当前管理员(自己)。
-        2FA 关闭时把其余设备记入"已踢"名单,防止它们重新登记。"""
+        2FA 关闭时把其余设备记入"已踢"名单,防止它们重新登记。
+        ⚠️ SSH(服务器注册表反注册)必须在 _gate_lock 外做:单次 SSH 最多 ~15s,
+        锁内做会把 TOTP 验证/会话校验等全部闸机请求冻结 ~15s×N(2026-11-07 审计 G3)。"""
         if not self._gate_ok():
             self._send_json(401, {"ok": False, "error": "未通过验证"})
             return
@@ -3879,23 +4082,35 @@ color:#fff;text-decoration:none;font-size:14px}
         st["gate_kick_seq"] = (st.get("gate_kick_seq") or 0) + 1
         global _kick_seq_seen
         admin_dev = self._gate_cookie_dev()
+        ssh_pending = []
         with _gate_lock:
             admin_info = _sessions.pop(admin_dev, None) if admin_dev else None
             kicked_devs = list(_sessions.keys())
-            # 关闭所有被踢设备的在线记录
+            # 关闭所有被踢设备的在线记录(本地关闭在锁内;SSH 挪到锁外)
             for d in kicked_devs:
                 info = _sessions.get(d)
                 if info:
                     _device_close(_device_key({"dev": d, **info}))
-                    _server_unregister_device(d)
+                    ssh_pending.append(d)
             _sessions.clear()
             if admin_info:
                 _sessions[admin_dev] = admin_info
             _kick_seq_seen = st["gate_kick_seq"]  # 标记已消费,管理员本人不被 seq 清除
         if not st.get("totp_enabled"):
             st["gate_kicked_devs"] = _cap_kicked([*(st.get("gate_kicked_devs") or []), *kicked_devs])
+        # 服务器注册表反注册(SSH)挪到锁外:失败只记日志,不影响本地踢出
+        for d in ssh_pending:
+            try:
+                _server_unregister_device(d)
+            except BaseException:
+                pass
+        # 字段级写:只动 gate_kick_seq / gate_kicked_devs(kb/06 第 24 条),
+        # 不把 frpc_pid/tunnel_ok 等并发字段覆盖回旧快照
         try:
-            write_state(st)
+            update_state(lambda s: {**s,
+                                    "gate_kick_seq": st["gate_kick_seq"],
+                                    "gate_kicked_devs": st.get("gate_kicked_devs",
+                                                               s.get("gate_kicked_devs"))})
         except Exception:
             pass
         _dump_sessions()
@@ -4088,8 +4303,8 @@ color:#fff;text-decoration:none;font-size:14px}
         # 公共 App 下载页:无鉴权
         if self.command == "GET" and self._serve_app_page():
             return
-        # 闸机自己的端点永不需要会话
-        if self.path.startswith(GATE_PREFIX):
+        # 闸机自己的端点永不需要会话(官方前缀和测试副本前缀都认)
+        if self.path.startswith(GATE_PREFIXES):
             self._serve_gate()
             return
         st = gate_state()
@@ -4134,7 +4349,18 @@ color:#fff;text-decoration:none;font-size:14px}
     do_OPTIONS = _handle
 
 
+def _bc_apply_fwd_port():
+    """子进程(fwd/watch)从环境变量继承闸机端口,父进程 start 时选好再 spawn。"""
+    p = os.environ.get("BC_FWD_PORT")
+    if p:
+        try:
+            globals()["FWD_PORT"] = int(p)
+        except ValueError:
+            pass
+
+
 def gate_serve():
+    _bc_apply_fwd_port()
     """127.0.0.1:FWD_PORT 闸机:TOTP 2FA → 反代 DSH(支持 WS/SSE 长连接)。
     外层自杀重启循环:任何致命异常打崩 HTTP 服务后 1 秒重建,链路自愈。"""
     global _kick_seq_seen
@@ -4174,8 +4400,8 @@ def gate_serve():
         while True:
             time.sleep(2)
             try:
-                # 心跳(按真实流逝时间累计)：必须在本进程跑，_sessions 在这里才是活的
-                # （看门狗是独立进程、_sessions 恒空，放那里永远不会上报——历史 bug）。
+                # 心跳(按真实流逝时间累计) + 逐请求日志批量上报：必须在本进程跑，
+                # _sessions 在这里才是活的（看门狗是独立进程、恒空）。
                 _gate_heartbeat_tick()
                 _reqlog_flush_tick()
                 _process_kicks()
@@ -4301,14 +4527,21 @@ def _port_open(port, timeout=1.0):
 
 
 # ---- 闸机心跳（阶段4：时长计量，契约 docs/notes/签到与时长后台增强计划.md §2.5）----
-# 由 fwd 进程的 housekeeping 每 2s 调一次：按真实流逝时间累计（不是固定 +5），
-# 每 60s 向服务器 POST 一次（即使 acc==0 也发——既是保活，也让服务器自愈端口租约），
+# 由看门狗每 5s 调一次：有活跃会话就累计秒数，每 60s 向服务器 POST 一次，
 # 服务器据此扣减该用户余额并记录设备明细。完全静默失败，绝不拖垮闸机主流程。
-# 注意：必须跑在 gate_serve 的 housekeeping 里，_sessions 才是在线设备表；
-# 看门狗是独立进程、_sessions 恒空，放那里永远不会上报（历史 bug）。
+# ⚠️ 2026-11-07 修复：心跳只能在 fwd 进程(gate_serve)里跑——_sessions 只有 fwd 是活的，
+# 看门狗是独立进程、_sessions 恒为空，以前放 watch 里永远算不出 active → 心跳从未发出，
+# 服务器既不扣时长、使用统计也恒为 0。现在改由 fwd 的 housekeeping 每 2s 调一次。
 _heartbeat_acc = 0.0
 _heartbeat_next = 0.0
 _heartbeat_last = 0.0  # 上次 tick 的墙钟，用于按真实流逝时间累计
+
+# 逐请求日志（New API 风格）：fwd 进程缓冲，周期批量上报 /api/gate/requests。
+_reqlog_lock = threading.Lock()
+_reqlog_buf = deque(maxlen=2000)  # 待上报行（新→旧）
+_reqlog_last_flush = 0.0
+REQLOG_FLUSH_EVERY = 20.0     # 每 20s 上报一批
+REQLOG_MAX_BATCH = 300
 
 
 def _gate_heartbeat_tick():
@@ -4368,14 +4601,6 @@ def _gate_heartbeat_tick():
         pass
 
 
-# 逐请求日志（New API 风格）：fwd 进程缓冲，周期批量上报 /api/gate/requests。
-_reqlog_lock = threading.Lock()
-_reqlog_buf = deque(maxlen=2000)  # 待上报行（新→旧）
-_reqlog_last_flush = 0.0
-REQLOG_FLUSH_EVERY = 20.0     # 每 20s 上报一批
-REQLOG_MAX_BATCH = 300
-
-
 def _reqlog_record(self, t0, is_ws=False):
     """记录一个反代/WS 请求条目到缓冲（fwd 进程内，失败静默）。"""
     try:
@@ -4415,6 +4640,7 @@ def _reqlog_flush_tick():
     if now - _reqlog_last_flush < REQLOG_FLUSH_EVERY:
         return
     _reqlog_last_flush = now
+    batch = []   # 先定义:异常发生在取批之前时,except 里的回填不再引用未定义名字
     try:
         st = read_state()
         port = int(st.get("remote_port") or 0)
@@ -4474,18 +4700,18 @@ def _gate_balance_allowed():
 
 
 def cmd_watch():
+    _bc_apply_fwd_port()
     """看门狗:巡检闸机与 frpc,死了就拉起。由 start 以分离进程常驻。
     指数退避:连续拉起失败时 12s→30s→60s→5min→15min,防止崩溃风暴;
     巡检一轮发现一切正常即复位。
     ⚠️ 心跳计量不在本进程跑——_sessions 只有 fwd(gate_serve)是活的,
-    心跳在 fwd 的 housekeeping 里(见 _gate_heartbeat_tick)。"""
+    心跳/逐请求日志都在 fwd 的 housekeeping 里(见 _gate_heartbeat_tick/_reqlog_flush_tick)。"""
     backoff = [12, 30, 60, 300, 900]
     failures = 0
     # 启动即自报 pid 到 state,避免 ensure_watchdog 因读到旧(已死)pid 反复拉起副本
+    # 字段级写:只动 watchdog_pid(kb/06 第 24 条)
     try:
-        st0 = read_state()
-        st0["watchdog_pid"] = os.getpid()
-        write_state(st0)
+        update_state(lambda s: {**s, "watchdog_pid": os.getpid()})
     except Exception:
         pass
     while True:
@@ -4533,9 +4759,13 @@ def cmd_watch():
                 # → 插件又报「frpc 进程未运行」(这是 state 抖动的另一个来源)。
                 try:
                     update_state(lambda s: {**s, "fwd_pid": p.pid})
-                except Exception:
-                    st["fwd_pid"] = p.pid
-                    write_state(st)
+                except Exception as e:
+                    # 兜底:update_state 失败(锁异常)时改为"重读最新 state + 字段级写",
+                    # 绝不回写旧快照 st(会把 frpc_pid/tunnel_ok 覆盖回过期值);再失败只记日志
+                    try:
+                        write_state({**read_state(), "fwd_pid": p.pid})
+                    except Exception:
+                        print("看门狗: fwd_pid 写入失败: %r" % (e,), flush=True)
                 print("[%s] 看门狗: 重拉闸机(pid=%d)" % (time.strftime("%H:%M:%S"), p.pid), flush=True)
             if "frpc" in need:
                 # 与 cmd_start 串行化:start 刚拉起 frpc 的头一两秒里,state 里可能还是
@@ -4587,23 +4817,31 @@ def ensure_watchdog():
     # 整份写回会把 frpc_pid / tunnel_ok / tunnel_error 一起覆盖成过期值。
     try:
         update_state(lambda s: {**s, "watchdog_pid": p.pid})
-    except Exception:
-        st["watchdog_pid"] = p.pid
-        write_state(st)
+    except Exception as e:
+        # 兜底同上:重读最新 state 后字段级写,不回写旧快照 st
+        try:
+            write_state({**read_state(), "watchdog_pid": p.pid})
+        except Exception:
+            print("看门狗 pid 写入失败: %r" % (e,), flush=True)
 
 
 def totp_set(enabled, reset=False):
-    st = read_state()
-    if enabled and (not st.get("totp_secret") or reset):
-        st["totp_secret"] = base64.b32encode(os.urandom(20)).decode().rstrip("=")
-    if not enabled and reset:
-        st.pop("totp_secret", None)
-    st["totp_enabled"] = bool(enabled)
-    st["gate_kick_seq"] = st.get("gate_kick_seq", 0) + 1  # 踢全部既有会话
-    if enabled:
-        # 2FA 启用后由动态码把关,清空"2FA 关闭时"的已踢名单,重新开始
-        st.pop("gate_kicked_devs", None)
-    write_state(st)
+    # 字段级写(kb/06 第 24 条):只动 totp_secret/totp_enabled/gate_kick_seq/
+    # gate_kicked_devs 四个键;旧的整份快照回写会覆盖并发写者的其它字段。
+    # 密钥生成放进 mutator:若并发已生成过 totp_secret 就不重复造。
+    def _mut(s):
+        s = dict(s)
+        if enabled and (not s.get("totp_secret") or reset):
+            s["totp_secret"] = base64.b32encode(os.urandom(20)).decode().rstrip("=")
+        if not enabled and reset:
+            s.pop("totp_secret", None)
+        s["totp_enabled"] = bool(enabled)
+        s["gate_kick_seq"] = s.get("gate_kick_seq", 0) + 1  # 踢全部既有会话
+        if enabled:
+            # 2FA 启用后由动态码把关,清空"2FA 关闭时"的已踢名单,重新开始
+            s.pop("gate_kicked_devs", None)
+        return s
+    st = update_state(_mut)
     _append_event("totp", "2FA %s%s" % ("启用" if enabled else "禁用",
                                         "(重置密钥)" if reset else ""))
     return st
@@ -4876,7 +5114,19 @@ def ensure_tunnel(remote_port=REMOTE_PORT):
         if not server_host:
             server_host = OFFICIAL_FRP_HOST
     server_port = int(sec.get("frp_server_port") or OFFICIAL_FRP_PORT)
+    # 防呆(2026-11-07 实测):服务端端口池曾把 frps 自己的监听端口(17000)当普通端口分配给用户,
+    # 于是这里的 remotePort 和 serverPort 相等 → frpc 连上 frps 后必然报 `port unavailable`,
+    # 日志里只有一句 start error,插件表现是"一直启动失败/隧道未就绪",极难排查。
+    # 与其生成一份注定起不来的配置,不如直接报清楚原因(服务端已修:allocatePort 跳过服务保留段)。
+    if remote_port == server_port:
+        raise SystemExit(
+            "端口配置异常:申请到的远程端口(%d)与 frps 服务端口相同,frpc 无法注册。\n"
+            "请到插件「配置」面板重新登录官方账号以重新申请端口;\n"
+            "若反复出现,说明服务端端口池把「服务保留段」也发出去了,需要更新服务端。" % remote_port)
     server_token = sec.get("frp_token")
+    # TOML 基本字符串只要求转义 反斜杠 和 引号;官方 token 是安全字符集,
+    # 自建用户自填 token 若含 " 或 \,不转义会生成非法 toml(frpc 直接解析失败)。
+    _toml_token = str(server_token).replace("\\", "\\\\").replace('"', '\\"')
     toml = frpc_toml_path()
     toml.write_text(
         'serverAddr = "%s"\n'
@@ -4912,7 +5162,7 @@ def ensure_tunnel(remote_port=REMOTE_PORT):
         'type = "tcp"\n'
         'localIP = "127.0.0.1"\n'
         'localPort = %d\n'
-        'remotePort = %d\n' % (server_host, server_port, server_token,
+        'remotePort = %d\n' % (server_host, server_port, _toml_token,
                                remote_port, FWD_PORT, remote_port),
         encoding="utf-8",
     )
@@ -5078,9 +5328,8 @@ def ensure_forwarder():
     if not ok:
         raise SystemExit("转发器启动失败,详见 %s" % FWD_LOG)
     print("本地转发器已启动(pid=%d)" % p.pid)
-    state = read_state()
-    state["fwd_pid"] = p.pid
-    write_state(state)
+    # 字段级写:只落 fwd_pid(kb/06 第 24 条),不回写旧快照
+    update_state(lambda s: {**s, "fwd_pid": p.pid})
 
 
 # ---------------- 服务器端 ----------------
@@ -5321,8 +5570,8 @@ def nginx_install(remote_port=REMOTE_PORT):
         secret = state.get("link_secret")
         if not secret:
             secret = os.urandom(16).hex()
-            state["link_secret"] = secret
-            write_state(state)
+            # 字段级写:只落 link_secret,避免整份快照回写覆盖其它字段(kb/06 第 24 条)
+            update_state(lambda s: {**s, "link_secret": secret})
         block = build_nginx_block(remote_port, secret)
         # 优先"就地替换":定位旧块的起止标记,在它原来的位置放回新块。
         # 不要依赖通用 /p/ 正则的字面量(服务器上端口范围已被扩写成
@@ -5393,7 +5642,11 @@ def build_nginx_block(remote_port, secret):
         "            --    2FA 登录页,这是 Cookie 过期后唯一的自助恢复路径;边缘一旦\n"
         "            --    403 掉,用户就只能回电脑前重新生成引导链接才能进门。\n"
         "            local ck = ngx.var.http_cookie or \"\"\n"
-        "            local bc = ck:match(\"bc%%-gate=([^;]+)\")\n"
+        "            -- 同名多值时取「最后一段」:Chromium 同路径 cookie 按创建时间升序发送,\n"
+        "            -- 最后出现的值最新;与闸机 _gate_cookie_raw 的 newest-valid-wins 对齐。\n"
+        "            -- (kb/06 第 25 条:取首段会在 App WebView 双 bc-gate 场景拿旧值)\n"
+        "            local bc = nil\n"
+        "            for seg in ck:gmatch(\"bc%%-gate=([^;]+)\") do bc = seg end\n"
         "            if not bc then return end\n"
         "            -- 2) 拆分 v1.{body_b64url}.{sig_b64url}\n"
         "            local dot1 = bc:find(\".\", 1, true)\n"
@@ -5719,6 +5972,8 @@ def cmd_status():
 def cmd_start():
     # 跨进程互斥:多个并发 start(按钮连点/侧边栏自动 ensure)串行化,防重复进程
     with _ctl_release(_ctl_lock()):
+        _clean_elevated_leftovers()   # 提权残留先自动用管理员权限清掉,再挑端口/起闸机
+        _select_fwd_port()   # 3080 被占就顺延,并把结果传给 fwd/watch
         port = detect_port()
         print("DSH Web 端口: %d" % port)
         ensure_forwarder()
@@ -5737,12 +5992,12 @@ def cmd_start():
         if tunnel_err is not None:
             raise tunnel_err
         name, value, payload = mint_cookie()
-        st = read_state()
-        st["dsh_port"] = port
-        st["cookie_name"] = name
-        st["cookie_value"] = value
-        st["cookie_expires"] = payload["expiresAt"]
-        write_state(st)
+        # 字段级写:只更新 dsh_port 与 DSH cookie 四个键(kb/06 第 24 条)。
+        # 原整份快照回写会把 start 期间看门狗/插件并发写的 frpc_pid/tunnel_ok
+        # 覆盖回旧值,是「隧道间歇未建立」的竞态来源之一。
+        st = update_state(lambda s: {**s, "dsh_port": port,
+                                     "cookie_name": name, "cookie_value": value,
+                                     "cookie_expires": payload["expiresAt"]})
     print()
     print("=" * 62)
     if st.get("link_secret"):
@@ -5763,13 +6018,32 @@ def cmd_start():
 def cmd_stop():
     with _ctl_release(_ctl_lock()):
         st = read_state()
+        leftovers = []
+        pop_keys = []   # 只 pop 真正清掉的 pid 键;提权残留的键必须留在 state 里
         for key in ("frpc_pid", "fwd_pid", "watchdog_pid"):
             pid = st.get(key)
             if pid and _pid_alive(pid):
                 _run_hidden(["taskkill", "/PID", str(pid), "/T", "/F"],
                             capture_output=True, timeout=15)
+                if _pid_alive(pid):
+                    # 提权(UAC)/受保护进程:普通权限的 taskkill 杀不掉(2026-11-07 实测)。
+                    # 保留 pid 记录并记入 elevated_leftovers 标记,让 cmd_start 下次启动时
+                    # 自动用管理员权限(UAC)清掉 —— 否则残留闸机/看门狗/frpc 一直占端口,
+                    # 两份闸机同时写同一个 state 互相覆盖,插件就间歇报「frpc 进程未运行」。
+                    print("[警告] %s(pid=%d) 为提权/受保护进程,普通权限杀不掉,已记录待管理员清理。"
+                          % (key, pid))
+                    leftovers.append(int(pid))
+                    continue
                 print("已停止 %s(pid=%d)" % (key, pid))
-            st.pop(key, None)
+            pop_keys.append(key)
+        if leftovers:
+            # 字段级写:只动 elevated_leftovers 一个键。整份快照回写会把 stop 期间
+            # 其它进程(插件 ensure/看门狗)刚写的 frpc_pid/tunnel_ok 等覆盖回旧值
+            # (kb/06 第 24 条的 state 覆盖竞态)。
+            update_state(lambda s: {**s, "elevated_leftovers": sorted(set(leftovers))})
+            print("下次点「开始控制」会自动请求管理员权限(UAC)清理残留,弹窗请点「是」。")
+        else:
+            pop_keys.append("elevated_leftovers")
         # 兜底:清掉任何残留副本(watchdog / frpc / 竞态重复 fwd)。
         # 排除当前进程(自己杀自己会中断清理循环)。
         # wmic 在新版 Windows 已弃用且 where 子句常失效,改用 PowerShell CIM。
@@ -5777,8 +6051,10 @@ def cmd_stop():
             _own_pid = os.getpid()
             # 关键:必须按「本副本自己的目录」限定范围。
             # 以前只匹配 '*browserctl*',会把同一台机器上另一份插件的进程一起杀掉 ——
-            # 同一台机器可以并存官方插件与另一份副本(各自目录都有 browserctl.py /
-            # browserctl_frpc.toml),两边命令行都含 'browserctl',停一份就把另一份的隧道打断。
+            # 同一台机器可以并存「正式版(mirror 目录)」和「测试副本(工作区目录)」,
+            # 两者各有 browserctl.py / browserctl_frpc.toml / win_push.py,命令行里都含
+            # 'browserctl'。结果就是「停测试版 → 正式版隧道也被打断」或反之(2026-11-07 实测:
+            # 面板一直报隧道未就绪,而被杀的那份日志里连异常都没有)。
             try:
                 _here_pat = str(HERE).replace("'", "''").replace("[", "[[]")
                 ps = (
@@ -5799,7 +6075,10 @@ def cmd_stop():
                                     capture_output=True, timeout=10)
             except Exception:
                 pass
-        write_state(st)
+        # 收尾写盘同样字段级:只 pop 本次真正清掉的 pid 键(提权残留键保留),
+        # 其它字段(remote_port/cookie/tunnel 状态)一律以磁盘当前值为准,不回写旧快照。
+        if pop_keys:
+            update_state(lambda s: {k: v for k, v in s.items() if k not in pop_keys})
 
 
 def cmd_link(ttl=86400, uses=1):
@@ -5811,7 +6090,10 @@ def cmd_link(ttl=86400, uses=1):
         r = urllib.request.urlopen(req, timeout=5)
         info = json.loads(r.read())
     except Exception:
-        # 闸机未运行:本地直接签名(效果相同,过期时间以本机时钟为准)
+        # 闸机未运行:本地直接签名(效果相同,过期时间以本机时钟为准)。
+        # ⚠️ 与闸机在线时不同,这条路径拿不到隧道状态,只校验"端口有没有分配",
+        # 不校验 frpc 是否真的把端口注册到了 frps —— 隧道未连通时这里给出的链接
+        # 打开就是 502。所以本地签发必须把这一点讲清楚,别让用户以为闸机已经把关。
         state = read_state()
         secret = state.get("link_secret")
         if not secret:
@@ -5821,6 +6103,8 @@ def cmd_link(ttl=86400, uses=1):
         if "?p=0&" in url or url.endswith("?p=0"):
             raise SystemExit("尚未建立隧道(远端端口未分配),无法生成引导链接;\n"
                              "请先登录官方账号并启动隧道(python browserctl.py start)")
+        print("⚠️ 闸机未运行,链接由 CLI 本地签发,未校验隧道是否真正连通;")
+        print("   打开若 502,请先 python browserctl.py start 再重新生成。", file=sys.stderr)
         info = {"url": url,
                 "ttl": int(ttl), "exp": int(time.time()) + int(ttl), "uses": uses}
     print("引导链接(有效期至 %s,可用 %s):" % (
