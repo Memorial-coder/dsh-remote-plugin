@@ -5324,6 +5324,55 @@ function apiAuthorized(req) {
   }
   return false;
 }
+var CSRF_LOOPBACK_HOST = /^(?:127\.0\.0\.1|localhost|\[::1\]|::1)(?::\d+)?$/i;
+function csrfBlocked(req) {
+  if (req.headers["x-real-ip"] || req.headers["x-forwarded-for"]) return false;
+  const site = String(req.headers["sec-fetch-site"] || "").trim().toLowerCase();
+  if (site === "cross-site") return true;
+  const origin = String(req.headers.origin || "").trim();
+  if (!origin) return false;
+  let oh = null;
+  try {
+    oh = new URL(origin);
+  } catch {
+    return true;
+  }
+  if (oh.host === String(req.headers.host || "")) return false;
+  if (CSRF_LOOPBACK_HOST.test(oh.host) && CSRF_LOOPBACK_HOST.test(String(req.headers.host || ""))) return false;
+  return true;
+}
+var CSRF_PROTECTED = /* @__PURE__ */ new Set([
+  "/browserctl/api/ensure",
+  "/browserctl/api/stop",
+  "/browserctl/api/elevate",
+  "/browserctl/api/link",
+  "/browserctl/api/pair",
+  "/browserctl/api/pair-long",
+  "/browserctl/api/totp-toggle",
+  "/browserctl/api/totp-kick",
+  "/browserctl/api/blacklist-add",
+  "/browserctl/api/blacklist-remove",
+  "/browserctl/api/server/logout",
+  "/browserctl/api/server/oauth/begin",
+  "/browserctl/api/server/oauth/open",
+  "/browserctl/api/server/oauth/poll",
+  "/browserctl/api/config"
+]);
+var GATE_PFX = "/browserctl-gate";
+var GATE_WRITE_PATHS = [
+  "/kick",
+  "/kick-all",
+  "/blacklist",
+  "/blacklist/remove",
+  "/push-config",
+  "/notify",
+  "/pair",
+  "/link",
+  "/verify",
+  "/totp-toggle",
+  "/totp-reset",
+  "/bootstrap"
+];
 function apply(ctx, config = {}) {
   ctx.effect(() => ctx.webServer.register({
     kind: "prefix",
@@ -5336,6 +5385,10 @@ function apply(ctx, config = {}) {
         return;
       }
       const route = url.pathname.replace(/\/+$/, "") || url.pathname;
+      if (CSRF_PROTECTED.has(route) && csrfBlocked(req)) {
+        sendJson(res, 403, { ok: false, error: "\u8DE8\u7AD9\u8BF7\u6C42\u88AB\u62D2\u7EDD:\u72B6\u6001\u53D8\u66F4\u4EC5\u63A5\u53D7\u540C\u6E90\u8C03\u7528" });
+        return;
+      }
       if (route === "/browserctl/api/ensure") {
         if (ensureRunning) {
           sendJson(res, 200, {
@@ -5843,6 +5896,10 @@ function apply(ctx, config = {}) {
                 sendJson(res, 400, { ok: false, error: "\u7F3A\u5C11 host \u53C2\u6570" });
                 return;
               }
+              if (!token && sec2.frp_token_official && sec2.frp_token === sec2.frp_token_official) {
+                sendJson(res, 400, { ok: false, error: "\u8BF7\u586B\u5199\u81EA\u5EFA frps token:\u5F53\u524D\u4FDD\u5B58\u7684\u662F\u5B98\u65B9\u670D\u52A1\u5668\u5206\u914D\u7684 token,\u7559\u7A7A\u4F1A\u5BFC\u81F4\u81EA\u5EFA\u96A7\u9053\u8BA4\u8BC1\u5931\u8D25" });
+                return;
+              }
               sec2.server_mode = "selfhost";
               sec2.ssh_host = host;
               sec2.frp_server_port = Number.isFinite(port) && port > 0 ? port : 17e3;
@@ -5851,6 +5908,7 @@ function apply(ctx, config = {}) {
               if (token) sec2.frp_token = token;
             } else {
               sec2.server_mode = "official";
+              if (sec2.frp_token_official) sec2.frp_token = sec2.frp_token_official;
               if (!sec2.server_uid) delete sec2.frp_remote_port;
               delete sec2.ssh_host;
               delete sec2.frp_server_port;
@@ -5927,6 +5985,13 @@ function apply(ctx, config = {}) {
     path: "/browserctl-gate",
     handler: async (req, res) => {
       const url = new URL(req.url || "/", "http://dsh.invalid");
+      const gPath = url.pathname.slice(GATE_PFX.length);
+      const gMethod = String(req.method || "GET").toUpperCase();
+      const gWrite = gMethod !== "GET" && gMethod !== "HEAD" || GATE_WRITE_PATHS.some((w) => gPath === w || gPath.startsWith(w + "/"));
+      if (gWrite && csrfBlocked(req)) {
+        sendJson(res, 403, { ok: false, error: "\u8DE8\u7AD9\u8BF7\u6C42\u88AB\u62D2\u7EDD:\u72B6\u6001\u53D8\u66F4\u4EC5\u63A5\u53D7\u540C\u6E90\u8C03\u7528" });
+        return;
+      }
       if (!apiAuthorized(req)) {
         sendJson(res, 401, { ok: false, error: "\u672A\u6388\u6743:\u8BF7\u901A\u8FC7\u9762\u677F\u8BBF\u95EE(\u7F3A\u5C11\u6709\u6548\u4F1A\u8BDD)" });
         return;

@@ -972,6 +972,58 @@ function apiAuthorized(req) {
   return false
 }
 
+// ---- CSRF 防御(状态变更路由) -----------------------------------------------
+// 背景:apiAuthorized 的「本机直连」通道对「对端 loopback 且无转发头」的请求放行,
+// 公网页面向 http://127.0.0.1:<DSH端口>/browserctl/api/* 发的跨站请求同样满足它。
+// 状态变更路由必须再加一道跨站识别。信号与取舍:
+//   ① Sec-Fetch-Site: cross-site —— 现代浏览器对导航/fetch 一律携带(curl/PowerShell 不带);
+//   ② Origin 头存在但与请求 Host 不同源 —— 跨站 fetch/表单必带 Origin,无法伪造;
+//   ③ 经 nginx/闸机转发的请求(X-Real-IP/X-Forwarded-For)已过边缘门禁+Cookie 鉴权,不在此列;
+//   ④ 无任何信号的本机工具/老内核 → 放行(兼容,防误伤);
+//   ⑤ host 自己的反代 upstream fetch 不带 Origin/Sec-Fetch,天然放行,不会被误伤。
+// 残余面:既不带 Origin 也不带 Sec-Fetch 的极老浏览器导航型 GET 不在此防御内(可接受)。
+const CSRF_LOOPBACK_HOST = /^(?:127\.0\.0\.1|localhost|\[::1\]|::1)(?::\d+)?$/i
+
+function csrfBlocked(req) {
+  if (req.headers['x-real-ip'] || req.headers['x-forwarded-for']) return false
+  const site = String(req.headers['sec-fetch-site'] || '').trim().toLowerCase()
+  if (site === 'cross-site') return true
+  const origin = String(req.headers.origin || '').trim()
+  if (!origin) return false
+  let oh = null
+  try { oh = new URL(origin) } catch { return true } // Origin 解析不了 = 伪造,拒
+  if (oh.host === String(req.headers.host || '')) return false // 同源(含端口)
+  // 本机双通道:Origin 与 Host 都是回环(端口可不同)→ 同一台机器,放行
+  if (CSRF_LOOPBACK_HOST.test(oh.host) && CSRF_LOOPBACK_HOST.test(String(req.headers.host || ''))) return false
+  return true
+}
+
+// 状态变更路由清单(POST/DELETE + GET 型写操作)。只读路由(status/qr/totp/pair-status/
+// server/me/update-check)不在列:误伤面板刷新代价更大。
+const CSRF_PROTECTED = new Set([
+  '/browserctl/api/ensure',
+  '/browserctl/api/stop',
+  '/browserctl/api/elevate',
+  '/browserctl/api/link',
+  '/browserctl/api/pair',
+  '/browserctl/api/pair-long',
+  '/browserctl/api/totp-toggle',
+  '/browserctl/api/totp-kick',
+  '/browserctl/api/blacklist-add',
+  '/browserctl/api/blacklist-remove',
+  '/browserctl/api/server/logout',
+  '/browserctl/api/server/oauth/begin',
+  '/browserctl/api/server/oauth/open',
+  '/browserctl/api/server/oauth/poll',
+  '/browserctl/api/config',
+])
+
+// 闸机反代里的「写端点」后缀(POST/DELETE 全拦 + GET 型写操作;events/push-poll/
+// heartbeat/totp 等读端点放行)。前缀按 GATE_PFX 截掉后再匹配。
+const GATE_PFX = '/browserctl-gate'
+const GATE_WRITE_PATHS = ['/kick', '/kick-all', '/blacklist', '/blacklist/remove', '/push-config',
+  '/notify', '/pair', '/link', '/verify', '/totp-toggle', '/totp-reset', '/bootstrap']
+
 export function apply(ctx, config = {}) {
   // 照抄官方 open-in-app 插件的注册方式:直接 ctx.webServer.register(ctx.effect 包裹)。
   // 之前用 ctx.inject(['webServer'], ...) 的回调从未被调用,路由一直没注册上。
@@ -986,6 +1038,11 @@ export function apply(ctx, config = {}) {
           return
         }
         const route = url.pathname.replace(/\/+$/, '') || url.pathname  // 归一化尾斜杠
+        // CSRF:状态变更路由拒绝跨站来源(无 Origin/Sec-Fetch 的本机工具/老内核放行)
+        if (CSRF_PROTECTED.has(route) && csrfBlocked(req)) {
+          sendJson(res, 403, { ok: false, error: '跨站请求被拒绝:状态变更仅接受同源调用' })
+          return
+        }
         if (route === '/browserctl/api/ensure') {
           // 幂等启动(逻辑见 buildTunnel):本会话隧道在跑 → 直接返回,不拆隧道不换端口;
           // 只有隧道没在跑 / DSH 刚启动首次 ensure 才重建。关插件面板绝不会重启隧道。
@@ -1465,6 +1522,13 @@ export function apply(ctx, config = {}) {
                 const remotePort = parseInt(url.searchParams.get('remotePort') || '', 10)
                 const token = (url.searchParams.get('token') || '').trim()
                 if (!host) { sendJson(res, 400, { ok: false, error: '缺少 host 参数' }); return }
+                // token 留空本意=保持现有 token;但若现有的其实是官方下发的 frp token
+                // (frp_token_official 备份还在且两者相等),留空会把官方 token 误用到
+                // 自建 frps → 必然认证失败,这里直接拒绝并说明,不再静默写错值
+                if (!token && sec.frp_token_official && sec.frp_token === sec.frp_token_official) {
+                  sendJson(res, 400, { ok: false, error: '请填写自建 frps token:当前保存的是官方服务器分配的 token,留空会导致自建隧道认证失败' })
+                  return
+                }
                 sec.server_mode = 'selfhost'
                 sec.ssh_host = host
                 sec.frp_server_port = Number.isFinite(port) && port > 0 ? port : 17000
@@ -1476,6 +1540,9 @@ export function apply(ctx, config = {}) {
                 // 官方模式:清掉自建覆盖。注意:不清 server_* 账号与分配端口——
                 // 「切到官方模式」≠「退出账号」,账号走 /server/logout。
                 sec.server_mode = 'official'
+                // 切回官方:还原官方下发的 frp token(若曾备份),避免自建 token 残留
+                // 导致官方 frps 认证失败(备份只在此前的切换时写入)
+                if (sec.frp_token_official) sec.frp_token = sec.frp_token_official
                 if (!sec.server_uid) delete sec.frp_remote_port
                 delete sec.ssh_host
                 delete sec.frp_server_port
@@ -1559,6 +1626,17 @@ export function apply(ctx, config = {}) {
     path: '/browserctl-gate',
     handler: async (req, res) => {
       const url = new URL(req.url || '/', 'http://dsh.invalid')
+      // CSRF:反代里的写端点拒绝跨站来源(POST/DELETE 全拦 + GET 型写操作;读端点放行)。
+      // 本机 GUI 同源请求 Origin==Host 放行;远程面板带转发头在 csrfBlocked 里放行;
+      // host 内部 upstream fetch 无 Origin/Sec-Fetch,不受影响。
+      const gPath = url.pathname.slice(GATE_PFX.length)
+      const gMethod = String(req.method || 'GET').toUpperCase()
+      const gWrite = (gMethod !== 'GET' && gMethod !== 'HEAD') ||
+        GATE_WRITE_PATHS.some(w => gPath === w || gPath.startsWith(w + '/'))
+      if (gWrite && csrfBlocked(req)) {
+        sendJson(res, 403, { ok: false, error: '跨站请求被拒绝:状态变更仅接受同源调用' })
+        return
+      }
       // H-04:插件反代会把请求伪装成 loopback 打到闸机。未授权请求先在这里拦掉,
       // 否则公网无 Cookie 的陌生请求也能借反代创建配对码/引导链接。
       if (!apiAuthorized(req)) {

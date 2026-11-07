@@ -24,7 +24,24 @@ STATE_FILE = HERE / "browserctl_pushwin_state.json"
 ADMIN_TOKEN_FILE = HERE / "browserctl_admin_token"
 TOAST_PS1 = HERE / "push_toast.ps1"
 
-PUSH_POLL_URL = "http://127.0.0.1:3080/browserctl-gate/push-poll"
+def _fwd_port():
+    """闸机端口每轮现算:① BC_FWD_PORT 环境变量 → ② 本目录 browserctl_state.json 的 fwd_port → ③ 3080。
+    不在 import 时冻结:闸机端口避让/重启换端口后,下一轮轮询自动跟上,通知不再静默失联。"""
+    env = os.environ.get("BC_FWD_PORT")
+    if env:
+        try:
+            p = int(str(env).strip())
+            if 0 < p < 65536:
+                return p
+        except (TypeError, ValueError):
+            pass
+    try:
+        p = int(json.loads((HERE / "browserctl_state.json").read_text(encoding="utf-8")).get("fwd_port") or 0)
+        if 0 < p < 65536:
+            return p
+    except Exception:
+        pass
+    return 3080
 
 # 轮询节奏 —— 与 Android PushService 对齐
 POLL_OK_SEC = 15.0       # 正常间隔 (15s)
@@ -69,7 +86,7 @@ def poll(last_id):
     token = read_admin_token()
     if not token:
         return None
-    url = f"{PUSH_POLL_URL}?last={last_id}"
+    url = f"http://127.0.0.1:{_fwd_port()}/browserctl-gate/push-poll?last={last_id}"
     req = urllib.request.Request(url)
     req.add_header("X-BC-Admin", token)
     try:

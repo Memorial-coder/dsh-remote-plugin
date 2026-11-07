@@ -1377,15 +1377,14 @@ div[data-slot='sidebar.footer.action'] > * {
 }
 `;
 function installStyles() {
-  const existing = document.querySelector(`style[data-plugin="${STYLE_ID}"]`);
-  if (existing !== null) return () => {
-  };
-  const style = document.createElement("style");
-  style.dataset.plugin = STYLE_ID;
-  style.textContent = css;
-  document.head.append(style);
+  let style = document.querySelector(`style[data-plugin="${STYLE_ID}"]`);
+  if (style === null) {
+    style = document.createElement("style");
+    style.dataset.plugin = STYLE_ID;
+    document.head.append(style);
+  }
+  if (style.textContent !== css) style.textContent = css;
   return () => {
-    style.remove();
   };
 }
 function CtlIcon({ size = 16 }) {
