@@ -2379,21 +2379,50 @@ class GateHandler(BaseHTTPRequestHandler):
                              "%s=deleted; Max-Age=0; Path=/" % GATE_COOKIE)]
         self._send(403 if app_ua else 200, DENIED_HTML, headers=headers)
 
-    def _gate_cookie_raw(self):
+    def _gate_cookie_values(self):
+        """Cookie 头里全部 bc-gate 值(按出现顺序;同名多值是 WebView 竞态残留)。"""
         raw = self.headers.get("Cookie", "")
+        vals = []
         for seg in raw.split(";"):
             k, _, v = seg.partition("=")
             if k.strip() == GATE_COOKIE:
-                return v.strip()
-        return None
+                vals.append(v.strip())
+        return vals
+
+    def _gate_cookie_raw(self):
+        """取 bc-gate 用于鉴权。同名多值时按「新值优先」逐个校验,取第一个通过
+        签名+有效期的;全都不通过时返回最后一个,让上层校验给出正确的拒绝。
+        背景(2026-11-07 手机端「未授权」根因):App WebView 里旧 cookie 未必被
+        新配对覆盖,同一请求会带两个 bc-gate(旧值在前新值在后),旧值若属于
+        已踢设备会把新值一起拖死。Chromium 同路径 cookie 按创建时间升序发送,
+        最靠后的值最新,故从后往前找。"""
+        vals = self._gate_cookie_values()
+        if not vals:
+            return None
+        st = gate_state()
+        secret = st.get("link_secret")
+        if len(vals) == 1 or not secret:
+            return vals[-1]
+        for v in reversed(vals):
+            try:
+                if gate_cookie_dev_only(v, secret):
+                    return v
+            except Exception:
+                continue
+        return vals[-1]
 
     def _gate_cookie_dev(self):
-        """仅取 Cookie 中的设备 id(不要求会话在册;用于 2FA 关闭时识别已踢设备)。"""
+        """仅取 Cookie 中的设备 id(不要求会话在册;用于 2FA 关闭时识别已踢设备)。
+        踢人语义从严:只看最新的那个值(请求里最后一个),不做旧值回退——
+        否则用户踢掉当前会话后,App 里残留的旧 cookie 会让踢下线形同虚设。"""
         st = gate_state()
         secret = st.get("link_secret")
         if not secret:
             return None
-        return gate_cookie_dev_only(self._gate_cookie_raw(), secret)
+        vals = self._gate_cookie_values()
+        if not vals:
+            return None
+        return gate_cookie_dev_only(vals[-1], secret)
 
     def _has_dsh_cookie(self):
         """请求是否带"已配对"的 DSH 授权 Cookie(仅由配对 claim / 引导 bootstrap 发放)。
@@ -2758,15 +2787,34 @@ class GateHandler(BaseHTTPRequestHandler):
         fwd_headers["Host"] = self.headers.get("Host") or "remote.ymzcc.com"
         # 上游 keep-alive:池按端口分桶,DSH 换端口时 resolve_dsh 整池作废
         fwd_headers["Connection"] = "keep-alive"
+        # 2026-11-07:边缘 Lua 改写 Cookie 时会同时保留原 Cookie 头和重写后的
+        # Cookie 头(大小写不同,如 Cookie/cookie),两条都会原样转发到 DSH,
+        # DSH 取其中一条 → 过期值复活 → 401。这里先把所有 Cookie 头合并成一份。
+        try:
+            _ck_merge = "; ".join(seg for k, v in self.headers.items()
+                                  if k.lower() == "cookie"
+                                  for seg in (v or "").split(";") if seg.strip())
+            for _ck_key in [k for k in fwd_headers.keys() if k.lower() == "cookie"]:
+                del fwd_headers[_ck_key]
+            if _ck_merge:
+                fwd_headers["Cookie"] = _ck_merge
+        except Exception:
+            pass
         # 闸机已通过 2FA:自动注入 DSH 授权 Cookie。
         # 这样用户只需输入动态码,无需先走 dsh-auth.html 写入 Cookie。
+        # 2026-11-07:请求自带的同名 DSH cookie 必须整体替换而非跳过——
+        # App 端 restoreCookies 会把几天前的旧 dsh cookie 一并恢复,旧值对着
+        # 已重启的 DSH web 恒 401,曾经"缺了才补"的策略让 App 端永远打不开面板。
         try:
             _st = gate_state()
             _cn, _cv = _st.get("cookie_name"), _st.get("cookie_value")
             if _cn and _cv:
                 _ck = fwd_headers.get("Cookie") or ""
-                if ("%s=" % _cn) not in _ck:
-                    fwd_headers["Cookie"] = (_ck + "; " if _ck else "") + "%s=%s" % (_cn, _cv)
+                if _ck:
+                    _keep = [p for p in _ck.split(";")
+                             if p.strip() and not p.strip().startswith(_cn + "=")]
+                    _ck = "; ".join(_keep)
+                fwd_headers["Cookie"] = (_ck + "; " if _ck else "") + "%s=%s" % (_cn, _cv)
         except Exception:
             pass
         if body is not None:
