@@ -4,7 +4,7 @@
 
 ## 怎么提交
 
-1. 把 `memorial-coder__dsh-remote-plugin.yml` 原样复制到 awesome-dsh-plugin 仓库的 `data/plugins/` 下，文件名不要改。
+1. 把 `Memorial-coder__dsh-remote-plugin.yml` 原样复制到 awesome-dsh-plugin 仓库的 `data/plugins/` 下，文件名不要改。
 2. 一个 PR 只加这一条，不要手改两个 README（它们由 `scripts/generate-readme.mjs` 从 `data/plugins/*.yml` 生成）。
 3. 仓库根改了 `package.json` 等文件后，先打新 tag（例如 `v1.0.33`）让 Release 产出 `dsh-remote-plugin.tgz`，再按需启用条目里的 `tarball:` 字段。
 
