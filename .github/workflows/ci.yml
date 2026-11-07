@@ -25,3 +25,6 @@ jobs:
         working-directory: dsh-plugin-browserctl
       - run: node test/smoke.cjs
         working-directory: dsh-plugin-browserctl
+      # 根 manifest(awesome-dsh-plugin gate 读它)与子包 manifest 必须不漂移,
+      # files / screenshots.json 指向的文件必须存在
+      - run: node scripts/check-manifests.mjs

@@ -23,6 +23,9 @@ name: Release
 #      (Windows 上正常,别的系统解出一堆乱名文件)。用 `cd dist/pkg && zip -r ... dsh-remote-plugin` 保证。
 #   4. 版本号唯一来源 = dsh-plugin-browserctl/package.json;build.mjs 用它 define 进产物,
 #      工作流只从它取 tag,不手写版本。
+#   5. **额外的 npm 兼容 .tgz**:awesome-dsh-plugin 商店的 `tarball:` 字段要求 GitHub Release
+#      托管的 `https` `.tgz`。这里再打一份 `package/` 顶层目录的 tarball,资产名不带版本号
+#      (`dsh-remote-plugin.tgz`),`releases/latest/download/` 才能稳定解析。
 #
 # 注意:官网「检查更新」用的 version.json(remote.ymzcc.com/dsh-remote/version.json)
 # 是独立部署的,发版时需另行更新并部署,不归本 workflow 管。
@@ -113,6 +116,11 @@ jobs:
           (cd dist/pkg && zip -r -q "dsh-remote-plugin-${VERSION}.zip" dsh-remote-plugin)
           cp "dist/pkg/dsh-remote-plugin-${VERSION}.zip" "dist/dsh-remote-plugin-${VERSION}.zip"
 
+          # 5) npm 兼容的 .tgz(awesome-dsh-plugin `tarball:` 字段用;顶层目录必须是 package/)
+          rm -rf dist/tgz && mkdir -p dist/tgz
+          cp -r "$STAGE" dist/tgz/package
+          (cd dist/tgz && tar -czf "$GITHUB_WORKSPACE/dist/dsh-remote-plugin.tgz" package)
+
       - name: Verify zip layout
         run: |
           set -euo pipefail
@@ -134,12 +142,35 @@ jobs:
           unzip -q "$ZIP" -d dist/unzip
           node -e "import('./dist/unzip/dsh-remote-plugin/lib/index.js').then(m=>{if(!m||!m.inject)throw new Error('inject missing');console.log('host entry OK')})"
 
+      - name: Verify tarball layout
+        run: |
+          set -euo pipefail
+          TGZ="dist/dsh-remote-plugin.tgz"
+          # 先落盘再查,避免 `tar | grep -q` 在 set -o pipefail 下被 SIGPIPE 判失败
+          tar -tzf "$TGZ" > dist/tgz.list
+          echo "--- tarball 文件清单(前 40) ---"
+          sed -n '1,40p' dist/tgz.list
+          for f in package/package.json package/browserctl.py package/cordis.patch.yml \
+                   package/lib/index.js package/lib/client.js package/frpc.exe; do
+            grep -qx "$f" dist/tgz.list || { echo "ERROR: tgz 缺 $f" >&2; exit 1; }
+          done
+          # 顶层必须是 package/;出现裸 package.json 说明 tar 的 -C 目录不对
+          if grep -qx 'package.json' dist/tgz.list; then
+            echo "ERROR: tgz 顶层缺少 package/ 目录" >&2
+            exit 1
+          fi
+          # 解压后用 node 实测插件入口能加载
+          rm -rf dist/tgztest && mkdir -p dist/tgztest
+          tar -xzf "$TGZ" -C dist/tgztest
+          node -e "import('./dist/tgztest/package/lib/index.js').then(m=>{if(!m||!m.inject)throw new Error('inject missing');console.log('tarball host entry OK')})"
+
       - name: Create release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "${{ steps.ver.outputs.tag }}" \
             "dist/dsh-remote-plugin-${VERSION}.zip" \
+            "dist/dsh-remote-plugin.tgz" \
             --repo "$GITHUB_REPOSITORY" \
             --title "dsh-remote-plugin ${{ steps.ver.outputs.tag }}" \
             --generate-notes

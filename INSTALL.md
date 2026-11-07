@@ -62,6 +62,8 @@ DSH →「设置」→ 插件页 →「添加插件」→「选择本地目录�
 安装器会自动写入该 profile 的 `link:` 依赖和 `dsh.profile.bundles`，并默认启用插件。
 **不需要手改** `%USERPROFILE%\.dsh\profiles\...\package.json`，手动改是 502 与「看不到按钮」的主要来源。
 
+不想解压 zip 也可以直接从仓库安装：`dsh plugin add github:Memorial-coder/dsh-remote-plugin`，或「选择本地目录」选 git clone 出来的仓库根 - 仓库根有同名 `package.json`，`lib/` 已入库，不需要 `npm install`。`frpc.exe` 与 `browserctl.py` 都在仓库根，杀软拦截仍按第 1 步处理。
+
 ### 3. 重启 DSH
 
 重启后侧边栏出现「远程助手」按钮即安装成功。按钮不出现见「常见问题」第 3 条。

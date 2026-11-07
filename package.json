@@ -1,0 +1,70 @@
+{
+  "name": "dsh-plugin-browserctl",
+  "version": "1.0.31",
+  "private": true,
+  "type": "module",
+  "description": "DSH 远程助手(DshRemote): 把 DeepSeek 助手 Web 面板安全穿透到手机与外网, 侧边栏一键开启",
+  "license": "MIT",
+  "author": "Memorial-coder",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Memorial-coder/dsh-remote-plugin.git"
+  },
+  "homepage": "https://github.com/Memorial-coder/dsh-remote-plugin#readme",
+  "bugs": {
+    "url": "https://github.com/Memorial-coder/dsh-remote-plugin/issues"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "remote",
+    "frp",
+    "tunnel"
+  ],
+  "main": "dsh-plugin-browserctl/lib/index.js",
+  "exports": {
+    ".": "./dsh-plugin-browserctl/lib/index.js",
+    "./client": "./dsh-plugin-browserctl/lib/client.js",
+    "./package.json": "./package.json",
+    "./cordis.patch.yml": "./dsh-plugin-browserctl/cordis.patch.yml",
+    "./locale/*.json": "./dsh-plugin-browserctl/locale/*.json",
+    "./icon": "./dsh-plugin-browserctl/icon.svg"
+  },
+  "files": [
+    "package.json",
+    "screenshots.json",
+    "dsh-plugin-browserctl/package.json",
+    "dsh-plugin-browserctl/lib/index.js",
+    "dsh-plugin-browserctl/lib/client.js",
+    "dsh-plugin-browserctl/cordis.patch.yml",
+    "dsh-plugin-browserctl/locale/*.json",
+    "dsh-plugin-browserctl/icon.svg",
+    "dsh-plugin-browserctl/README.md",
+    "browserctl.py",
+    "frpc.exe",
+    "win_push.py",
+    "push_toast.ps1",
+    "fix-antivirus.ps1",
+    "browserctl_pwa",
+    "INSTALL.md",
+    "LICENSE",
+    "requirements.txt"
+  ],
+  "dsh": {
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-primitives",
+        "@deepseek-ai/dsh-client-ui-slots"
+      ],
+      "platform": "web"
+    },
+    "bundle": {
+      "patch": "./dsh-plugin-browserctl/cordis.patch.yml"
+    }
+  },
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0",
+    "dsh": ">=0.2.1-rc.3"
+  }
+}

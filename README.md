@@ -113,6 +113,14 @@ DSH 侧边栏的远程控制面板，集成了二维码配对、设备管理、�
 
 **自建服务器**：配置自己的 frps 服务器；密钥仅保存在本机，不会被提交或上传
 
+**从 GitHub 仓库根安装**（开发/尝鲜）：仓库根另有一份同名 `package.json`，`dsh.bundle` 指到 `dsh-plugin-browserctl/cordis.patch.yml`，所以仓库根也是合法插件包，`lib/` 已入库、不需要 `npm install`：
+
+```sh
+dsh plugin add github:Memorial-coder/dsh-remote-plugin
+```
+
+或在「添加插件 → 选择本地目录」里直接选仓库根目录。发版产物（zip / tgz）的目录结构不变。
+
 ## 架构
 
 ```
@@ -165,6 +173,8 @@ DSH 侧边栏的远程控制面板，集成了二维码配对、设备管理、�
 ```
 
 `qrcode` 已在构建期内联进 `lib/index.js`，运行时不需要 `node_modules`。仓库另带 `screenshots/`（本 README 引用的功能截图）。
+
+仓库根还有 `package.json`（同名，`dsh.bundle` 指向插件子包，供 `dsh plugin add` 与插件市场读取）、`screenshots.json`（市场商店截图声明，6 张相对路径）和 `submission/`（投稿到 awesome-dsh-plugin 的条目副本，不参与打包）。
 
 ## 开源许可
 
