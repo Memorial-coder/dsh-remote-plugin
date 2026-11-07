@@ -4734,19 +4734,24 @@ def ensure_tunnel(remote_port=REMOTE_PORT):
                     if cand != p.pid:
                         keep = cand
                         break
-            try:
-                _run_hidden(["taskkill", "/PID", str(p.pid), "/T", "/F"],
-                            capture_output=True, timeout=15)
-            except Exception:
-                pass
             if keep:
+                # 定位到真正在服务的那一份:杀掉重复的,把 state 的 pid 还给它
+                try:
+                    _run_hidden(["taskkill", "/PID", str(p.pid), "/T", "/F"],
+                                capture_output=True, timeout=15)
+                except Exception:
+                    pass
                 try:
                     update_state(lambda s: {**s, "frpc_pid": keep, "remote_port": want})
                 except Exception:
                     pass
+                print("frpc 已在运行(pid=%d) → 远端端口 %d(已清理重复进程 pid=%d)"
+                      % (keep, want, p.pid), flush=True)
+            else:
+                # 定位不到另一份:绝不能动 p。它还活着、state 也指向它,杀掉反而会触发
+                # 「看门狗重拉 → 又抢不到 → 再杀」的循环;而目标端口已被注册成功,隧道可用。
+                print("frpc 端口 %d 已由另一份进程注册成功(未能定位其 pid),按就绪处理" % want, flush=True)
             _mark_tunnel(True, "", remote_port)
-            print("frpc 已在运行(pid=%d) → 远端端口 %d(已清理重复进程 pid=%d)"
-                  % (keep or p.pid, want, p.pid), flush=True)
             return remote_port
         err = _tunnel_failure_text(log_text, server_host, server_port, remote_port)
         _mark_tunnel(False, err, remote_port)
