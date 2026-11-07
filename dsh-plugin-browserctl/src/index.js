@@ -10,7 +10,7 @@
 import { spawn, spawnSync } from 'node:child_process'
 import crypto from 'node:crypto'
 import net from 'node:net'
-import { existsSync, readdirSync, readFileSync, writeFileSync, renameSync, rmSync, openSync, closeSync, truncateSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, writeFileSync, renameSync, rmSync, openSync, closeSync, readSync, truncateSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import QRCode from 'qrcode'
@@ -73,6 +73,9 @@ const EVENTS_PATH = path.join(CORE_DIR, 'browserctl_events.json')
 const DEVICES_PATH = path.join(CORE_DIR, 'browserctl_devices.json')
 const SCRIPT_PATH = path.join(CORE_DIR, 'browserctl.py')
 const SECRETS_PATH = path.join(CORE_DIR, 'browserctl_secrets.json')
+// frpc 日志:隧道就绪的**唯一权威依据**是日志里出现 `start proxy success`(端口注册成功)。
+// tunnelReady() 用它自愈 state 里滞后的 tunnel_ok(详见下面的自愈注释)。
+const FRPC_LOG = path.join(CORE_DIR, 'browserctl_frpc.log')
 // 本地管理令牌:闸机把特权端点(生成链接/配对码/改推送开关)从「loopback 即管理员」
 // 改成「loopback + 持有令牌」。每次调用都重新读,这样闸机重启后新建的令牌能立刻生效。
 const ADMIN_TOKEN_PATH = path.join(CORE_DIR, 'browserctl_admin_token')
@@ -171,27 +174,78 @@ function pidAlive(pid) {
   }
 }
 
-/** 隧道是否就绪。返回 {ok:true,tunnel:{...}} 或 {ok:false, error:'可读原因'}。导出供测试。 */
+/** 读文本文件尾部(最多 maxBytes)。读不到返回 ''。 */
+function readTextTail(file, maxBytes = 65536) {
+  try {
+    const info = statSync(file)
+    if (!info.isFile() || info.size <= 0) return ''
+    const start = Math.max(0, info.size - maxBytes)
+    const len = info.size - start
+    const fd = openSync(file, 'r')
+    try {
+      const buf = Buffer.alloc(len)
+      readSync(fd, buf, 0, len, start)
+      return buf.toString('utf8')
+    } finally {
+      closeSync(fd)
+    }
+  } catch {
+    return ''
+  }
+}
+
+/** 日志里最后一条 `start proxy success` 对应的远端端口;取不到返回 0。 */
+function lastSuccessPort(text) {
+  let port = 0
+  for (const line of String(text || '').split('\n')) {
+    if (!line.includes('start proxy success')) continue
+    const m = line.match(/dsh_web_(\d+)/)
+    if (m) port = parseInt(m[1], 10) || 0
+  }
+  return port
+}
+
+/** 这些措辞都是「闸机正在自愈」的瞬时态:面板应当自动重试,而不是直接报错让人再点一次。 */
+const TRANSIENT_TUNNEL_RE = /正在启动|正在重拉|等待端口注册|正在按新端口重启|正在重建/
+
+/** 隧道是否就绪。返回 {ok:true,tunnel:{...}} 或 {ok:false, error:'可读原因', tunnel:{pending}}。导出供测试。 */
 export function tunnelReady() {
   const st = readState()
   const pid = Number(st.frpc_pid) || 0
+  const want = Number(st.remote_port) || 0
   const tunnel = {
     ok: false,
     error: '',
-    port: Number(st.remote_port) || 0,
+    port: want,
     pid,
     ts: Number(st.tunnel_ts) || 0,
+    pending: false,
   }
-  if (Object.prototype.hasOwnProperty.call(st, 'tunnel_ok')) {
+  const hasFlag = Object.prototype.hasOwnProperty.call(st, 'tunnel_ok')
+  // 自愈:state 说隧道没就绪,但 frpc 进程活着、且日志里最后一条 start proxy success
+  // 正是当前端口 → 隧道其实在服务。典型来源:claim 换端口后的竞态、看门狗刚重拉完、
+  // 上次判定被重复 frpc 的 "already exists" 带偏(state 指向失败的那份进程)。
+  // 闸机看门狗要 5 秒一拍才会纠正,这 5 秒里面板已经白屏报错、用户只能"再点一次";
+  // 所以插件这边先按日志自查一次,顺手把 state 修正回来。
+  if ((!hasFlag || st.tunnel_ok !== true) && pid > 0 && pidAlive(pid)) {
+    if (want > 0 && lastSuccessPort(readTextTail(FRPC_LOG)) === want) {
+      try {
+        writeState({ ...st, tunnel_ok: true, tunnel_error: '', tunnel_ts: Date.now() / 1000 })
+      } catch {}
+      return { ok: true, tunnel: { ...tunnel, ok: true } }
+    }
+  }
+  if (hasFlag) {
     if (st.tunnel_ok === true) return { ok: true, tunnel: { ...tunnel, ok: true } }
     const reason = String(st.tunnel_error || '').trim()
     const error = reason || '隧道尚未建立(frpc 未连接),请稍候或重新点「开始控制」'
-    return { ok: false, error, tunnel: { ...tunnel, error } }
+    // pending = 闸机正在自愈(启动中/重拉中/端口切换中),前端据此自动重试而不是让人再点
+    const pending = (pid > 0 && pidAlive(pid)) || TRANSIENT_TUNNEL_RE.test(error)
+    return { ok: false, error, tunnel: { ...tunnel, error, pending } }
   }
   // 旧闸机兼容分支:没有 tunnel_ok 字段
-  const port = Number(st.remote_port) || 0
-  if (port > 0 || pid > 0) {
-    if (port > 0 && pidAlive(pid)) return { ok: true, tunnel: { ...tunnel, ok: true } }
+  if (want > 0 || pid > 0) {
+    if (want > 0 && pidAlive(pid)) return { ok: true, tunnel: { ...tunnel, ok: true } }
     const error = '隧道尚未建立(frpc 进程未运行),请先点「开始控制」'
     return { ok: false, error, tunnel: { ...tunnel, error } }
   }
@@ -970,6 +1024,9 @@ export function apply(ctx, config = {}) {
                                  ok: ready.ok,
                                  error: ready.ok ? '' : String(ready.error || ''),
                                  port: Number(readState().remote_port) || 0,
+                                 // pending = 闸机正在自愈(启动中/重拉中):前端据此自动重试
+                                 // 二维码,用户不必再点一次「开始控制」(2026-11-07 用户反馈)
+                                 pending: !ready.ok && !!ready.tunnel.pending,
                                } })
           return
         }

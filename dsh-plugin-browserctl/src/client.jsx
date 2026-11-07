@@ -1400,53 +1400,82 @@ function useQr(open, reloadToken, uses) {
   const [error, setError] = useState(null)
   const [expiresAt, setExpiresAt] = useState(0) // >0 表示一次性配对,按秒倒数
   const [status, setStatus] = useState(null)    // { uses, remaining } 配对码剩余次数
+  const [retrying, setRetrying] = useState(false) // 隧道自愈中,正在自动重试(不需要用户再点一次)
   const [refreshTick, setRefreshTick] = useState(0)
   const usesRef = useRef(uses)
   usesRef.current = uses || 1
   // 生成配对码(闸机不可达时回退长期链接)
+  // ★ 自动重试(2026-11-07):闸机在「frpc 正在启动 / 看门狗重拉 / claim 换端口」的头几秒里
+  //   会回 503 + tunnel.pending=true。旧代码只请求一次,失败就把红字钉死在二维码位置,
+  //   必须再点一次「开始控制」才能恢复 —— 这就是用户说的"还要再点一次"。
+  //   现在遇到隧道类瞬时失败会自动轮询(1.5s × 30 ≈ 45s),隧道一就绪立刻出二维码;
+  //   只有真正的硬失败(闸机没启动 / 路由没加载)才立刻放弃,把「开始控制」留给用户。
   useEffect(() => {
     if (!open) return
     let alive = true
+    let timer = null
+    let tries = 0
+    const MAX_TRIES = 30
     setError(null)
+    setRetrying(false)
+    // 返回 { ok, retryable, error }:retryable = 隧道还没就绪但在自愈中,值得再等一会儿
     async function load() {
       try {
         const r = await fetch(API_P + '/browserctl/api/pair?uses=' + usesRef.current, { method: 'POST', cache: 'no-store' })
         const tx = await r.text()
         let j
-        try { j = JSON.parse(tx) } catch { throw new Error('路由未加载(HTTP ' + r.status + ');请重启 DSH 后重试') }
-        if (j.error) throw new Error(j.error)
-        if (!alive) return
+        try { j = JSON.parse(tx) } catch { return { ok: false, retryable: false, error: '路由未加载(HTTP ' + r.status + ');请重启 DSH 后重试' } }
+        if (!alive) return { ok: false, retryable: false }
+        if (j.error) {
+          // 带 tunnel 字段 = 被隧道门禁拦下的(隧道还没就绪 / 正在自愈):属于瞬时态
+          return { ok: false, retryable: !!(j.tunnel && j.tunnel.ok === false), error: j.error }
+        }
         setError(null)
         setData(j)
         setStatus({ uses: j.uses || 1, remaining: j.remaining || 1 })
         setExpiresAt(Date.now() + (j.ttl || 60) * 1000)
-        return
+        return { ok: true }
       } catch (e1) {
+        // 配对码端点不可用(老闸机/请求被拒)→ 回退长期链接
         try {
           const r2 = await fetch(API_P + '/browserctl/api/qr', { cache: 'no-store' })
           const tx2 = await r2.text()
           let j2
-          try { j2 = JSON.parse(tx2) } catch { throw new Error('路由未加载(HTTP ' + r2.status + ');请重启 DSH 后重试') }
-          if (!alive) return
+          try { j2 = JSON.parse(tx2) } catch { return { ok: false, retryable: false, error: '路由未加载(HTTP ' + r2.status + ');请重启 DSH 后重试' } }
+          if (!alive) return { ok: false, retryable: false }
           if (j2.error) {
-            // 闸机不可达:清掉旧二维码,让"开始控制"按钮出现,避免停止后只剩"停止控制"卡死
-            setData(null)
-            setError(j2.error)
-          } else {
-            setError(null)
-            setData(j2)
-            setExpiresAt(0)
+            return { ok: false, retryable: !!(j2.tunnel && j2.tunnel.ok === false), error: j2.error }
           }
+          setError(null)
+          setData(j2)
+          setExpiresAt(0)
+          return { ok: true }
         } catch (e2) {
-          if (alive) {
-            setData(null)
-            setError(String((e2 && e2.message) || e2))
-          }
+          if (!alive) return { ok: false, retryable: false }
+          return { ok: false, retryable: false, error: String((e2 && e2.message) || e2) }
         }
       }
     }
-    load()
-    return () => { alive = false }
+    async function loop() {
+      const res = await load()
+      if (!alive) return
+      if (res.ok) { setRetrying(false); return }
+      // 清掉旧二维码,让"开始控制"按钮出现,避免停止后只剩"停止控制"卡死
+      setData(null)
+      setError(res.error || null)
+      if (!res.retryable || tries >= MAX_TRIES) {
+        if (res.retryable) {
+          setError((res.error || '') + '\n隧道仍在自愈中,等待超时;可再点一次「开始控制」重试。')
+        }
+        setRetrying(false)
+        return
+      }
+      tries += 1
+      setRetrying(true)
+      timer = setTimeout(loop, 1500)
+    }
+    loop()
+    return () => { alive = false; if (timer) clearTimeout(timer) }
   }, [open, reloadToken, refreshTick, uses])
   // 轮询配对码状态:检测到有人扫码(剩余次数减少)→ 用尽自动换码
   useEffect(() => {
@@ -1466,7 +1495,7 @@ function useQr(open, reloadToken, uses) {
     const id = setInterval(tick, 1500)
     return () => { alive = false; clearInterval(id) }
   }, [open, data])
-  return { data, error, expiresAt, status, refresh: () => setRefreshTick(x => x + 1) }
+  return { data, error, expiresAt, status, retrying, refresh: () => setRefreshTick(x => x + 1) }
 }
 
 function useCountdown(expiresAt) {
@@ -3292,7 +3321,7 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
   // 当前连接模式(official/selfhost),用于判断未登录时是否显示二维码
   const [cfgMode, setCfgMode] = useState('official')
   const panel = useRef(null)
-  const { data, error, expiresAt, status, refresh } = useQr(open, reloadToken, uses)
+  const { data, error, expiresAt, status, retrying, refresh } = useQr(open, reloadToken, uses)
   const left = useCountdown(expiresAt)
   const run = async (label, fn) => {
     if (busy) return
@@ -3556,12 +3585,12 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
         </header>
         <div
           className="dshBrowserCtlStatus"
-          data-ok={data ? (data.forwarder === false ? 'wait' : 'true') : (busy === 'start' ? 'wait' : (error ? 'false' : 'wait'))}
+          data-ok={data ? (data.forwarder === false ? 'wait' : 'true') : (busy === 'start' || retrying ? 'wait' : (error ? 'false' : 'wait'))}
         >
           {data
             ? (data.forwarder === false ? t('statusTunnelStarting') : t('statusReady'))
-            : (busy === 'start' ? t('starting') : (error ? t('statusNoSecret') : t('statusLoading')))}
-          {error && busy !== 'start' ? <span title={error} style={{ opacity: 0.8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{error}</span> : null}
+            : (busy === 'start' ? t('starting') : (retrying ? t('statusTunnelBuilding') : (error ? t('statusNoSecret') : t('statusLoading'))))}
+          {error && busy !== 'start' && !retrying ? <span title={error} style={{ opacity: 0.8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{error}</span> : null}
         </div>
         <div className="dshBrowserCtlTabs">
           {TABS.map(tb => (
@@ -3619,6 +3648,12 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
                     <span className="dshBrowserCtlQrLoading">
                       <span className="dshBrowserCtlSpinner" aria-hidden="true" />
                       {t('starting')}
+                    </span>
+                  ) : retrying ? (
+                    // 隧道正在自愈:自动轮询中,二维码一就绪就会出现,不需要用户再点一次
+                    <span className="dshBrowserCtlQrLoading">
+                      <span className="dshBrowserCtlSpinner" aria-hidden="true" />
+                      {t('statusTunnelBuilding')}
                     </span>
                   ) : startErr ? (
                     <span style={{
@@ -3951,6 +3986,7 @@ export function apply(ctx) {
       statusLoading: '正在生成二维码…',
       statusReady: '隧道就绪,扫码即可打开面板',
       statusTunnelStarting: '隧道正在建立,请稍候几秒后刷新二维码',
+      statusTunnelBuilding: '隧道正在建立,几秒后自动出二维码(无需再点「开始控制」)',
       statusNoSecret: '隧道未就绪:点下方"开始控制"启动本机穿透,几秒后自动出二维码',
       totpTitle: '两步验证 (2FA)',
       totpOn: '已启用',
@@ -4144,6 +4180,7 @@ export function apply(ctx) {
       statusLoading: 'Generating QR code…',
       statusReady: 'Tunnel ready — scan to open the panel',
       statusTunnelStarting: 'Tunnel starting; refresh the QR in a few seconds',
+      statusTunnelBuilding: 'Tunnel is starting — the QR appears automatically in a few seconds (no need to click Start again)',
       statusNoSecret: 'Tunnel not ready: click "Start control" below, QR appears in a few seconds',
       totpTitle: 'Two-Factor Auth (2FA)',
       totpOn: 'Enabled',

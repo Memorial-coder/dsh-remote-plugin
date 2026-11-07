@@ -4271,23 +4271,45 @@ def cmd_watch():
             failures += 1
             if "fwd" in need:
                 p = spawn_detached([sys.executable, str(Path(__file__).resolve()), "fwd"], FWD_LOG)
-                st["fwd_pid"] = p.pid
-                write_state(st)
+                # 只改 fwd_pid:上面读到的 st 可能已是几秒前的快照,直接 write_state(st)
+                # 会把别的进程刚写好的 frpc_pid / tunnel_ok / tunnel_error 覆盖回旧值
+                # → 插件又报「frpc 进程未运行」(这是 state 抖动的另一个来源)。
+                try:
+                    update_state(lambda s: {**s, "fwd_pid": p.pid})
+                except Exception:
+                    st["fwd_pid"] = p.pid
+                    write_state(st)
                 print("[%s] 看门狗: 重拉闸机(pid=%d)" % (time.strftime("%H:%M:%S"), p.pid), flush=True)
             if "frpc" in need:
-                _mark_tunnel(False, "frpc 进程不存在,看门狗正在重拉", int(st.get("remote_port") or 0))
+                # 与 cmd_start 串行化:start 刚拉起 frpc 的头一两秒里,state 里可能还是
+                # 旧(已死)pid;看门狗若同时再拉一份,两份 frpc 抢同一个 proxy,后一份
+                # 永久 "proxy ... already exists" 重试,而 state 指向失败那份 →
+                # 隧道其实在服务,插件却间歇报「隧道未建立」。
+                # (2026-11-07 实测:10:07:15.576 frpc 注册成功 / 10:07:16.376 看门狗又拉一份)
+                lock = None
                 try:
-                    ensure_tunnel(st.get("remote_port", REMOTE_PORT))
-                except SystemExit as e:
-                    # 失败原因已经写进 state.tunnel_error,这里只打首行,避免日志刷屏
-                    first = (str(e) or "隧道重拉失败").splitlines()[0][:240]
-                    print("[%s] 看门狗: 隧道重拉失败: %s" % (time.strftime("%H:%M:%S"), first), flush=True)
-                else:
-                    print("[%s] 看门狗: 重拉 frpc" % time.strftime("%H:%M:%S"), flush=True)
-            st2 = read_state()
-            st2["watchdog_pid"] = os.getpid()
-            st2["watchdog_last_respawn"] = time.time()
-            write_state(st2)
+                    lock = _ctl_lock(timeout=20)
+                except SystemExit:
+                    lock = None  # 另一个 start/stop 正在跑,让它自己拉,下一轮再巡检
+                if lock:
+                    with _ctl_release(lock):
+                        st_l = read_state()  # 锁内重读:可能已被别的进程拉好
+                        if not (st_l.get("frpc_pid") and _pid_alive(st_l.get("frpc_pid"))):
+                            _mark_tunnel(False, "frpc 进程不存在,看门狗正在重拉",
+                                         int(st_l.get("remote_port") or 0))
+                            try:
+                                ensure_tunnel(st_l.get("remote_port", REMOTE_PORT))
+                            except SystemExit as e:
+                                # 失败原因已经写进 state.tunnel_error,这里只打首行,避免日志刷屏
+                                first = (str(e) or "隧道重拉失败").splitlines()[0][:240]
+                                print("[%s] 看门狗: 隧道重拉失败: %s" % (time.strftime("%H:%M:%S"), first), flush=True)
+                            else:
+                                print("[%s] 看门狗: 重拉 frpc" % time.strftime("%H:%M:%S"), flush=True)
+            try:
+                update_state(lambda s: {**s, "watchdog_pid": os.getpid(),
+                                        "watchdog_last_respawn": time.time()})
+            except Exception:
+                pass
         except Exception as e:
             print("看门狗异常: %r" % e, flush=True)
 
@@ -4304,8 +4326,13 @@ def ensure_watchdog():
     p = spawn_detached([sys.executable, str(Path(__file__).resolve()), "watch"], HERE / "browserctl_watch.log")
     # 关键:把新看门狗 pid 立即写回 state。否则 state 里是旧(已死)pid,
     # 下次 ensure_watchdog 又以为没有看门狗 → 反复拉副本。
-    st["watchdog_pid"] = p.pid
-    write_state(st)
+    # 只改 watchdog_pid,不要整份 write_state(st):上面读到的 st 是旧快照,
+    # 整份写回会把 frpc_pid / tunnel_ok / tunnel_error 一起覆盖成过期值。
+    try:
+        update_state(lambda s: {**s, "watchdog_pid": p.pid})
+    except Exception:
+        st["watchdog_pid"] = p.pid
+        write_state(st)
 
 
 def totp_set(enabled, reset=False):
@@ -4671,17 +4698,56 @@ def ensure_tunnel(remote_port=REMOTE_PORT):
     offset = _frpc_log_size()
     _mark_tunnel(False, "frpc 正在启动,等待端口注册到 frps…", remote_port)
     p = spawn_detached([str(FRPC), "-c", str(toml)], FRPC_LOG)
+    # 关键:新 frpc 的 pid 必须**立刻**落盘,不能等下面 sleep(1s) 之后再写。
+    # 否则这 1 秒里 state 里还是旧(已死)pid,看门狗巡检读到就以为 frpc 死了、又拉一份
+    # → 两份 frpc 抢同一个 proxy,后拉的那份永久 "proxy ... already exists" 重试,
+    # 而 state 指向失败那份 → 隧道其实在服务,插件却间歇报「隧道未建立」。
+    # (2026-11-07 实测时间线:10:07:15.576 frpc 注册成功 / 10:07:16.376 看门狗又拉一份)
+    # 用 update_state 而不是 write_state(state):避免把几秒前的旧快照整体写回,覆盖掉
+    # 闸机/看门狗/插件刚写进去的字段。
+    try:
+        update_state(lambda s: {**s, "frpc_pid": p.pid, "remote_port": int(remote_port)})
+    except Exception as e:
+        print("[警告] state 写入失败(隧道本身不受影响): %r" % e, flush=True)
     time.sleep(1.0)
     if p.poll() is not None:
         raise SystemExit("frpc 启动失败,详见 %s" % FRPC_LOG)
-    state["frpc_pid"] = p.pid
-    state["remote_port"] = remote_port
-    try:
-        write_state(state)
-    except OSError as e:
-        print("[警告] state 写入失败(隧道本身不受影响): %r" % e, flush=True)
     ok, log_text = _wait_tunnel_ready(offset)
     if not ok:
+        # 自愈:刚拉起的这份 frpc 报 "already exists",且日志里最后的 start proxy success
+        # 正是目标端口 → 端口已经被**另一份活着的 frpc** 抢注成功,我们这份是重复进程。
+        # 杀掉重复的、把 state 指向真正在服务的那份、判隧道就绪 ——
+        # 用户不必再点一次「开始控制」,隧道也不会因为一次竞态就"假死"。
+        want = int(remote_port or 0)
+        tail_all = _frpc_log_tail(max(0, _frpc_log_size() - 65536))
+        if "already exists" in (log_text or "") and want > 0 and _last_success_port(tail_all) == want:
+            keep = 0
+            try:
+                st_now = read_state()
+                cand = int(st_now.get("frpc_pid") or 0)
+                if cand and cand != p.pid and _pid_alive(cand):
+                    keep = cand
+            except Exception:
+                keep = 0
+            if not keep:
+                for cand in _live_frpc_pids():
+                    if cand != p.pid:
+                        keep = cand
+                        break
+            try:
+                _run_hidden(["taskkill", "/PID", str(p.pid), "/T", "/F"],
+                            capture_output=True, timeout=15)
+            except Exception:
+                pass
+            if keep:
+                try:
+                    update_state(lambda s: {**s, "frpc_pid": keep, "remote_port": want})
+                except Exception:
+                    pass
+            _mark_tunnel(True, "", remote_port)
+            print("frpc 已在运行(pid=%d) → 远端端口 %d(已清理重复进程 pid=%d)"
+                  % (keep or p.pid, want, p.pid), flush=True)
+            return remote_port
         err = _tunnel_failure_text(log_text, server_host, server_port, remote_port)
         _mark_tunnel(False, err, remote_port)
         # 不 kill frpc:它会自己退避重试,看门狗也会继续检查,端口恢复后隧道能自愈。
@@ -4700,6 +4766,25 @@ def _pid_alive(pid):
         return ('"%d"' % pid) in out
     except Exception:
         return False
+
+
+def _live_frpc_pids():
+    """列出所有存活的 frpc.exe 进程 pid。
+
+    只在「竞态里起了重复 frpc」的自愈路径用:需要找出真正在服务的那一份。
+    只按进程名筛(不看命令行)—— 提权进程的 CommandLine 常读不到,但 Name 能看到。
+    取不到就返回空列表,调用方必须有兜底(绝不因为这里失败而阻断隧道)。
+    """
+    if os.name != "nt":
+        return []
+    try:
+        ps = ("Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'frpc.exe' } "
+              "| ForEach-Object { $_.ProcessId }")
+        out = _run_hidden(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
+                          capture_output=True, text=True, timeout=20).stdout
+        return [int(x) for x in (out or "").split() if x.strip().isdigit()]
+    except Exception:
+        return []
 
 
 def ensure_forwarder():

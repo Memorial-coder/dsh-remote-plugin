@@ -1413,13 +1413,18 @@ function useQr(open, reloadToken, uses) {
   const [error, setError] = (0, import_react.useState)(null);
   const [expiresAt, setExpiresAt] = (0, import_react.useState)(0);
   const [status, setStatus] = (0, import_react.useState)(null);
+  const [retrying, setRetrying] = (0, import_react.useState)(false);
   const [refreshTick, setRefreshTick] = (0, import_react.useState)(0);
   const usesRef = (0, import_react.useRef)(uses);
   usesRef.current = uses || 1;
   (0, import_react.useEffect)(() => {
     if (!open) return;
     let alive = true;
+    let timer = null;
+    let tries = 0;
+    const MAX_TRIES = 30;
     setError(null);
+    setRetrying(false);
     async function load() {
       try {
         const r = await fetch(API_P + "/browserctl/api/pair?uses=" + usesRef.current, { method: "POST", cache: "no-store" });
@@ -1428,15 +1433,17 @@ function useQr(open, reloadToken, uses) {
         try {
           j = JSON.parse(tx);
         } catch {
-          throw new Error("\u8DEF\u7531\u672A\u52A0\u8F7D(HTTP " + r.status + ");\u8BF7\u91CD\u542F DSH \u540E\u91CD\u8BD5");
+          return { ok: false, retryable: false, error: "\u8DEF\u7531\u672A\u52A0\u8F7D(HTTP " + r.status + ");\u8BF7\u91CD\u542F DSH \u540E\u91CD\u8BD5" };
         }
-        if (j.error) throw new Error(j.error);
-        if (!alive) return;
+        if (!alive) return { ok: false, retryable: false };
+        if (j.error) {
+          return { ok: false, retryable: !!(j.tunnel && j.tunnel.ok === false), error: j.error };
+        }
         setError(null);
         setData(j);
         setStatus({ uses: j.uses || 1, remaining: j.remaining || 1 });
         setExpiresAt(Date.now() + (j.ttl || 60) * 1e3);
-        return;
+        return { ok: true };
       } catch (e1) {
         try {
           const r2 = await fetch(API_P + "/browserctl/api/qr", { cache: "no-store" });
@@ -1445,28 +1452,46 @@ function useQr(open, reloadToken, uses) {
           try {
             j2 = JSON.parse(tx2);
           } catch {
-            throw new Error("\u8DEF\u7531\u672A\u52A0\u8F7D(HTTP " + r2.status + ");\u8BF7\u91CD\u542F DSH \u540E\u91CD\u8BD5");
+            return { ok: false, retryable: false, error: "\u8DEF\u7531\u672A\u52A0\u8F7D(HTTP " + r2.status + ");\u8BF7\u91CD\u542F DSH \u540E\u91CD\u8BD5" };
           }
-          if (!alive) return;
+          if (!alive) return { ok: false, retryable: false };
           if (j2.error) {
-            setData(null);
-            setError(j2.error);
-          } else {
-            setError(null);
-            setData(j2);
-            setExpiresAt(0);
+            return { ok: false, retryable: !!(j2.tunnel && j2.tunnel.ok === false), error: j2.error };
           }
+          setError(null);
+          setData(j2);
+          setExpiresAt(0);
+          return { ok: true };
         } catch (e2) {
-          if (alive) {
-            setData(null);
-            setError(String(e2 && e2.message || e2));
-          }
+          if (!alive) return { ok: false, retryable: false };
+          return { ok: false, retryable: false, error: String(e2 && e2.message || e2) };
         }
       }
     }
-    load();
+    async function loop() {
+      const res = await load();
+      if (!alive) return;
+      if (res.ok) {
+        setRetrying(false);
+        return;
+      }
+      setData(null);
+      setError(res.error || null);
+      if (!res.retryable || tries >= MAX_TRIES) {
+        if (res.retryable) {
+          setError((res.error || "") + "\n\u96A7\u9053\u4ECD\u5728\u81EA\u6108\u4E2D,\u7B49\u5F85\u8D85\u65F6;\u53EF\u518D\u70B9\u4E00\u6B21\u300C\u5F00\u59CB\u63A7\u5236\u300D\u91CD\u8BD5\u3002");
+        }
+        setRetrying(false);
+        return;
+      }
+      tries += 1;
+      setRetrying(true);
+      timer = setTimeout(loop, 1500);
+    }
+    loop();
     return () => {
       alive = false;
+      if (timer) clearTimeout(timer);
     };
   }, [open, reloadToken, refreshTick, uses]);
   (0, import_react.useEffect)(() => {
@@ -1490,7 +1515,7 @@ function useQr(open, reloadToken, uses) {
       clearInterval(id);
     };
   }, [open, data]);
-  return { data, error, expiresAt, status, refresh: () => setRefreshTick((x) => x + 1) };
+  return { data, error, expiresAt, status, retrying, refresh: () => setRefreshTick((x) => x + 1) };
 }
 function useCountdown(expiresAt) {
   const [left, setLeft] = (0, import_react.useState)(0);
@@ -3119,7 +3144,7 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
   const [acctMe, setAcctMe] = (0, import_react.useState)(null);
   const [cfgMode, setCfgMode] = (0, import_react.useState)("official");
   const panel = (0, import_react.useRef)(null);
-  const { data, error, expiresAt, status, refresh } = useQr(open, reloadToken, uses);
+  const { data, error, expiresAt, status, retrying, refresh } = useQr(open, reloadToken, uses);
   const left = useCountdown(expiresAt);
   const run = async (label, fn) => {
     if (busy) return;
@@ -3395,10 +3420,10 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
         "div",
         {
           className: "dshBrowserCtlStatus",
-          "data-ok": data ? data.forwarder === false ? "wait" : "true" : busy === "start" ? "wait" : error ? "false" : "wait",
+          "data-ok": data ? data.forwarder === false ? "wait" : "true" : busy === "start" || retrying ? "wait" : error ? "false" : "wait",
           children: [
-            data ? data.forwarder === false ? t("statusTunnelStarting") : t("statusReady") : busy === "start" ? t("starting") : error ? t("statusNoSecret") : t("statusLoading"),
-            error && busy !== "start" ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { title: error, style: { opacity: 0.8, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, children: error }) : null
+            data ? data.forwarder === false ? t("statusTunnelStarting") : t("statusReady") : busy === "start" ? t("starting") : retrying ? t("statusTunnelBuilding") : error ? t("statusNoSecret") : t("statusLoading"),
+            error && busy !== "start" && !retrying ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { title: error, style: { opacity: 0.8, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, children: error }) : null
           ]
         }
       ),
@@ -3449,7 +3474,13 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
           ] }) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlQrBox", style: { height: 128 }, children: busy === "start" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { className: "dshBrowserCtlQrLoading", children: [
             /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlSpinner", "aria-hidden": "true" }),
             t("starting")
-          ] }) : startErr ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { style: {
+          ] }) : retrying ? (
+            // 隧道正在自愈:自动轮询中,二维码一就绪就会出现,不需要用户再点一次
+            /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { className: "dshBrowserCtlQrLoading", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlSpinner", "aria-hidden": "true" }),
+              t("statusTunnelBuilding")
+            ] })
+          ) : startErr ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { style: {
             color: "var(--dsw-alias-state-error-primary,#e5655c)",
             fontSize: 11,
             padding: "0 12px",
@@ -3761,6 +3792,7 @@ function apply(ctx) {
       statusLoading: "\u6B63\u5728\u751F\u6210\u4E8C\u7EF4\u7801\u2026",
       statusReady: "\u96A7\u9053\u5C31\u7EEA,\u626B\u7801\u5373\u53EF\u6253\u5F00\u9762\u677F",
       statusTunnelStarting: "\u96A7\u9053\u6B63\u5728\u5EFA\u7ACB,\u8BF7\u7A0D\u5019\u51E0\u79D2\u540E\u5237\u65B0\u4E8C\u7EF4\u7801",
+      statusTunnelBuilding: "\u96A7\u9053\u6B63\u5728\u5EFA\u7ACB,\u51E0\u79D2\u540E\u81EA\u52A8\u51FA\u4E8C\u7EF4\u7801(\u65E0\u9700\u518D\u70B9\u300C\u5F00\u59CB\u63A7\u5236\u300D)",
       statusNoSecret: '\u96A7\u9053\u672A\u5C31\u7EEA:\u70B9\u4E0B\u65B9"\u5F00\u59CB\u63A7\u5236"\u542F\u52A8\u672C\u673A\u7A7F\u900F,\u51E0\u79D2\u540E\u81EA\u52A8\u51FA\u4E8C\u7EF4\u7801',
       totpTitle: "\u4E24\u6B65\u9A8C\u8BC1 (2FA)",
       totpOn: "\u5DF2\u542F\u7528",
@@ -3954,6 +3986,7 @@ function apply(ctx) {
       statusLoading: "Generating QR code\u2026",
       statusReady: "Tunnel ready \u2014 scan to open the panel",
       statusTunnelStarting: "Tunnel starting; refresh the QR in a few seconds",
+      statusTunnelBuilding: "Tunnel is starting \u2014 the QR appears automatically in a few seconds (no need to click Start again)",
       statusNoSecret: 'Tunnel not ready: click "Start control" below, QR appears in a few seconds',
       totpTitle: "Two-Factor Auth (2FA)",
       totpOn: "Enabled",

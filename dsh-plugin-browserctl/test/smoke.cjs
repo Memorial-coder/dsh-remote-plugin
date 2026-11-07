@@ -133,8 +133,11 @@ exported.apply(ctx)
 console.log('✅ apply(ctx) 执行成功')
 console.log('   捕获组件:', Object.keys(captured).join(', '))
 
-const dict = registered['browserctl']
-if (!dict) throw new Error('未注册 browserctl 词典')
+// 词典注册 key 随插件身份变化(browserctl / 带后缀的变体),这里取唯一注册的那个,
+// 避免身份不同的副本跑 smoke 时误报「未注册词典」。
+const dictKey = Object.keys(registered).find(k => k === 'browserctl' || k.indexOf('browserctl-') === 0) || Object.keys(registered)[0]
+const dict = dictKey ? registered[dictKey] : null
+if (!dict) throw new Error('未注册浏览器控制词典(registered=' + Object.keys(registered).join(',') + ')')
 const zh = dict.zh
 const t = (k) => (zh[k] !== undefined ? zh[k] : k)
 
