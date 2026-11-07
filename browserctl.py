@@ -2586,35 +2586,83 @@ class GateHandler(BaseHTTPRequestHandler):
             self._send(502, "DSH 未启动", "text/plain")
             return
         head = self.raw_requestline
-        _cookies = []
-        _has_auth = False
+        _seg = []
         try:
             _st = gate_state()
             _cn, _cv = _st.get("cookie_name"), _st.get("cookie_value")
         except Exception:
             _cn = _cv = None
+        # 2026-11-07:与 HTTP 反代对齐——① 边缘 Lua 会留两份大小写不同的 Cookie 头,
+        # 必须合并成一份;② 请求自带的同名 DSH cookie 必须整体替换而非"有就不注"
+        # (App 恢复的旧 dsh cookie 直达 DSH → WS 握手 401 → 面板永远「重新连接中」)。
         for k, v in self.headers.items():
             if k.lower() == "cookie":
-                _cookies.append(v)
-                if _cn and ("%s=" % _cn) in v:
-                    _has_auth = True
+                for s in (v or "").split(";"):
+                    if s.strip():
+                        _seg.append(s.strip())
                 continue
             head += ("%s: %s\r\n" % (k, v)).encode("latin-1", "replace")
-        if _cn and _cv and not _has_auth:  # 与 HTTP 反代一致:自动注入 DSH 授权 Cookie
-            _cookies.append("%s=%s" % (_cn, _cv))
-        if _cookies:
-            head += ("Cookie: %s\r\n" % "; ".join(_cookies)).encode("latin-1", "replace")
+        if _cn and _cv:
+            _seg = [s for s in _seg if not s.startswith(_cn + "=")]
+            _seg.append("%s=%s" % (_cn, _cv))
+        if _seg:
+            head += ("Cookie: %s\r\n" % "; ".join(_seg)).encode("latin-1", "replace")
         head += b"\r\n"
         remote = socket.create_connection(("127.0.0.1", port), timeout=10)
         remote.sendall(head)
+        _ws_write_lock = threading.Lock()
 
-        def pump(src, dst):
+        def _send_remote(data):
+            # 两个泵线程都可能写 remote,必须串行,否则大块转发和代答帧可能交错
+            with _ws_write_lock:
+                remote.sendall(data)
+
+        def _ws_pong_for_dsh(payload):
+            # 闸机在 DSH 面前是"客户端":RFC 6455 要求客户端帧必须掩码
+            key = os.urandom(4)
+            n = len(payload)
+            if n <= 125:
+                headb = bytes([0x8A, 0x80 | n])
+            else:
+                headb = bytes([0x8A, 0x80 | 126]) + n.to_bytes(2, "big")
+            masked = bytes(payload[i] ^ key[i % 4] for i in range(n))
+            return headb + key + masked
+
+        def _pump_upstream_to_client(src, dst):
+            # DSH→客户端方向。DSH 的 mux 心跳很苛刻:2s 一次 ping,漏 2 次直接 terminate
+            # (MAX_MISSED_HEARTBEATS=2)。大流量同步(实测首连 ~5MB)把 KCP 上行灌满时,
+            # 真实客户端的 pong 会被排队延迟数秒 → 服务端误杀 → 面板「重新连接中」死循环。
+            # 这里逐帧解析,看到 PING 就立刻代答一个 PONG 给 DSH(回环微秒级),让连接扛过
+            # 拥塞;其余字节原样转发。
+            buf = bytearray()
             try:
                 while True:
                     data = src.recv(65536)
                     if not data:
                         break
-                    dst.sendall(data)
+                    buf.extend(data)
+                    while len(buf) >= 2:
+                        opcode = buf[0] & 0x0F
+                        fin = buf[0] & 0x80
+                        ln = buf[1] & 0x7F
+                        off = 2
+                        if ln == 126:
+                            if len(buf) < 4:
+                                break
+                            ln = int.from_bytes(buf[2:4], "big")
+                            off = 4
+                        elif ln == 127:
+                            if len(buf) < 10:
+                                break
+                            ln = int.from_bytes(buf[2:10], "big")
+                            off = 10
+                        if len(buf) < off + ln:
+                            break
+                        frame = bytes(buf[:off + ln])
+                        del buf[:off + ln]
+                        if opcode == 0x9 and fin:  # PING → 立即代答 PONG
+                            _send_remote(_ws_pong_for_dsh(frame[off:off + ln]))
+                        dst.sendall(frame)
             except OSError:
                 pass
             finally:
@@ -2623,8 +2671,23 @@ class GateHandler(BaseHTTPRequestHandler):
                 except OSError:
                     pass
 
-        conns = [(self.connection, remote), (remote, self.connection)]
-        threads = [threading.Thread(target=pump, args=pair, daemon=True) for pair in conns]
+        def pump(src, dst):
+            try:
+                while True:
+                    data = src.recv(65536)
+                    if not data:
+                        break
+                    _send_remote(data)
+            except OSError:
+                pass
+            finally:
+                try:
+                    remote.shutdown(socket.SHUT_WR)
+                except OSError:
+                    pass
+
+        threads = [threading.Thread(target=_pump_upstream_to_client, args=(remote, self.connection), daemon=True),
+                   threading.Thread(target=pump, args=(self.connection, None), daemon=True)]
         for t in threads:
             t.start()
         for t in threads:
