@@ -2636,10 +2636,35 @@ class GateHandler(BaseHTTPRequestHandler):
             # 拥塞;其余字节原样转发。
             buf = bytearray()
             try:
+                # 2026-11-07 修复:DSH 返回的第一段是 HTTP/1.1 101 响应头,不是 WS 帧!
+                # 必须先原样透传完头,确认状态码是 101 之后才开始逐帧解析;
+                # 否则把握手头当帧数据切,隧道路径直接 502(本地直连乱流侥幸像活着)。
+                buf = bytearray()  # 重置:先攒头
+                hdr_done = False
                 while True:
                     data = src.recv(65536)
                     if not data:
                         break
+                    if not hdr_done:
+                        buf.extend(data)
+                        i = buf.find(b"\r\n\r\n")
+                        if i < 0:
+                            continue
+                        head = bytes(buf[:i + 4])
+                        del buf[:i + 4]
+                        dst.sendall(head)
+                        hdr_done = head.split(b"\r\n", 1)[0].endswith(b"101 Switching Protocols")
+                        data = bytes(buf)
+                        del buf[:]
+                        if not hdr_done:
+                            # 非 101(403 拒绝页/502 等):剩余字节纯透传
+                            dst.sendall(data)
+                            while True:
+                                d2 = src.recv(65536)
+                                if not d2:
+                                    break
+                                dst.sendall(d2)
+                            break
                     buf.extend(data)
                     while len(buf) >= 2:
                         opcode = buf[0] & 0x0F
