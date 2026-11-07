@@ -5518,13 +5518,20 @@ def cmd_stop():
         # wmic 在新版 Windows 已弃用且 where 子句常失效,改用 PowerShell CIM。
         if os.name == "nt":
             _own_pid = os.getpid()
+            # 关键:必须按「本副本自己的目录」限定范围。
+            # 以前只匹配 '*browserctl*',会把同一台机器上另一份插件的进程一起杀掉 ——
+            # 同一台机器可以并存官方插件与另一份副本(各自目录都有 browserctl.py /
+            # browserctl_frpc.toml),两边命令行都含 'browserctl',停一份就把另一份的隧道打断。
             try:
+                _here_pat = str(HERE).replace("'", "''").replace("[", "[[]")
                 ps = (
                     "$pids = Get-CimInstance Win32_Process | Where-Object { "
-                    "($_.Name -eq 'python.exe' -and $_.CommandLine -like '*browserctl*') -or "
-                    "($_.Name -eq 'frpc.exe' -and $_.CommandLine -like '*browserctl*') } "
+                    "($_.Name -eq 'python.exe' -and $_.CommandLine -like '*browserctl*' "
+                    "-and $_.CommandLine -like '*%s*') -or "
+                    "($_.Name -eq 'frpc.exe' -and $_.CommandLine -like '*browserctl*' "
+                    "-and $_.CommandLine -like '*%s*') } "
                     "| ForEach-Object { $_.ProcessId }; "
-                    "$pids | Where-Object { $_ -ne %d }" % _own_pid)
+                    "$pids | Where-Object { $_ -ne %d }" % (_here_pat, _here_pat, _own_pid))
                 out = subprocess.run(["powershell", "-NoProfile", "-Command", ps],
                                      capture_output=True, text=True, timeout=30,
                                      creationflags=CREATE_NO_WINDOW)
