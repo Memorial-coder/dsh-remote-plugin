@@ -16,6 +16,8 @@ browserctl_admin_token
 browserctl_frpc.toml
 browserctl_*.log
 browserctl_*.lock
+# 历史发版产物（红线 #12：文件保留在本地，只是不进公开仓库）
+DshRemote-*.zip
 .ssh_known_hosts
 *.tmp
 
