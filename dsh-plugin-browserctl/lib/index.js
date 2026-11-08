@@ -4570,7 +4570,7 @@ var import_qrcode = __toESM(require_lib(), 1);
 import { spawn, spawnSync } from "node:child_process";
 import crypto from "node:crypto";
 import net from "node:net";
-import { existsSync, readdirSync, readFileSync, writeFileSync, renameSync, rmSync, openSync, closeSync, readSync, truncateSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync, renameSync, rmSync, openSync, closeSync, readSync, truncateSync, statSync, chmodSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 var name = "browserctl";
@@ -4624,7 +4624,7 @@ function adminHeaders() {
   }
   return {};
 }
-var VERSION = true ? "1.0.36" : "dev";
+var VERSION = true ? "1.0.39" : "dev";
 var sessionTunnel = false;
 var ensureRunning = null;
 var lastEnsureError = "";
@@ -4652,6 +4652,37 @@ function atomicWrite(file, data) {
     } catch {
     }
     throw e;
+  }
+  hardenFileAcl(file);
+}
+var _aclWarned = /* @__PURE__ */ new Set();
+function hardenFileAcl(file) {
+  try {
+    if (process.platform === "win32") {
+      const user = process.env.USERNAME || "";
+      if (!user) return;
+      const child = spawn(
+        "icacls",
+        [file, "/inheritance:r", "/grant:r", user + ":F"],
+        { stdio: "ignore", windowsHide: true }
+      );
+      child.on("error", () => {
+        if (!_aclWarned.has(file)) {
+          _aclWarned.add(file);
+          console.warn("[browserctl] [\u5B89\u5168\u544A\u8B66] \u65E0\u6CD5\u6536\u7D27 " + file + " \u7684 ACL\uFF08\u6743\u9650\u4E0D\u8DB3\u65F6\u8DF3\u8FC7\uFF0C\u5176\u4F59\u5199\u5165\u65B9\u4F1A\u518D\u6536\u7D27\uFF09");
+        }
+      });
+    } else {
+      try {
+        chmodSync(file, 384);
+      } catch (e) {
+        if (!_aclWarned.has(file)) {
+          _aclWarned.add(file);
+          console.warn("[browserctl] [\u5B89\u5168\u544A\u8B66] \u65E0\u6CD5\u6536\u7D27 " + file + " \u7684\u6743\u9650: " + (e && e.message));
+        }
+      }
+    }
+  } catch {
   }
 }
 function readState() {
@@ -5254,6 +5285,14 @@ function sendJson(res, code, obj) {
   res.writeHead(code, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
   res.end(body);
 }
+function readRawBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    req.on("data", (chunk) => chunks.push(chunk));
+    req.on("end", () => resolve(Buffer.concat(chunks)));
+    req.on("error", reject);
+  });
+}
 var LOOPBACK_HOSTS = /* @__PURE__ */ new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
 function isLoopbackHost(value) {
   let host = String(value || "").trim().toLowerCase();
@@ -5763,7 +5802,6 @@ function apply(ctx, config = {}) {
         }
         const href = target.toString();
         const candidates = [
-          ["cmd", ["/c", "start", "", href]],
           ["rundll32", ["url.dll,FileProtocolHandler", href]],
           ["explorer", [href]]
         ];
@@ -5846,6 +5884,8 @@ function apply(ctx, config = {}) {
         delete sec.server_link_secret;
         delete sec.server_panel_url;
         delete sec.frp_remote_port;
+        delete sec.frp_token;
+        delete sec.frp_token_official;
         writeSecrets(sec);
         try {
           const st = readState();
@@ -5891,7 +5931,13 @@ function apply(ctx, config = {}) {
               const host = (url.searchParams.get("host") || "").trim().replace(/^https?:\/\//, "").replace(/\/+$/, "");
               const port = parseInt(url.searchParams.get("port") || "17000", 10);
               const remotePort = parseInt(url.searchParams.get("remotePort") || "", 10);
-              const token = (url.searchParams.get("token") || "").trim();
+              let tokenBody = {};
+              try {
+                tokenBody = JSON.parse((await readRawBody(req)).toString("utf-8") || "{}");
+              } catch {
+                tokenBody = {};
+              }
+              const token = String(tokenBody.frp_token || url.searchParams.get("token") || "").trim();
               if (!host) {
                 sendJson(res, 400, { ok: false, error: "\u7F3A\u5C11 host \u53C2\u6570" });
                 return;

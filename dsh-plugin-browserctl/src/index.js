@@ -10,7 +10,7 @@
 import { spawn, spawnSync } from 'node:child_process'
 import crypto from 'node:crypto'
 import net from 'node:net'
-import { existsSync, readdirSync, readFileSync, writeFileSync, renameSync, rmSync, openSync, closeSync, readSync, truncateSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, writeFileSync, renameSync, rmSync, openSync, closeSync, readSync, truncateSync, statSync, chmodSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import QRCode from 'qrcode'
@@ -143,6 +143,36 @@ function atomicWrite(file, data) {
     try { rmSync(tmp, { force: true }) } catch {}
     throw e
   }
+  // 写后 ACL 收紧（kb/24 P1-3）：rename 出来的新文件继承父目录 ACL，与闸机
+  // harden_file_perms 同语义（Windows: icacls 断继承+仅当前用户；POSIX: 0600）。
+  // atomicWrite 只用于 state/secrets/blacklist 三个凭据/运行态文件，在这里收一次全覆盖。
+  hardenFileAcl(file)
+}
+
+// ACL 收紧：异步 fire-and-forget（不阻塞写路径）；失败每文件只告警一次，绝不静默成永无记录。
+const _aclWarned = new Set()
+function hardenFileAcl(file) {
+  try {
+    if (process.platform === 'win32') {
+      const user = process.env.USERNAME || ''
+      if (!user) return
+      const child = spawn('icacls', [file, '/inheritance:r', '/grant:r', user + ':F'],
+        { stdio: 'ignore', windowsHide: true })
+      child.on('error', () => {
+        if (!_aclWarned.has(file)) {
+          _aclWarned.add(file)
+          console.warn('[browserctl] [安全告警] 无法收紧 ' + file + ' 的 ACL（权限不足时跳过，其余写入方会再收紧）')
+        }
+      })
+    } else {
+      try { chmodSync(file, 0o600) } catch (e) {
+        if (!_aclWarned.has(file)) {
+          _aclWarned.add(file)
+          console.warn('[browserctl] [安全告警] 无法收紧 ' + file + ' 的权限: ' + (e && e.message))
+        }
+      }
+    }
+  } catch {}
 }
 
 function readState() {
@@ -1401,10 +1431,10 @@ export function apply(ctx, config = {}) {
             sendJson(res, 400, { ok: false, error: '不允许打开该地址' }); return
           }
           const href = target.toString()
-          // 多方法打开默认浏览器:cmd start → rundll32 → explorer,任一 spawn 成功即可。
+          // 多方法打开默认浏览器:rundll32 → explorer,任一 spawn 成功即可。
           // 即便全部失败,client 的授权页链接也能让用户手动打开,这里只上报。
+          // （cmd start 候选已移除——解析面更大,rundll32/explorer 已覆盖所有场景,kb/24 P3）
           const candidates = [
-            ['cmd', ['/c', 'start', '', href]],
             ['rundll32', ['url.dll,FileProtocolHandler', href]],
             ['explorer', [href]],
           ]
@@ -1474,6 +1504,10 @@ export function apply(ctx, config = {}) {
           delete sec.server_link_secret
           delete sec.server_panel_url
           delete sec.frp_remote_port
+          // 派生凭据一并清（kb/24 P3）：官方下发的 frp token 与模式切换备份,
+          // 重新登录会拿到新 token;不清会让 /config 的 hasToken 误报「已配置」。
+          delete sec.frp_token
+          delete sec.frp_token_official
           writeSecrets(sec)
           // link_secret 换回本机随机值:闸机此后签发的 Cookie 不再匹配注册表,
           // 等于把自己从公网入口断开(账号还在服务器,重新登录即恢复)。
@@ -1508,7 +1542,8 @@ export function apply(ctx, config = {}) {
         }
         if (route === '/browserctl/api/config') {
           if (req.method === 'POST' || req.method === 'PUT') {
-            // 写入连接配置。注意:DSH webServer 会排空请求体,参数一律从 query 读(历史大坑)。
+            // 写入连接配置。mode/host/port/remotePort 走 query；frp_token 走 POST body
+            // （kb/23 宿主契约：当前 DSH 把原始 req 交 handler、body 未排空可读；kb/05 旧注释已过时）。
             const mode = (url.searchParams.get('mode') || 'official').trim()
             try {
               const sec = readSecrets()
@@ -1520,7 +1555,11 @@ export function apply(ctx, config = {}) {
                 const host = (url.searchParams.get('host') || '').trim().replace(/^https?:\/\//, '').replace(/\/+$/, '')
                 const port = parseInt(url.searchParams.get('port') || '17000', 10)
                 const remotePort = parseInt(url.searchParams.get('remotePort') || '', 10)
-                const token = (url.searchParams.get('token') || '').trim()
+                // frp token 优先从 POST body 读(字段 frp_token;client 已不再把 token 放 URL ——
+                // URL 会进闸机 reqlog 并被自动上报官方);兼容旧版 client 仍从 query 读。
+                let tokenBody = {}
+                try { tokenBody = JSON.parse((await readRawBody(req)).toString('utf-8') || '{}') } catch { tokenBody = {} }
+                const token = String(tokenBody.frp_token || url.searchParams.get('token') || '').trim()
                 if (!host) { sendJson(res, 400, { ok: false, error: '缺少 host 参数' }); return }
                 // token 留空本意=保持现有 token;但若现有的其实是官方下发的 frp token
                 // (frp_token_official 备份还在且两者相等),留空会把官方 token 误用到

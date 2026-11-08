@@ -32,7 +32,7 @@ var import_dsh_client_store = require("@deepseek-ai/dsh-client-store");
 var import_jsx_runtime = require("react/jsx-runtime");
 var NS = "browserctl";
 var STYLE_ID = "browserctl/styles";
-var VERSION = true ? "1.0.36" : "dev";
+var VERSION = true ? "1.0.39" : "dev";
 var ABOUT_LINKS = {
   website: "https://remote.ymzcc.com/dsh-remote/",
   github: "https://github.com/Memorial-coder/dsh-remote-plugin",
@@ -2821,13 +2821,17 @@ function ConfigPanel({ t, onClose, onSaved }) {
       params.set("host", h);
       params.set("port", String(parseInt(port, 10) || 17e3));
       if (remotePort.trim()) params.set("remotePort", String(parseInt(remotePort, 10) || ""));
-      if (token) params.set("token", token);
     } else {
       params.set("mode", "official");
     }
     setSaving("loading");
     try {
-      const r = await fetch(API_P + "/browserctl/api/config?" + params.toString(), { method: "POST", cache: "no-store" });
+      const r = await fetch(API_P + "/browserctl/api/config?" + params.toString(), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(token ? { frp_token: token } : {}),
+        cache: "no-store"
+      });
       const j = await r.json().catch(() => ({}));
       if (!r.ok || j.error) {
         setErr(j.error || "HTTP " + r.status);

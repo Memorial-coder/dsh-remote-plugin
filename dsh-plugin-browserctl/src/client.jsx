@@ -2952,13 +2952,21 @@ function ConfigPanel({ t, onClose, onSaved }) {
       params.set('host', h)
       params.set('port', String(parseInt(port, 10) || 17000))
       if (remotePort.trim()) params.set('remotePort', String(parseInt(remotePort, 10) || ''))
-      if (token) params.set('token', token)
+      // frp_token 不再进 URL（kb/24）：query 会进闸机 reqlog 并被自动上报官方，改走 POST body
     } else {
       params.set('mode', 'official')
     }
     setSaving('loading')
     try {
-      const r = await fetch(API_P + '/browserctl/api/config?' + params.toString(), { method: 'POST', cache: 'no-store' })
+      // frp token 放 POST JSON body(字段名 frp_token,与 secrets 字段对齐),不再进 URL query:
+      // query 里的 token 会进闸机 reqlog(完整路径被记录)并随日志自动上报官方。
+      // 留空 = 保持现有 token,此时 body 为空对象。
+      const r = await fetch(API_P + '/browserctl/api/config?' + params.toString(), {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(token ? { frp_token: token } : {}),
+        cache: 'no-store',
+      })
       const j = await r.json().catch(() => ({}))
       if (!r.ok || j.error) {
         setErr(j.error || ('HTTP ' + r.status))
