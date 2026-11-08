@@ -3417,10 +3417,17 @@ class GateHandler(BaseHTTPRequestHandler):
             if k.lower() in self.HOP_HEADERS or k.lower() == "host":
                 continue
             fwd_headers[k] = v
-        # Host 无条件改写为 authority(kb/08 H-06 对齐 nginx 侧):DSH 的 dsh-auth
-        # Cookie 绑定 authority=127.0.0.1,Host 带端口(如本机直开 127.0.0.1:3080)
+        # Host/Origin/Referer 无条件改写为 authority(kb/08 H-06 对齐 nginx 侧):DSH 的
+        # dsh-auth Cookie 绑定 authority=127.0.0.1,Host 带端口(如本机直开 127.0.0.1:3080)
         # 时 authority 对不上 → 恒 401「reopen the URL」(2026-11-08 本机实测)。
-        # nginx 路径本来就改写成不带端口,此处收紧只影响直连本机闸机的访问。
+        # ⚠️ 必须先按大小写无关删掉客户端自带的 host/origin/referer 再写规范键:
+        # Node 反代(如 dsh-remote-server 的 uid 路径 proxyToPort)发来的是全小写
+        # origin/_REFERER,Python 字典里 origin 与 Origin 是两个键,两个都转发会让
+        # DSH 看到 "https://127.0.0.1, http://127.0.0.1" 双值 → isSameAuthorityOrigin
+        # 解析失败 → 核心 API 全 403 forbidden(2026-11-09 手机端全面故障根因)。
+        for _rw_key in [k for k in fwd_headers.keys()
+                        if k.lower() in ("host", "origin", "referer")]:
+            del fwd_headers[_rw_key]
         fwd_headers["Host"] = AUTHORITY
         fwd_headers["Origin"] = "http://%s" % AUTHORITY
         fwd_headers["Referer"] = "http://%s/" % AUTHORITY
@@ -3457,6 +3464,10 @@ class GateHandler(BaseHTTPRequestHandler):
         except Exception:
             pass
         if body is not None:
+            # 同理:客户端(尤其 Node 反代)的 content-length 是小写键,直接再写
+            # 大写 Content-Length 会双值重复,先按大小写无关清干净再写。
+            for _cl_key in [k for k in fwd_headers.keys() if k.lower() == "content-length"]:
+                del fwd_headers[_cl_key]
             fwd_headers["Content-Length"] = str(len(body))
         try:
             conn.request(self.command, self.path, body=body, headers=fwd_headers)
