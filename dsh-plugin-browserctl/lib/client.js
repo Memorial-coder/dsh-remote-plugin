@@ -32,7 +32,7 @@ var import_dsh_client_store = require("@deepseek-ai/dsh-client-store");
 var import_jsx_runtime = require("react/jsx-runtime");
 var NS = "browserctl";
 var STYLE_ID = "browserctl/styles";
-var VERSION = true ? "1.0.33" : "dev";
+var VERSION = true ? "1.0.34" : "dev";
 var ABOUT_LINKS = {
   website: "https://remote.ymzcc.com/dsh-remote/",
   github: "https://github.com/Memorial-coder/dsh-remote-plugin",
@@ -3276,6 +3276,32 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
     await new Promise((r) => setTimeout(r, 200));
     setReloadToken((x) => x + 1);
   });
+  const openPanelChain = () => run("open", async () => {
+    const w = window.open("", "_blank");
+    const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+    const fail = (msg) => {
+      try {
+        if (w && !w.closed) {
+          w.document.title = t("openFailed");
+          w.document.body.style.cssText = "margin:0;background:#141519;color:#d8dade;font-family:system-ui,'Segoe UI',sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh";
+          w.document.body.innerHTML = '<div style="max-width:460px;padding:0 24px;text-align:center"><div style="font-size:15px;margin-bottom:10px">' + esc(t("openFailed")) + '</div><div style="font-size:12px;line-height:1.7;opacity:.75;white-space:pre-wrap;text-align:left">' + esc(msg) + "</div></div>";
+        }
+      } catch {
+      }
+    };
+    try {
+      const r = await fetch(API_P + "/browserctl/api/link?ttl=600&uses=1", { cache: "no-store" });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j.url) {
+        fail(j && j.error || "HTTP " + r.status);
+        return;
+      }
+      if (w && !w.closed) w.location.href = j.url;
+      else window.open(j.url, "_blank");
+    } catch (e) {
+      fail(String(e && e.message || e));
+    }
+  });
   const elevateChain = (requested) => run("elevate", async () => {
     const act = requested === "stop" ? "stop" : "start";
     let lastErr = "";
@@ -3565,7 +3591,11 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
               t("starting")
             ] }) : t("startCtl") }),
             /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "secondary", size: "sm", disabled: gating, onClick: refreshAll, children: busy === "refresh" ? t("refresh") + "\u2026" : t("refresh") }),
-            data && data.panel && !(cfgMode === "official" && !acctMe) && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "primary", size: "sm", disabled: gating, onClick: () => window.open(data.panel, "_blank"), children: t("openPanel") }),
+            data && data.panel && !(cfgMode === "official" && !acctMe) && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "primary", size: "sm", disabled: gating, onClick: openPanelChain, children: busy === "open" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
+              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlSpinner", "aria-hidden": "true" }),
+              " ",
+              t("opening")
+            ] }) : t("openPanel") }),
             data && !data.panel && !(cfgMode === "official" && !acctMe) && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: { fontSize: 12, color: "var(--dsw-alias-label-tertiary,#8b8f98)", display: "inline-flex", alignItems: "center" }, children: t("loginRequired") }),
             data && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
               import_dsh_client_ui_primitives.Button,
@@ -3750,6 +3780,8 @@ function apply(ctx) {
       copied: "\u5DF2\u590D\u5236",
       refresh: "\u5237\u65B0\u4E8C\u7EF4\u7801",
       openPanel: "\u6253\u5F00\u9762\u677F",
+      opening: "\u6B63\u5728\u6253\u5F00\u2026",
+      openFailed: "\u6253\u5F00\u9762\u677F\u5931\u8D25",
       qrAlt: "\u914D\u5BF9\u4E8C\u7EF4\u7801",
       pairOnce: "\u4E00\u6B21\u6027\u914D\u5BF9\u94FE\u63A5",
       pairLeft: "\u5269\u4F59",
@@ -3944,6 +3976,8 @@ function apply(ctx) {
       copied: "Copied",
       refresh: "Refresh QR",
       openPanel: "Open panel",
+      opening: "Opening\u2026",
+      openFailed: "Failed to open panel",
       qrAlt: "Pairing QR code",
       pairOnce: "One-time pairing link",
       pairLeft: "expires in",

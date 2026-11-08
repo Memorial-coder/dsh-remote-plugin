@@ -3457,6 +3457,40 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
     await new Promise(r => setTimeout(r, 200))
     setReloadToken(x => x + 1)
   })
+  // 「打开面板」:不能直接 window.open(data.panel)。裸面板 URL 在闸机侧是
+  // 「裸 URL 一律拒绝」(2026-11-07 安全策略:2FA 关时也必须已配对)——浏览器拿到的是
+  // <title>403</title> 的纯黑页,而桌面浏览器没有任何获取会话的入口(手机走扫码、
+  // iOS 走引导链接)。这里改为:点击 → 开一个新标签 → 现取一条一次性引导链接
+  // (/link → 闸机 bootstrap?k=)写进该标签:闸机种下 30 天会话 Cookie 后 302 回面板根
+  // (2FA 开启时先显示动态码验证页,验证一次同样 30 天免登)。
+  // 必须先同步 window.open 再异步 fetch:否则经过 await 后再开窗会被弹窗拦截器吞掉。
+  const openPanelChain = () => run('open', async () => {
+    const w = window.open('', '_blank')
+    const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
+    const fail = (msg) => {
+      try {
+        if (w && !w.closed) {
+          w.document.title = t('openFailed')
+          w.document.body.style.cssText = 'margin:0;background:#141519;color:#d8dade;' +
+            "font-family:system-ui,'Segoe UI',sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh"
+          w.document.body.innerHTML =
+            '<div style="max-width:460px;padding:0 24px;text-align:center">' +
+            '<div style="font-size:15px;margin-bottom:10px">' + esc(t('openFailed')) + '</div>' +
+            '<div style="font-size:12px;line-height:1.7;opacity:.75;white-space:pre-wrap;text-align:left">' + esc(msg) + '</div>' +
+            '</div>'
+        }
+      } catch {}
+    }
+    try {
+      const r = await fetch(API_P + '/browserctl/api/link?ttl=600&uses=1', { cache: 'no-store' })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok || !j.url) { fail((j && j.error) || ('HTTP ' + r.status)); return }
+      if (w && !w.closed) w.location.href = j.url
+      else window.open(j.url, '_blank')
+    } catch (e) {
+      fail(String((e && e.message) || e))
+    }
+  })
   // 提权启动/停止:只在用户点按钮后触发,requested 是 'start' 或 'stop'。
   // 提权进程是分离的,接口只回 UAC 的结果;真正是否起来由这里轮询 /status 判断。
   const elevateChain = (requested) => run('elevate', async () => {
@@ -3744,7 +3778,11 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
                   {busy === 'refresh' ? t('refresh') + '…' : t('refresh')}
                 </Button>
                 {data && data.panel && !(cfgMode === 'official' && !acctMe) && (
-                  <Button variant="primary" size="sm" disabled={gating} onClick={() => window.open(data.panel, '_blank')}>{t('openPanel')}</Button>
+                  <Button variant="primary" size="sm" disabled={gating} onClick={openPanelChain}>
+                    {busy === 'open'
+                      ? (<><span className="dshBrowserCtlSpinner" aria-hidden="true" /> {t('opening')}</>)
+                      : t('openPanel')}
+                  </Button>
                 )}
                 {data && !data.panel && !(cfgMode === 'official' && !acctMe) && (
                   <span style={{ fontSize: 12, color: 'var(--dsw-alias-label-tertiary,#8b8f98)', display: 'inline-flex', alignItems: 'center' }}>{t('loginRequired')}</span>
@@ -3950,6 +3988,8 @@ export function apply(ctx) {
       copied: '已复制',
       refresh: '刷新二维码',
       openPanel: '打开面板',
+      opening: '正在打开…',
+      openFailed: '打开面板失败',
       qrAlt: '配对二维码',
       pairOnce: '一次性配对链接',
       pairLeft: '剩余',
@@ -4144,6 +4184,8 @@ export function apply(ctx) {
       copied: 'Copied',
       refresh: 'Refresh QR',
       openPanel: 'Open panel',
+      opening: 'Opening…',
+      openFailed: 'Failed to open panel',
       qrAlt: 'Pairing QR code',
       pairOnce: 'One-time pairing link',
       pairLeft: 'expires in',
