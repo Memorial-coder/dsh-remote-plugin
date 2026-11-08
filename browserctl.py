@@ -312,11 +312,16 @@ def state_lock():
 
 DSH_WEB_URL = os.environ.get("DSH_WEB_URL", "")
 
+# DSH 主进程名:预览/开发版叫 DSH NEXT.exe,正式安装版叫 DeepSeek Harness.exe,
+# 两个名字都要认——只认一个会让另一版的用户永远探测不到端口,
+# 表现为「未探测到 DSH Web 端口」(2026-11-08 实测)。
+DSH_PROCESS_NAMES = ("dsh next.exe", "deepseek harness.exe")
+
 
 # ---------------- DSH 端口探测 ----------------
 
 def dsh_candidates():
-    """候选端口: state 缓存 → DSH_WEB_URL 环境变量 → netstat(按进程名 DSH NEXT.exe)。"""
+    """候选端口: state 缓存 → DSH_WEB_URL 环境变量 → netstat(按 DSH 进程名,兼容 DSH NEXT.exe / DeepSeek Harness.exe)。"""
     ports = []
     try:
         st = read_state()
@@ -328,11 +333,21 @@ def dsh_candidates():
     if m:
         ports.append(int(m.group(1)))
     try:
+        # 不用 /FI 按名过滤:一次全列,本地按名字集合筛——两个进程名一次拿全,
+        # 也避开 /FI 参数里带空格的名字在不同系统上的引号差异。
+        # errors="replace":个别机器 locale 编码对不上时只损显示,不炸整个探测。
         out = _run_hidden(
-            ["tasklist", "/FI", "IMAGENAME eq DSH NEXT.exe", "/FO", "CSV", "/NH"],
-            capture_output=True, text=True, timeout=15,
+            ["tasklist", "/FO", "CSV", "/NH"],
+            capture_output=True, text=True, errors="replace", timeout=15,
         ).stdout
-        pids = {int(x.split('","')[1]) for x in out.splitlines() if '"DSH NEXT.exe' in x}
+        pids = set()
+        for x in out.splitlines():
+            f = x.split('","')
+            if len(f) >= 2 and f[0].strip('"').lower() in DSH_PROCESS_NAMES:
+                try:
+                    pids.add(int(f[1]))
+                except ValueError:
+                    pass
         if pids:
             ns = _run_hidden(
                 ["netstat", "-ano", "-p", "tcp"], capture_output=True, text=True, timeout=15,
