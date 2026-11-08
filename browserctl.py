@@ -3371,7 +3371,13 @@ class GateHandler(BaseHTTPRequestHandler):
             if k.lower() in self.HOP_HEADERS or k.lower() == "host":
                 continue
             fwd_headers[k] = v
-        fwd_headers["Host"] = self.headers.get("Host") or "remote.ymzcc.com"
+        # Host 无条件改写为 authority(kb/08 H-06 对齐 nginx 侧):DSH 的 dsh-auth
+        # Cookie 绑定 authority=127.0.0.1,Host 带端口(如本机直开 127.0.0.1:3080)
+        # 时 authority 对不上 → 恒 401「reopen the URL」(2026-11-08 本机实测)。
+        # nginx 路径本来就改写成不带端口,此处收紧只影响直连本机闸机的访问。
+        fwd_headers["Host"] = AUTHORITY
+        fwd_headers["Origin"] = "http://%s" % AUTHORITY
+        fwd_headers["Referer"] = "http://%s/" % AUTHORITY
         # 上游 keep-alive:池按端口分桶,DSH 换端口时 resolve_dsh 整池作废
         fwd_headers["Connection"] = "keep-alive"
         # 2026-11-07:边缘 Lua 改写 Cookie 时会同时保留原 Cookie 头和重写后的
