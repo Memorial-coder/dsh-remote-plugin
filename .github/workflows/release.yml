@@ -309,13 +309,14 @@ jobs:
             [ -n "$S" ] || continue
             # 机器人自己的加号提交是纯噪音,整行跳过;手动加号提交的正文说明要保留
             case "$S" in "chore(release): bump ${VERSION}") continue ;; esac
+            # 只剥 ASCII 标点:[:punct:] 在 C.UTF-8 下连「『( 等中文标点也剥,会吃掉正常句首
             C=$(printf '%s' "$S" \
               | sed -E 's/\(versionCode [0-9]+\)//g' \
               | sed -E 's/bump[ ]+(to[ ]+)?v?[0-9]+\.[0-9]+\.[0-9]+//g' \
               | sed -E 's/\bv[0-9]+\.[0-9]+\.[0-9]+//g' \
               | sed -E 's/\(\)//g' \
               | sed -E 's/^[a-zA-Z]+(\([^)]*\))?:[[:space:]]*//' \
-              | sed -E 's/^[[:space:][:punct:]]+//' \
+              | sed -E 's/^[[:space:]!-/:-@\[-`{-~]+//' \
               | sed -E 's/[[:space:]]*[+—-]+[[:space:]]*$//')
             [ -n "$C" ] || continue
             printf -- '- %s\n' "$C" >> body.tmp
