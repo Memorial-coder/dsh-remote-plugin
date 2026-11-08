@@ -1700,14 +1700,15 @@ def _download_denied(path):
     return False
 
 
-def _walk_named_files(root, name):
+def _walk_named_files(root, name, budget=None):
     """在一个根目录树里按文件名找候选文件。带条数与时间预算,防止超大目录
-    把闸机线程拖死(3 秒 / 3 万个条目,超了就用手上已有的结果)。"""
+    把闸机线程拖死(3 秒 / 3 万个条目,超了就用手上已有的结果)。
+    budget 可传共享字典(多根共用同一预算)。"""
     hits = []
     if not root.is_dir():
         return hits
-    budget = 30000
-    deadline = time.time() + 3.0
+    if budget is None:
+        budget = {"entries": 30000, "deadline": time.time() + 3.0}
     target = name.lower()
     try:
         for dirpath, dirnames, filenames in os.walk(root):
@@ -1720,12 +1721,34 @@ def _walk_named_files(root, name):
                         hits.append(p)
                 except OSError:
                     pass
-            budget -= len(filenames) + len(dirnames)
-            if budget <= 0 or time.time() > deadline:
+            budget["entries"] -= len(filenames) + len(dirnames)
+            if budget["entries"] <= 0 or time.time() > budget["deadline"]:
                 break
     except OSError:
         pass
     return hits
+
+
+def _dl_search_roots():
+    """工作区搜索根:本副本目录 + 父目录下的兄弟项目目录。
+    正式闸机跑在镜像目录(dsh-remote-plugin),而 DSH 会话工作区是同级的
+    08_WebAI助手 等项目——只搜本副本目录时,聊天卡片里的交付文件一律 404
+    (2026-11-08 实测:v1.0.43 卡片落到 589KB 的附件库占位文件)。
+    全程只读遍历,共享 3 秒/3 万条目预算。"""
+    roots = [HERE]
+    try:
+        parent = HERE.parent
+        here_res = HERE.resolve()
+        for d in sorted(parent.iterdir()):
+            if d.is_dir():
+                try:
+                    if d.resolve() != here_res:
+                        roots.append(d)
+                except OSError:
+                    pass
+    except OSError:
+        pass
+    return roots
 
 
 def _newest(paths):
@@ -1744,38 +1767,41 @@ def _newest(paths):
 
 def _resolve_download_candidate(name):
     """按文件名找要发给手机的文件。优先级:App 发布目录(规范 APK 存放处) >
-    工作区 > DSH 附件库;同优先级内取 mtime 最新。找不到返回 None。"""
-    tiers = []
+    本副本目录 + 父目录兄弟项目树(DSH 会话工作区在同级,最新 mtime 者胜) >
+    DSH 附件库(最后兜底:真实聊天附件;可能混有同名缩略图类占位,所以只作兜底)。
+    找不到返回 None。"""
     app_dir = APP_DIR / name
     if app_dir.is_file() and not _download_denied(app_dir):
-        tiers.append(app_dir)
-    else:
-        hits = _walk_named_files(HERE, name)
-        if hits:
-            tiers.append(_newest(hits))
-        if not tiers:
-            att_root = Path.home() / ".dsh" / "attachments" / "v1" / "files"
-            if att_root.is_dir():
-                hits = []
-                try:
-                    for p in att_root.iterdir():
-                        if not p.is_dir():
-                            continue
-                        for d in p.iterdir():
-                            if not d.is_dir():
-                                continue
-                            f = d / name
-                            try:
-                                if f.is_file() and not _download_denied(f):
-                                    hits.append(f)
-                            except OSError:
-                                pass
-                except OSError:
-                    pass
-                hit = _newest(hits)
-                if hit:
-                    tiers.append(hit)
-    return tiers[0] if tiers else None
+        return app_dir
+    budget = {"entries": 30000, "deadline": time.time() + 3.0}
+    hits = []
+    for root in _dl_search_roots():
+        hits.extend(_walk_named_files(root, name, budget))
+        if time.time() > budget["deadline"] or budget["entries"] <= 0:
+            break
+    hit = _newest(hits)
+    if hit:
+        return hit
+    att_root = Path.home() / ".dsh" / "attachments" / "v1" / "files"
+    if att_root.is_dir():
+        hits = []
+        try:
+            for p in att_root.iterdir():
+                if not p.is_dir():
+                    continue
+                for d in p.iterdir():
+                    if not d.is_dir():
+                        continue
+                    f = d / name
+                    try:
+                        if f.is_file() and not _download_denied(f):
+                            hits.append(f)
+                    except OSError:
+                        pass
+        except OSError:
+            pass
+        hit = _newest(hits)
+    return hit
 
 
 def _content_disposition(name):
