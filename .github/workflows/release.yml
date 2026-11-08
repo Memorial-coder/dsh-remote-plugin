@@ -1,6 +1,7 @@
 name: Release
 
-# 公开镜像仓库:打 v* 标签时自动构建、冒烟、打包「自包含插件包」并发布 GitHub Release。
+# 公开镜像仓库:push main / 打 v* 标签 / 手动 dispatch → 自动判定发版、自动 bump、构建、
+# 冒烟、打包「自包含插件包」并发布 GitHub Release(带更新介绍)。
 #
 # 发布产物是一个**解压即用**的插件目录(DSH「设置 → 插件 → 添加插件 → 选择本地目录」直接选它):
 #
@@ -22,26 +23,69 @@ name: Release
 #   3. **zip 条目用正斜杠 + 单一顶层目录**:macOS/Linux 的 unzip 会把反斜杠当字面字符
 #      (Windows 上正常,别的系统解出一堆乱名文件)。用 `cd dist/pkg && zip -r ... dsh-remote-plugin` 保证。
 #   4. 版本号唯一来源 = dsh-plugin-browserctl/package.json;build.mjs 用它 define 进产物,
-#      工作流只从它取 tag,不手写版本。
+#      工作流只从它取版本,不手写版本。
 #   5. **额外的 npm 兼容 .tgz**:awesome-dsh-plugin 商店的 `tarball:` 字段要求 GitHub Release
 #      托管的 `https` `.tgz`。这里再打一份 `package/` 顶层目录的 tarball,资产名不带版本号
 #      (`dsh-remote-plugin.tgz`),`releases/latest/download/` 才能稳定解析。
 #
-# 注意:官网「检查更新」用的 version.json(remote.ymzcc.com/dsh-remote/version.json)
-# 是独立部署的,发版时需另行更新并部署,不归本 workflow 管。
+# 自动发版判定(2026-11-08 起,与 dsh-remote-android 仓库同款;判定逻辑本地 git-bash 试跑过):
+#   - push 到 main:package.json 版本 ≠ 最近 v* 标签 → 按仓库版本直接发(工作区手动 bump 的老习惯);
+#     版本相同但 HEAD 不是该标签(确实有新提交) → 自动 patch+1(`npm version` 会把
+#     package.json 和 package-lock.json 一起改,否则 npm ci 因 lock 不同步直接失败),
+#     以「chore(release): bump x.y.z」提交并推回 main;
+#     当前版本已有同名标签 → 跳过(防机器人自推死循环;GITHUB_TOKEN 的 push 本身也不触发 workflow)。
+#   - 推 v* 标签:按标签发,并强校验「标签版本 == package.json 版本」——防止 Release 名
+#     是 v1.0.34、包里/资产名却是 1.0.33 的错位发布。
+#   - Actions 手动 Run:可选 bump 档位(auto/patch/minor/major/none),可勾 dry_run 只打包不发布。
+#   - **已发布过的版本绝不覆盖重发**(历史版本保留):Release 已存在时直接报错;要重发先删旧
+#     Release(和标签),或换个新版本号。
+#
+# 注意:
+#   - 自动 bump 会往 main 推一个提交,本地/同步工具下次操作前先 git pull --rebase。
+#   - 工作区(08_WebAI助手/dsh-plugin-browserctl)仍是日常版本的源头;镜像自动 bump 只发生在
+#     「推了内容但没改版本号」的场景,下次从工作区同步前把工作区版本改到不小于镜像版本。
+#   - 官网「检查更新」用的 version.json(remote.ymzcc.com/dsh-remote/version.json)
+#     是独立部署的,发版时需另行更新并部署,不归本 workflow 管。
+
 on:
   push:
+    branches: [main]
     tags: ['v*']
+    paths-ignore: ['**.md', '.github/**', 'docs/**']
   workflow_dispatch:
+    inputs:
+      bump:
+        description: '版本号怎么加'
+        type: choice
+        default: auto
+        options: [auto, patch, minor, major, none]
+      dry_run:
+        description: '只构建不发布(试跑)'
+        type: boolean
+        default: false
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
-  contents: write
+  contents: write # 自动 bump 推回 main、打标签、建 Release 都需要
 
 jobs:
   release:
+    name: 自动发版
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
+      - name: 检出代码(完整历史 + 标签)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 配置 git 身份
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
       - uses: actions/setup-node@v4
         with:
@@ -49,32 +93,110 @@ jobs:
           cache: npm
           cache-dependency-path: dsh-plugin-browserctl/package-lock.json
 
+      # ---------- 1. 决定:发不发、版本多少、要不要加号 ----------
+      - name: 决定版本号
+        id: decide
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./dsh-plugin-browserctl/package.json').version")"
+          [ -n "$VERSION" ] || { echo "::error::没能从 dsh-plugin-browserctl/package.json 读到 version"; exit 1; }
+
+          # 最近一个 v* 标签(按版本序排,不按时间)
+          LAST_TAG=$(git tag --list 'v*' --sort=-v:refname | head -1 || true)
+          MODE=auto; BUMP=""
+          if [ "${GITHUB_EVENT_NAME}" = "push" ] && [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            # 老习惯:手动推标签,按标签发;标签与 package.json 必须一致,防 Release 名与包内版本错位
+            if [ "${GITHUB_REF_NAME#v}" != "$VERSION" ]; then
+              echo "::error::标签 ${GITHUB_REF_NAME} 与 package.json 版本 ${VERSION} 不一致——先把 dsh-plugin-browserctl/package.json 改成一致再打标签"
+              exit 1
+            fi
+            VERSION=${GITHUB_REF_NAME#v}
+            LAST_TAG=$(git tag --list 'v*' --sort=-v:refname | grep -vx "${GITHUB_REF_NAME}" | head -1 || true)
+            MODE=build
+          elif [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            case "${{ inputs.bump }}" in
+              patch|minor|major) MODE=bump; BUMP="${{ inputs.bump }}" ;;
+              none)              MODE=build ;;
+              *)                 MODE=auto ;;
+            esac
+          fi
+
+          LAST_VERSION=${LAST_TAG#v}
+          if [ "$MODE" = "auto" ]; then
+            if [ "$VERSION" != "$LAST_VERSION" ]; then
+              MODE=build          # 提交里已手动加过号,按仓库版本发
+            elif [ -n "$LAST_TAG" ] && [ "$(git rev-parse "${LAST_TAG}^{commit}")" != "$(git rev-parse HEAD)" ]; then
+              MODE=bump; BUMP=patch
+            else
+              MODE=skip           # 版本没动、标签就是 HEAD:机器人自推或无新东西
+            fi
+          fi
+
+          if [ "$MODE" = "bump" ]; then
+            if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::版本号 ${VERSION} 不是 x.y.z 三段式,停"
+              exit 1
+            fi
+            IFS=. read -r MAJ MIN PAT <<< "$VERSION"
+            case "$BUMP" in
+              minor) MIN=$((MIN+1)); PAT=0 ;;
+              major) MAJ=$((MAJ+1)); MIN=0; PAT=0 ;;
+              *)     PAT=$((PAT+1)) ;;
+            esac
+            VERSION="${MAJ}.${MIN}.${PAT}"
+          fi
+
+          # 同名标签已存在 = 发过了,跳过;tag-push 模式旁路(标签本来就是我们刚推的)
+          if [ "$MODE" != "skip" ] && [ "${GITHUB_EVENT_NAME}:${GITHUB_REF_TYPE}" != "push:tag" ] \
+             && git rev-parse -q --verify "refs/tags/v${VERSION}" >/dev/null 2>&1; then
+            echo "v${VERSION} 已有标签,本次跳过"
+            MODE=skip
+          fi
+
+          {
+            echo "version=${VERSION}"
+            echo "tag=v${VERSION}"
+            echo "mode=${MODE}"
+            echo "last_tag=${LAST_TAG}"
+          } >> "$GITHUB_OUTPUT"
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+          echo "TAG=v${VERSION}"    >> "$GITHUB_ENV"
+          echo "决定:mode=${MODE},版本 v${VERSION},上一发版 ${LAST_TAG:-无}"
+
+      # ---------- 2. 需要时把版本号写回 package.json + package-lock.json 并提交 ----------
+      - name: 加版本号并提交
+        id: bump
+        if: steps.decide.outputs.mode == 'bump'
+        run: |
+          set -euo pipefail
+          # npm version 用显式版本号,一次改齐 package.json 与 package-lock.json(npm ci 要求两者同步)
+          (cd dsh-plugin-browserctl && npm version "${VERSION}" --no-git-tag-version --allow-same-version)
+          V="$(node -p "require('./dsh-plugin-browserctl/package.json').version")"
+          [ "$V" = "$VERSION" ] || { echo "::error::版本号没写进去 V=$V 期望=${VERSION}"; exit 1; }
+          grep -q "\"version\": \"${VERSION}\"" dsh-plugin-browserctl/package-lock.json \
+            || { echo "::error::package-lock.json 版本没同步"; exit 1; }
+          git add dsh-plugin-browserctl/package.json dsh-plugin-browserctl/package-lock.json
+          git commit -m "chore(release): bump ${VERSION}"
+          echo "committed=true" >> "$GITHUB_OUTPUT"
+
+      # ---------- 3. 构建 + 冒烟(skip 时全部条件跳过) ----------
       - name: Install deps (build only, no runtime deps)
+        if: steps.decide.outputs.mode != 'skip'
         working-directory: dsh-plugin-browserctl
         run: npm ci
 
       - name: Build
+        if: steps.decide.outputs.mode != 'skip'
         working-directory: dsh-plugin-browserctl
         run: npm run build
 
       - name: Test (smoke + layout)
+        if: steps.decide.outputs.mode != 'skip'
         working-directory: dsh-plugin-browserctl
         run: npm test
 
-      # 手动触发(workflow_dispatch)时没有标签,从 package.json 取版本号
-      - name: Resolve version
-        id: ver
-        run: |
-          VERSION="$(node -p "require('./dsh-plugin-browserctl/package.json').version")"
-          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
-            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
-          else
-            echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
-          fi
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
-
       - name: Package self-contained plugin
+        if: steps.decide.outputs.mode != 'skip'
         run: |
           set -euo pipefail
           STAGE="dist/pkg/dsh-remote-plugin"
@@ -96,7 +218,7 @@ jobs:
              requirements.txt INSTALL.md LICENSE "$STAGE/"
           cp -r browserctl_pwa "$STAGE/browserctl_pwa"
 
-          # 3) 自检:包根同时有两件套、无 node_modules、无脱敏残留、无 Windows 绝对路径
+          # 3) 自检:包根同时有两件套、无 node_modules、无脱敏残留
           test -f "$STAGE/package.json"
           test -f "$STAGE/browserctl.py"
           test -f "$STAGE/lib/index.js"
@@ -122,6 +244,7 @@ jobs:
           (cd dist/tgz && tar -czf "$GITHUB_WORKSPACE/dist/dsh-remote-plugin.tgz" package)
 
       - name: Verify zip layout
+        if: steps.decide.outputs.mode != 'skip'
         run: |
           set -euo pipefail
           ZIP="dist/dsh-remote-plugin-${VERSION}.zip"
@@ -143,6 +266,7 @@ jobs:
           node -e "import('./dist/unzip/dsh-remote-plugin/lib/index.js').then(m=>{if(!m||!m.inject)throw new Error('inject missing');console.log('host entry OK')})"
 
       - name: Verify tarball layout
+        if: steps.decide.outputs.mode != 'skip'
         run: |
           set -euo pipefail
           TGZ="dist/dsh-remote-plugin.tgz"
@@ -164,13 +288,108 @@ jobs:
           tar -xzf "$TGZ" -C dist/tgztest
           node -e "import('./dist/tgztest/package/lib/index.js').then(m=>{if(!m||!m.inject)throw new Error('inject missing');console.log('tarball host entry OK')})"
 
-      - name: Create release
+      # ---------- 4. 生成更新介绍(从提交记录) ----------
+      - name: 生成更新介绍
+        if: steps.decide.outputs.mode != 'skip'
+        run: |
+          set -euo pipefail
+          PREV="${{ steps.decide.outputs.last_tag }}"
+          DATE=$(date +%Y-%m-%d)
+          : > body.tmp
+          if [ -n "$PREV" ]; then
+            git log --pretty=%s "${PREV}..HEAD" > subj.tmp
+          else
+            git log -20 --pretty=%s > subj.tmp
+          fi
+          while IFS= read -r S; do
+            [ -n "$S" ] || continue
+            # 机器人自己的加号提交是纯噪音,整行跳过;手动加号提交的正文说明要保留
+            case "$S" in "chore(release): bump ${VERSION}") continue ;; esac
+            C=$(printf '%s' "$S" \
+              | sed -E 's/\(versionCode [0-9]+\)//g' \
+              | sed -E 's/bump[ ]+(to[ ]+)?v?[0-9]+\.[0-9]+\.[0-9]+//g' \
+              | sed -E 's/\bv[0-9]+\.[0-9]+\.[0-9]+//g' \
+              | sed -E 's/\(\)//g' \
+              | sed -E 's/^[a-zA-Z]+(\([^)]*\))?:[[:space:]]*//' \
+              | sed -E 's/^[[:space:][:punct:]]+//' \
+              | sed -E 's/[[:space:]]*[+—-]+[[:space:]]*$//')
+            [ -n "$C" ] || continue
+            printf -- '- %s\n' "$C" >> body.tmp
+          done < subj.tmp
+          if [ ! -s body.tmp ]; then printf -- '- 内部维护与优化\n' > body.tmp; fi
+          {
+            echo "dsh-remote-plugin v${VERSION}(${DATE})"
+            echo
+            cat body.tmp
+            echo
+            if [ -n "$PREV" ]; then
+              echo "完整变更:${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/compare/${PREV}...v${VERSION}"
+            else
+              echo "完整变更:${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commits/v${VERSION}"
+            fi
+          } > release-notes.md
+          echo "----- 更新介绍 -----"
+          cat release-notes.md
+          cat release-notes.md >> "$GITHUB_STEP_SUMMARY"
+
+      # ---------- 5. 发布:推回 main + 打标签 + 建 Release ----------
+      - name: 发布
+        id: publish
+        if: steps.decide.outputs.mode != 'skip' && inputs.dry_run != true
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ steps.ver.outputs.tag }}" \
+          set -euo pipefail
+          # 先推加号提交,再打标签(main 推失败就整步失败,不留半截状态)
+          if [ "${{ steps.bump.outputs.committed }}" = "true" ]; then
+            # 检出是 detached HEAD,本地未必有 main 分支,推 HEAD:main 最稳
+            git push origin HEAD:main
+          fi
+          if ! git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null 2>&1; then
+            git tag "${TAG}"
+          fi
+          git push origin "${TAG}"
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            echo "::error::${TAG} 已有 Release——已发布过的版本不覆盖重发;要重发先删旧 Release(和标签)再触发,或换个新版本号"
+            exit 1
+          fi
+          gh release create "${TAG}" \
             "dist/dsh-remote-plugin-${VERSION}.zip" \
             "dist/dsh-remote-plugin.tgz" \
             --repo "$GITHUB_REPOSITORY" \
-            --title "dsh-remote-plugin ${{ steps.ver.outputs.tag }}" \
-            --generate-notes
+            --title "dsh-remote-plugin v${VERSION}" \
+            --notes-file release-notes.md \
+            --latest
+          echo "release=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: 试跑说明
+        if: steps.decide.outputs.mode != 'skip' && inputs.dry_run == true
+        run: |
+          echo "dry_run=true:zip/tgz 已打包并上传到本页 Artifacts,没有推送、没有打标签、没有建 Release"
+
+      - name: 跳过说明
+        if: steps.decide.outputs.mode == 'skip'
+        run: |
+          echo "本次没有需要发的版本(v${VERSION} 已有标签),流水线直接结束"
+
+      - name: 上传打包产物(Actions 页可下载)
+        if: steps.decide.outputs.mode != 'skip'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dsh-remote-plugin-v${{ steps.decide.outputs.version }}
+          path: |
+            dist/dsh-remote-plugin-*.zip
+            dist/dsh-remote-plugin.tgz
+          if-no-files-found: error
+
+      - name: 结果摘要
+        if: always()
+        run: |
+          {
+            echo "### 自动发版"
+            echo "- 决定:mode=${{ steps.decide.outputs.mode }},tag=${{ steps.decide.outputs.tag }}"
+            echo "- 上一发版:${{ steps.decide.outputs.last_tag }}"
+            if [ -n "${{ steps.publish.outputs.release }}" ]; then
+              echo "- Release:${{ steps.publish.outputs.release }}"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
