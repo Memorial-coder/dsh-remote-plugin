@@ -469,6 +469,9 @@ PWA_MANIFEST = """{
 # 视口撑宽,竖屏也会被误判成横屏。选了固定宽度后用 MutationObserver 纠正页面
 # 自身对 viewport meta 的改写;该方向没设固定宽度就完全不碰页面 meta。
 # App(UA 含 DshRemote/)不注入本工具条,自有原生导航。
+# 长按 FAB 0.6s 可隐藏整个工具条;但「添加到主屏幕」的 standalone 窗口没有刷新按钮,
+# iOS 重新点开图标又常是冻结恢复旧页面而非重新加载,隐藏状态会被一直带走。
+# 所以隐藏不是永久的:切回前台(visibilitychange)或 pageshow(persisted) 自动恢复显示。
 # 返回逻辑 = history.back();若 900ms 后仍停留在本页(无历史可退)则兜底跳官网 /app。
 _MOBILE_TOOLBAR_JS = """(function(){
 try{
@@ -751,15 +754,21 @@ root.addEventListener('pointerdown',function(e){ e.stopPropagation() });
 root.addEventListener('touchstart',function(e){ e.stopPropagation() },{passive:true});
 var lp=0;
 fab.addEventListener('touchstart',function(){
-  lp=setTimeout(function(){ root.style.display='none'; toast('工具条已隐藏，刷新页面可恢复') },600);
+  lp=setTimeout(function(){ root.style.display='none'; toast('工具条已隐藏，切到后台再回来或刷新可恢复') },600);
 },{passive:true});
 ['touchend','touchcancel','touchmove'].forEach(function(t){
   fab.addEventListener(t,function(){ clearTimeout(lp) },{passive:true});
 });
+// 隐藏的自动恢复保险:standalone 没有刷新按钮,iOS 冻结恢复会把隐藏状态一直带走,
+// 所以隐藏只在「本次前台会话」内有效,切回前台立即放回来,不会再永久藏丢。
+document.addEventListener('visibilitychange',function(){
+  if (!document.hidden) root.style.display='';
+});
+window.addEventListener('pageshow',function(e){ if (e.persisted) root.style.display='' });
 
 document.documentElement.appendChild(root);
 new MutationObserver(function(){
-  if (!root.isConnected) document.documentElement.appendChild(root);
+  if (!root.isConnected){ root.style.display=''; document.documentElement.appendChild(root); }
 }).observe(document.documentElement,{childList:true});
 }catch(e){}
 })();"""
