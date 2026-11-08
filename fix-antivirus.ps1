@@ -6,9 +6,14 @@
 #  原因:  Windows Defender 把 frpc.exe 判为 PUA:Win32/FRProxy(潜在不受欢迎程序)
 #         并阻止它执行。联想电脑管家 / 火绒 / 360 等也会做同样的事。
 #
-#  用法:  右键本文件 →「使用 PowerShell 运行」
+#  用法:  双击本目录的 fix-antivirus.bat(推荐:自动解除下载锁定、绕过执行策略,
+#         跑完窗口停住,任何报错都看得见)
+#         或右键本文件 →「使用 PowerShell 运行」
 #         或在本目录执行:
 #           powershell -ExecutionPolicy Bypass -File .\fix-antivirus.ps1
+#
+#  说明:脚本无论正常结束还是报错(包括红色报错),都会停在窗口里等你按键,
+#        不会一闪而过——需要反馈时把整个窗口截图发出来即可。
 #
 #  本脚本只做三件事:解除下载锁定、给本目录加杀软排除项、验证 frpc.exe 能跑。
 #  不会上传任何东西,不会改系统其它设置。
@@ -31,7 +36,8 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
         Start-Process -FilePath 'powershell.exe' -ArgumentList $argv -Verb RunAs -Wait
     } catch {
         Say "提权被取消,无法继续。" 'Red'
-        Start-Sleep -Seconds 3
+        Say "按任意键退出..." 'Yellow'
+        try { $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown') } catch { try { Read-Host '按回车键退出' | Out-Null } catch { } }
     }
     exit
 }
@@ -42,6 +48,10 @@ Say "  DSH 远程助手 · 杀软拦截修复" 'Cyan'
 Line
 Say ("部署包目录: " + $kit) 'White'
 Say ""
+
+# 整个主体包进 try/catch/finally:任何未预期的终止错误也打印完整信息,
+# 且窗口一定停在「按任意键」,不会一闪而过(2026-11-08 用户反馈右键运行闪退看不清红字)。
+try {
 
 # ---------- 1. 解除下载锁定 ----------
 Say "[1/5] 解除文件下载锁定(MOTW)..." 'White'
@@ -171,4 +181,16 @@ Say ""
 Line
 Say "说明:本脚本只改了杀软排除项,随时可在杀软界面里删掉。" 'DarkGray'
 Line
-if (-not $NoPause) { Read-Host "按回车键关闭" | Out-Null }
+
+} catch {
+    Say ""
+    Say "脚本运行出错,完整信息如下(把整个窗口截图发我):" 'Red'
+    Say ($_ | Format-List * -Force | Out-String) 'Red'
+    if ($_.ScriptStackTrace) { Say $_.ScriptStackTrace 'Red' }
+} finally {
+    if (-not $NoPause) {
+        Write-Host ""
+        Say "按任意键退出..." 'Yellow'
+        try { $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown') } catch { try { Read-Host '按回车键退出' | Out-Null } catch { } }
+    }
+}

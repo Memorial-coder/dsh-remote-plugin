@@ -5222,7 +5222,7 @@ async function buildTunnel() {
       ok: false,
       started: true,
       forwarder: false,
-      error: "\u672C\u673A\u95F8\u673A(127.0.0.1:3080)\u542F\u52A8\u5931\u8D25\u3002\n\u6700\u5E38\u89C1\u539F\u56E0:Windows Defender / \u5B89\u5168\u8F6F\u4EF6\u628A frpc.exe \u5224\u4E3A PUA \u62D2\u7EDD\u6267\u884C(WinError 5 \u62D2\u7EDD\u8BBF\u95EE)\u3002\n\u5904\u7406:\u5728 kit \u76EE\u5F55\u53F3\u952E\u7528 PowerShell \u8FD0\u884C fix-antivirus.ps1,\u6216\u6309 INSTALL.md\u300C\u5E38\u89C1\u95EE\u9898\u300D\u7B2C 1 \u6761\u64CD\u4F5C\u3002\n\u8BE6\u89C1 browserctl_start.log \u4E0E browserctl_fwd.log\u3002" + (tail ? "\n\n\u2014 \u542F\u52A8\u65E5\u5FD7\u5C3E\u90E8 \u2014\n" + tail : ""),
+      error: "\u672C\u673A\u95F8\u673A(127.0.0.1:3080)\u542F\u52A8\u5931\u8D25\u3002\n\u6700\u5E38\u89C1\u539F\u56E0:Windows Defender / \u5B89\u5168\u8F6F\u4EF6\u628A frpc.exe \u5224\u4E3A PUA \u62D2\u7EDD\u6267\u884C(WinError 5 \u62D2\u7EDD\u8BBF\u95EE)\u3002\n\u5904\u7406:\u5728 kit \u76EE\u5F55\u53CC\u51FB fix-antivirus.bat(\u63A8\u8350;\u6216\u53F3\u952E fix-antivirus.ps1 \u2192\u300C\u4F7F\u7528 PowerShell \u8FD0\u884C\u300D),\u8BE6\u89C1 INSTALL.md\u300C\u5E38\u89C1\u95EE\u9898\u300D\u7B2C 1 \u6761\u3002\n\u8BE6\u89C1 browserctl_start.log \u4E0E browserctl_fwd.log\u3002" + (tail ? "\n\n\u2014 \u542F\u52A8\u65E5\u5FD7\u5C3E\u90E8 \u2014\n" + tail : ""),
       logTail: tail
     };
   }

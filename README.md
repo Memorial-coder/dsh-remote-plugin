@@ -99,14 +99,14 @@ DSH 侧边栏的远程控制面板，集成了二维码配对、设备管理、�
 **装之前先确认两件事**：
 
 - **需要一个官方账号**：官方托管模式要先去 <https://remote.ymzcc.com> 注册（免费），登录后服务器才分配专属端口。
-- **Windows 上 `frpc.exe` 可能被判为 `PUA:Win32/FRProxy` 拦截**：解压后先右键 `fix-antivirus.ps1` →「使用 PowerShell 运行」→ UAC 点「是」，否则隧道起不来、手机打开是 502。
+- **Windows 上 `frpc.exe` 可能被判为 `PUA:Win32/FRProxy` 拦截**：解压后先双击 `fix-antivirus.bat`（推荐；或右键 `fix-antivirus.ps1` →「使用 PowerShell 运行」） → UAC 点「是」，否则隧道起不来、手机打开是 502。
 
 完整安装步骤见 [INSTALL.md](INSTALL.md)。想先看效果？直接打开官网：[https://remote.ymzcc.com/dsh-remote/](https://remote.ymzcc.com/dsh-remote/)。
 
 **官方托管**（推荐）：登录官方账号即用，服务器自动分配专属入口
 
 ```
-1. 解压插件包（Windows 先跑一次 fix-antivirus.ps1）
+1. 解压插件包（Windows 先跑一次 fix-antivirus.bat，双击即可）
 2. DSH →「设置」→ 插件页 →「添加插件」→「选择本地目录」→ 选中插件包根目录 → 重启 DSH
 3. 侧边栏「远程助手」→ 登录官方账号 → 点「开始控制」→ 手机扫码二维码远程访问
 ```
@@ -169,6 +169,7 @@ dsh plugin add github:Memorial-coder/dsh-remote-plugin
 ├── push_toast.ps1          PowerShell 推送脚本
 ├── browserctl_pwa/         PWA 图标与 Service Worker
 ├── fix-antivirus.ps1       一键修复 frpc.exe 被 PUA 拦截
+├── fix-antivirus.bat       一键修复的双击启动器（跑完窗口停住）
 └── INSTALL.md / LICENSE
 ```
 

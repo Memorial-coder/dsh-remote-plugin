@@ -27,6 +27,7 @@
     "win_push.py",
     "push_toast.ps1",
     "fix-antivirus.ps1",
+    "fix-antivirus.bat",
     "browserctl_pwa"
   ],
   "dsh": {

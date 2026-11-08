@@ -819,7 +819,7 @@ async function buildTunnel() {
       forwarder: false,
       error: '本机闸机(127.0.0.1:3080)启动失败。\n'
         + '最常见原因:Windows Defender / 安全软件把 frpc.exe 判为 PUA 拒绝执行(WinError 5 拒绝访问)。\n'
-        + '处理:在 kit 目录右键用 PowerShell 运行 fix-antivirus.ps1,或按 INSTALL.md「常见问题」第 1 条操作。\n'
+        + '处理:在 kit 目录双击 fix-antivirus.bat(推荐;或右键 fix-antivirus.ps1 →「使用 PowerShell 运行」),详见 INSTALL.md「常见问题」第 1 条。\n'
         + '详见 browserctl_start.log 与 browserctl_fwd.log。'
         + (tail ? '\n\n— 启动日志尾部 —\n' + tail : ''),
       logTail: tail,

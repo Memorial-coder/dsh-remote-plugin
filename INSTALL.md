@@ -22,6 +22,7 @@
 | `frpc.exe` | FRP 客户端（Windows；macOS/Linux 需自备同版本 frpc） |
 | `win_push.py` / `push_toast.ps1` | Windows 消息推送驻留与 Toast 脚本 |
 | `fix-antivirus.ps1` | 一键解除下载锁定、加 Defender 排除项，修复 `frpc.exe` 被拦 |
+| `fix-antivirus.bat` | 上面的**双击版启动器**：自动解除下载锁定、绕过执行策略，跑完窗口停住，报错看得见 |
 | `browserctl_pwa/` | PWA 图标与 Service Worker |
 | `INSTALL.md` / `LICENSE` | 本文件与 MIT 许可证 |
 
@@ -51,7 +52,7 @@
 ### 1. 解压并解除拦截
 
 - 解压到固定目录（例如 `D:\DshRemote`），不要放在 `Temp` 或下载目录，解压后不要再移动。
-- Windows 先运行一次一键脚本：右键 `fix-antivirus.ps1` →「使用 PowerShell 运行」→ UAC 点「是」。
+- Windows 先运行一次一键脚本：双击 `fix-antivirus.bat`（推荐；或右键 `fix-antivirus.ps1` →「使用 PowerShell 运行」） → UAC 点「是」。
   脚本会解除下载锁定（MOTW）、加 Defender 排除项，并实跑 `frpc.exe -v` 验证。
 - 不做这一步，`frpc.exe` 很可能被 Windows Defender 判为 `PUA:Win32/FRProxy` 拒绝执行 → 隧道起不来 → 手机打开是 502。详见「常见问题」第 2 条。
 
@@ -124,7 +125,7 @@ DSH →「设置」→ 插件页 →「添加插件」→「选择本地目录�
 
 **根因**：Windows Defender 把 `frpc.exe` 判为 `PUA:Win32/FRProxy`（ThreatID 335323，潜在不受欢迎程序）。从 zip 解压出来的文件带「来自 Internet」的 MOTW 标记，PUA 拦截 + MOTW 同时满足就会拦。**改名、换目录、换副本都没用**（按文件内容判定，所有副本一起拦）。装了联想电脑管家（火绒引擎）、火绒、360 的机器还会各自再拦一次，排除项与 Defender 相互独立。
 
-**一键修复（推荐）**：右键 `fix-antivirus.ps1` →「使用 PowerShell 运行」→ UAC 点「是」。
+**一键修复（推荐）**：双击 `fix-antivirus.bat`（推荐；或右键 `fix-antivirus.ps1` →「使用 PowerShell 运行」） → UAC 点「是」。
 它会解除下载锁定 → 加 Defender 排除项（目录 + 进程）→ 检查并询问是否关闭 PUA 拦截 → 实跑 `frpc.exe -v` 验证并报告结果。
 
 > 由 AI 助手排障时：**不要替用户改系统安全设置**（需要管理员权限与 UAC），把这一步转达给用户本人执行。
@@ -226,6 +227,7 @@ npm test         # test/smoke.cjs + test/layout.cjs
 ├── frpc.exe                  FRP 客户端
 ├── win_push.py / push_toast.ps1
 ├── fix-antivirus.ps1
+├── fix-antivirus.bat
 ├── browserctl_pwa/
 └── INSTALL.md / LICENSE
 ```
