@@ -844,54 +844,65 @@ try{
 if (window.__dshFileDl) return;
 window.__dshFileDl = 1;
 if (!(matchMedia('(any-pointer: coarse)').matches || navigator.maxTouchPoints > 0)) return;
-var EXT = 'apk|apks|aab|zip|7z|rar|gz|tgz|pdf|png|jpg|jpeg|webp|gif|bmp|txt|md|log|json|csv|xlsx|xls|docx|doc|pptx|ppt|py|js|mjs|cjs|ps1|bat|sh|kt|java|xml|yml|yaml|toml|ini|cfg|conf|env|sql|jar|so|mp4|mp3|wav|ogg|ttf|otf';
-var RE = new RegExp('(^|[^\\w.\\-])([\\w.\\-@+#()\\u4e00-\\u9fff]{1,120}\\.(' + EXT + '))(?![\\w.])', 'i');
 var BASE = location.origin + '/browserctl-gate/file?name=';
-var STYLE = 'display:inline-flex;align-items:center;padding:3px 10px;margin:0 6px;font-size:11px;line-height:1.5;'
-  + 'border-radius:8px;border:1px solid rgba(140,140,150,.5);color:inherit;opacity:.9;'
-  + 'text-decoration:none;flex:0 0 auto;white-space:nowrap;-webkit-tap-highlight-color:transparent;';
-function labelOf(el){
-  var s = el.getAttribute('aria-label');
-  if (!s) s = el.getAttribute('title') || '';
-  return s;
+var STYLE = 'display:inline-flex;align-items:center;align-self:center;padding:3px 10px;margin:0 2px 0 6px;'
+  + 'font-size:11px;line-height:1.5;border-radius:8px;border:1px solid rgba(140,140,150,.5);'
+  + 'color:inherit;opacity:.9;text-decoration:none;flex:0 0 auto;white-space:nowrap;'
+  + '-webkit-tap-highlight-color:transparent;position:static;z-index:auto;';
+/* 只认交付文件卡片的宿主:DSH 侧 aria-label 是「在侧边栏预览 <路径>」/「在侧边栏打开 <路径>」。
+   绝不能按"任意 aria-label 里有文件名"来匹配——diff 头「查看 xxx.md 的改动」、图片查看器
+   「xxx.jpg，点击查看原图」都会误中,把下载按钮挂满聊天流(2026-11-08 真机教训)。
+   位置也必须挂在动作行([data-slot=deliverables.file.actions])里,而不是插进
+   卡片预览按钮和图标之间——卡片是 position:relative+overflow:hidden,插中间会把
+   Pill 挤到卡片内容下面并被裁掉一半(用户原话:「层级在整个卡片的下面」)。 */
+var HOST_RE = /^在侧边栏(预览|打开)\s*(.+)$/;
+function baseName(p){
+  var seg = String(p || '').split(/[\\/]/);
+  return (seg[seg.length - 1] || '').trim();
 }
-function fileNameIn(text){
-  var m = RE.exec(text || '');
-  return m ? m[2] : '';
-}
-function decorate(el, name){
-  var tag = (el.tagName || '').toUpperCase();
-  var host = null;
-  if (tag === 'BUTTON' || tag === 'A' || el.getAttribute('role') === 'button') host = el;
-  else {
-    var kids = el.querySelectorAll('button,a,[role="button"]');
-    for (var k = 0; k < kids.length; k++){
-      var l2 = labelOf(kids[k]) || (kids[k].textContent || '');
-      if (fileNameIn(l2) === name){ host = kids[k]; break; }
-    }
-  }
-  if (!host) return;
-  var parent = host.parentNode;
-  if (!parent) return;
+function pill(name){
   var a = document.createElement('a');
   a.setAttribute('data-dsh-dl', '1');
   a.href = BASE + encodeURIComponent(name);
   a.textContent = '下载';
   a.title = '下载 ' + name;
   a.setAttribute('style', STYLE);
-  parent.insertBefore(a, host.nextSibling);
+  return a;
+}
+function decorate(card){
+  var done = card.getAttribute('data-dsh-dl-card');
+  var existing = card.querySelector('[data-dsh-dl]');
+  if (done && existing) return;
+  if (existing && existing.parentNode) { try { existing.parentNode.removeChild(existing); } catch (e) {} }
+  var name = '';
+  var els = card.querySelectorAll('[aria-label],[title]');
+  for (var i = 0; i < els.length; i++){
+    var s = els[i].getAttribute('aria-label') || els[i].getAttribute('title') || '';
+    var m = HOST_RE.exec(s);
+    if (m) { name = baseName(m[2]); break; }
+  }
+  if (!name || name.length < 4) return;
+  var slot = card.querySelector('[data-slot="deliverables.file.actions"]');
+  (slot || card).appendChild(pill(name));
+  card.setAttribute('data-dsh-dl-card', '1');
 }
 function scan(){
-  var nodes = document.querySelectorAll('[aria-label],[title]');
-  for (var i = 0; i < nodes.length; i++){
-    var el = nodes[i];
-    if (el.getAttribute('data-dsh-dl')) continue;
-    var label = labelOf(el);
-    if (!label || label.length > 300) continue;
-    var name = fileNameIn(label);
+  var cards = document.querySelectorAll('[data-presented-file]');
+  for (var i = 0; i < cards.length; i++){ try { decorate(cards[i]); } catch (e) {} }
+  var hosts = document.querySelectorAll('[aria-label],[title]');
+  for (var j = 0; j < hosts.length; j++){
+    var el = hosts[j];
+    if (el.closest('[data-presented-file]')) continue;
+    if (el.getAttribute('data-dsh-dl-host')) continue;
+    var s = el.getAttribute('aria-label') || el.getAttribute('title') || '';
+    var m = HOST_RE.exec(s);
+    if (!m) continue;
+    el.setAttribute('data-dsh-dl-host', '1');
+    var name = baseName(m[2]);
     if (!name || name.length < 4) continue;
-    el.setAttribute('data-dsh-dl', '1');
-    try { decorate(el, name); } catch (e) {}
+    var box = el.parentElement;
+    if (!box || box.querySelector('[data-dsh-dl]')) continue;
+    try { box.appendChild(pill(name)); } catch (e) {}
   }
 }
 var pending = null;
