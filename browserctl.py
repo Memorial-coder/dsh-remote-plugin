@@ -828,6 +828,89 @@ setTimeout(h,20000)})()
 </script>"""
 _LOADING_SPLASH_TAG = _LOADING_SPLASH_HTML.encode('utf-8')
 
+# ---- 文件卡片「下载」按钮：注入面板 HTML 的装饰脚本 ----
+# 背景：DSH 网页端文件卡片(交付文件/聊天附件)在浏览器里没有任何下载通道 ——
+# 卡片上的按钮是 POST /api/present.open「在电脑上打开」，聊天附件只有图片能拿字节。
+# 远控场景(手机/平板)需要一个「下载」按钮把文件存到手机上，靠两个部件配合：
+# ① 本脚本：在触屏设备上扫描卡片上带文件名的 aria-label/title(如「在侧边栏打开
+#    xxx.apk」)，在动作按钮旁插一个指向 /browserctl-gate/file?name= 的「下载」链接；
+# ② 闸机新端点 _gate_file_download：按文件名在本机白名单目录里找最新同名文件，
+#   带 bc-gate 会话鉴权后流式返回(Content-Disposition: attachment)。
+# App(WebView)侧配 1.0.45 起的 setDownloadListener，点链接即走系统下载管理器。
+# 只对触屏设备生效(any-pointer: coarse / maxTouchPoints)，电脑浏览器零改动；
+# 注入进 App(UA 含 DshRemote/) 与浏览器两种会话 —— 与工具条不同，App 也需要它。
+_FILE_DL_JS = r"""(function(){
+try{
+if (window.__dshFileDl) return;
+window.__dshFileDl = 1;
+if (!(matchMedia('(any-pointer: coarse)').matches || navigator.maxTouchPoints > 0)) return;
+var EXT = 'apk|apks|aab|zip|7z|rar|gz|tgz|pdf|png|jpg|jpeg|webp|gif|bmp|txt|md|log|json|csv|xlsx|xls|docx|doc|pptx|ppt|py|js|mjs|cjs|ps1|bat|sh|kt|java|xml|yml|yaml|toml|ini|cfg|conf|env|sql|jar|so|mp4|mp3|wav|ogg|ttf|otf';
+var RE = new RegExp('(^|[^\\w.\\-])([\\w.\\-@+#()\\u4e00-\\u9fff]{1,120}\\.(' + EXT + '))(?![\\w.])', 'i');
+var BASE = location.origin + '/browserctl-gate/file?name=';
+var STYLE = 'display:inline-flex;align-items:center;padding:3px 10px;margin:0 6px;font-size:11px;line-height:1.5;'
+  + 'border-radius:8px;border:1px solid rgba(140,140,150,.5);color:inherit;opacity:.9;'
+  + 'text-decoration:none;flex:0 0 auto;white-space:nowrap;-webkit-tap-highlight-color:transparent;';
+function labelOf(el){
+  var s = el.getAttribute('aria-label');
+  if (!s) s = el.getAttribute('title') || '';
+  return s;
+}
+function fileNameIn(text){
+  var m = RE.exec(text || '');
+  return m ? m[2] : '';
+}
+function decorate(el, name){
+  var tag = (el.tagName || '').toUpperCase();
+  var host = null;
+  if (tag === 'BUTTON' || tag === 'A' || el.getAttribute('role') === 'button') host = el;
+  else {
+    var kids = el.querySelectorAll('button,a,[role="button"]');
+    for (var k = 0; k < kids.length; k++){
+      var l2 = labelOf(kids[k]) || (kids[k].textContent || '');
+      if (fileNameIn(l2) === name){ host = kids[k]; break; }
+    }
+  }
+  if (!host) return;
+  var parent = host.parentNode;
+  if (!parent) return;
+  var a = document.createElement('a');
+  a.setAttribute('data-dsh-dl', '1');
+  a.href = BASE + encodeURIComponent(name);
+  a.textContent = '下载';
+  a.title = '下载 ' + name;
+  a.setAttribute('style', STYLE);
+  parent.insertBefore(a, host.nextSibling);
+}
+function scan(){
+  var nodes = document.querySelectorAll('[aria-label],[title]');
+  for (var i = 0; i < nodes.length; i++){
+    var el = nodes[i];
+    if (el.getAttribute('data-dsh-dl')) continue;
+    var label = labelOf(el);
+    if (!label || label.length > 300) continue;
+    var name = fileNameIn(label);
+    if (!name || name.length < 4) continue;
+    el.setAttribute('data-dsh-dl', '1');
+    try { decorate(el, name); } catch (e) {}
+  }
+}
+var pending = null;
+function queue(){
+  if (pending) return;
+  pending = setTimeout(function(){ pending = null; try { scan(); } catch (e) {} }, 300);
+}
+function start(){
+  try {
+    new MutationObserver(queue).observe(document.documentElement, {childList:true, subtree:true});
+  } catch (e) {}
+  queue(); setTimeout(queue, 900); setTimeout(queue, 2500);
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
+else start();
+}catch(e){}
+})();"""
+_FILE_DL_TAG = b'<script>' + _FILE_DL_JS.encode('utf-8') + b'</script>'
+
 GATE_MAX_AGE = COOKIE_LIFETIME_DAYS * 86400
 TOTP_STEP = 30
 REPLAY_WINDOW = 90          # 同码 90 秒内只认一次(防重放)
@@ -1558,6 +1641,137 @@ def _app_parse_version_from_filename(filename):
         version_code = int(m.group(1)) * 10000 + int(m.group(2)) * 100 + int(m.group(3))
         return version_name, version_code
     return "", 0
+
+
+# ---- 文件卡片「下载」端点的名字解析 ----
+# 客户端(手机卡片上的下载按钮)只带文件名,不带路径 —— 由闸机在几个白名单根里
+# 找「最新同名文件」,天然没有目录穿越。找不到就 404,绝不猜路径。
+# 工作区里跳过构建产物/临时目录(未签名中间产物 app-release.apk 也藏在 build/ 下,
+# 绝不能让"同名优先"把它发出去);DSH 附件库 v1/files/<前缀>/<摘要>/<名字> 是
+# 聊天里附带文件的硬链接引用路径,名字就落在路径里,直接按名字命中。
+_DL_PRUNE_DIRS = {
+    ".git", ".gradle", ".claude", ".dsh-vision-router", ".playwright-cli",
+    ".vscode", ".idea", "node_modules", "__pycache__", "gradle", "build",
+    "venv", ".venv", "_dsh_tmp", "_shots", "_shots_new", "chrome-profile",
+    "acl-recovery", "extracted", "npm-cache", "mobile_verify", "e2e-ui-data",
+    "data", "codeslots", "browserctl_app",
+}
+_DL_MIME = {
+    ".apk": "application/vnd.android.package-archive",
+    ".aab": "application/vnd.android.package-archive",
+    ".jar": "application/java-archive",
+    ".zip": "application/zip", ".7z": "application/x-7z-compressed",
+    ".rar": "application/x-rar-compressed", ".gz": "application/gzip",
+    ".pdf": "application/pdf", ".png": "image/png", ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif",
+    ".txt": "text/plain; charset=utf-8", ".md": "text/plain; charset=utf-8",
+    ".log": "text/plain; charset=utf-8", ".json": "application/json",
+    ".csv": "text/csv", ".mp4": "video/mp4", ".mp3": "audio/mpeg",
+}
+# 凭据拒绝名单（2026-11-08 收紧）：白名单根是整个工作区，而根下躺着一族
+# 等同访问凭据的运行态/密钥文件（state 里有 totp_secret/link_secret、admin_token、
+# secrets 里有 SSH/frp 口令、grants 是有效配对令牌、frpc.toml 里有 frp token）。
+# 已配对设备虽属半信任，但绝不能由这个端点按名字点名拉走 —— 一律 404。
+_DL_DENY_BASENAMES = {
+    "keystore.properties", ".secret", ".git-credentials", ".htpasswd", ".npmrc",
+}
+_DL_DENY_EXTS = {".jks", ".keystore", ".p12", ".pfx", ".pem", ".key", ".env"}
+_DL_DENY_STEMS = {"id_rsa", "id_ed25519", "id_ecdsa"}
+
+
+def _download_denied(path):
+    """该文件是否属于凭据/密钥族（命中则下载端点 404，连存在性都不暴露）。"""
+    b = path.name.lower()
+    if (b.startswith("browserctl_") or b in _DL_DENY_BASENAMES
+            or path.suffix.lower() in _DL_DENY_EXTS
+            or (b.rsplit(".", 1)[0] if "." in b else b) in _DL_DENY_STEMS):
+        return True
+    return False
+
+
+def _walk_named_files(root, name):
+    """在一个根目录树里按文件名找候选文件。带条数与时间预算,防止超大目录
+    把闸机线程拖死(3 秒 / 3 万个条目,超了就用手上已有的结果)。"""
+    hits = []
+    if not root.is_dir():
+        return hits
+    budget = 30000
+    deadline = time.time() + 3.0
+    target = name.lower()
+    try:
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = [d for d in dirnames
+                           if d not in _DL_PRUNE_DIRS and not d.startswith(".")]
+            if target in (f.lower() for f in filenames):
+                p = Path(dirpath) / name
+                try:
+                    if p.is_file() and not _download_denied(p):
+                        hits.append(p)
+                except OSError:
+                    pass
+            budget -= len(filenames) + len(dirnames)
+            if budget <= 0 or time.time() > deadline:
+                break
+    except OSError:
+        pass
+    return hits
+
+
+def _newest(paths):
+    """mtime 最新的一个文件;stat 失败的条目忽略。"""
+    best = None
+    best_key = -1.0
+    for p in paths:
+        try:
+            k = p.stat().st_mtime
+        except OSError:
+            continue
+        if k > best_key:
+            best, best_key = p, k
+    return best
+
+
+def _resolve_download_candidate(name):
+    """按文件名找要发给手机的文件。优先级:App 发布目录(规范 APK 存放处) >
+    工作区 > DSH 附件库;同优先级内取 mtime 最新。找不到返回 None。"""
+    tiers = []
+    app_dir = APP_DIR / name
+    if app_dir.is_file() and not _download_denied(app_dir):
+        tiers.append(app_dir)
+    else:
+        hits = _walk_named_files(HERE, name)
+        if hits:
+            tiers.append(_newest(hits))
+        if not tiers:
+            att_root = Path.home() / ".dsh" / "attachments" / "v1" / "files"
+            if att_root.is_dir():
+                hits = []
+                try:
+                    for p in att_root.iterdir():
+                        if not p.is_dir():
+                            continue
+                        for d in p.iterdir():
+                            if not d.is_dir():
+                                continue
+                            f = d / name
+                            try:
+                                if f.is_file() and not _download_denied(f):
+                                    hits.append(f)
+                            except OSError:
+                                pass
+                except OSError:
+                    pass
+                hit = _newest(hits)
+                if hit:
+                    tiers.append(hit)
+    return tiers[0] if tiers else None
+
+
+def _content_disposition(name):
+    """RFC 6266 双写法:ASCII 兜底 + RFC 5987 UTF-8,中文名手机也能正确落盘。"""
+    ascii_name = name.encode("ascii", "replace").decode("ascii").replace('"', "'")
+    return 'attachment; filename="%s"; filename*=UTF-8\'\'%s' % (
+        ascii_name, urllib.parse.quote(name, safe=""))
 
 
 # ---- 消息推送(手机 App 长轮询) ----
@@ -3873,6 +4087,11 @@ color:#fff;text-decoration:none;font-size:14px}
         if m:
             self._gate_app_apk_download(m.group(1))
             return
+        # ---- 文件卡片「下载」按钮:按文件名发本机文件(已验证会话) ----
+        if self.command in ("GET", "HEAD") and path in (
+                GATE_PREFIX.rstrip("/") + "/file", "/browserctl-test-gate/file"):
+            self._gate_file_download()
+            return
         if path.rstrip("/") in (GATE_PREFIX.rstrip("/"), "/browserctl-test-gate"):
             self._send(200, GATE_HTML)
             return
@@ -4099,6 +4318,62 @@ color:#fff;text-decoration:none;font-size:14px}
                              'attachment; filename="%s"' % safe_name)
             self.send_header("Cache-Control", "public, max-age=3600")
             self.end_headers()
+            with open(target, "rb") as f:
+                while True:
+                    chunk = f.read(262144)
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+        except (BrokenPipeError, ConnectionResetError):
+            pass  # 客户端中途取消下载属正常
+        except OSError:
+            pass
+
+    def _gate_file_download(self):
+        """按文件名把本机文件发给远控端(面板文件卡片上的「下载」按钮用)。
+
+        鉴权:必须已通过 2FA/会话(_gate_ok) —— 这个端点等于把电脑上的文件
+        发到对面手机,和面板同一把锁,公网陌生人拿不到任何东西。
+        客户端只允许带文件名(query ?name=),路径由闸机在白名单根里自己找
+        (App 发布目录 > 工作区 > DSH 附件库,同名取最新),天然无目录穿越。
+        流式分块发送,不整包进内存;中文文件名走 RFC 5987 双写法。"""
+        if not self._gate_ok():
+            self._send_json(401, {"ok": False, "error": "未通过验证"})
+            return
+        from urllib.parse import urlsplit, parse_qs
+        q = parse_qs(urlsplit(self.path).query)
+        name = (q.get("name") or [""])[0].strip()
+        safe_name = Path(name).name if name else ""
+        if (not safe_name or safe_name in (".", "..")
+                or "/" in name or "\\" in name or len(safe_name) > 200
+                or any(ord(c) < 32 for c in safe_name)):
+            self._send_json(400, {"ok": False, "error": "缺少或非法的文件名"})
+            return
+        target = _resolve_download_candidate(safe_name)
+        if target is None or _download_denied(target):
+            # 拒绝名单二次复核(纵深防御):解析层已过滤,这里再拦一次,
+            # 且拒绝与"没找到"同口径回复,不暴露文件是否存在
+            self._send_json(404, {"ok": False,
+                                  "error": "电脑上没找到这个文件（可能已被移动或删除）"})
+            return
+        try:
+            size = target.stat().st_size
+        except OSError:
+            self._send_json(404, {"ok": False, "error": "文件读取失败"})
+            return
+        if size > 512 * 1024 * 1024:
+            self._send_json(413, {"ok": False,
+                                  "error": "文件超过 512MB，暂不支持手机下载"})
+            return
+        ctype = _DL_MIME.get(target.suffix.lower(), "application/octet-stream")
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(size))
+            self.send_header("Content-Disposition", _content_disposition(safe_name))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self._responded = True  # 手工发头路径也要标记,异常兜底不再重复回包
             with open(target, "rb") as f:
                 while True:
                     chunk = f.read(262144)
@@ -4374,7 +4649,8 @@ color:#fff;text-decoration:none;font-size:14px}
         """往面板根 HTML 的 <head> 里塞 PWA 标签(manifest/apple-touch-icon/meta/SW 注册)
         和移动端工具条(返回/全屏/视口,见 _MOBILE_TOOLBAR_JS,仅触屏设备自行显示)。
         toolbar_only=True 时只注入工具条,跳过 PWA 标签(用于非根 HTML 页面)。
-        App(UA 含 DshRemote/)不注入工具条——App 有自己的原生导航,不需要悬浮按钮。
+        App(UA 含 DshRemote/)不注入工具条——App 有自己的原生导航,不需要悬浮按钮;
+        但文件卡片「下载」按钮(_FILE_DL_TAG,触屏自生效)对 App 一样注入。
         全部用相对路径:面板无论从 /p/<port>/ 还是 /dsh-remote/p/<uid>/(uid 稳定配对)
         打开,都解析到当前前缀下的本闸机静态资源 —— 端口变化后 PWA 图标/SW 照常工作。
         必须在校验 / 压缩之前调用,让 ETag 覆盖注入后的真实字节。"""
@@ -4383,8 +4659,9 @@ color:#fff;text-decoration:none;font-size:14px}
         is_app = "dshremote/" in ua
         if toolbar_only:
             if is_app:
-                return html
-            tags = _MOBILE_TOOLBAR_TAG
+                tags = _FILE_DL_TAG
+            else:
+                tags = _MOBILE_TOOLBAR_TAG + _FILE_DL_TAG
         else:
             tags = (
                 b'<meta name="apple-mobile-web-app-capable" content="yes">'
@@ -4395,6 +4672,7 @@ color:#fff;text-decoration:none;font-size:14px}
                 b'<link rel="apple-touch-icon" href="icon-180.png">'
                 b'<script>try{navigator.serviceWorker&&navigator.serviceWorker.register("sw.js")}catch(e){}</script>'
                 + (b"" if is_app else _MOBILE_TOOLBAR_TAG)
+                + _FILE_DL_TAG
             )
         idx = html.lower().find(b"<head")
         if idx < 0:
