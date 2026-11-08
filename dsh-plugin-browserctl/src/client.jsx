@@ -2620,7 +2620,9 @@ function PushCard({ t, reloadToken }) {
       const q = new URLSearchParams({ kind: 'test', title: t('pushTestTitle'), body: t('pushTestBody') }).toString()
       const r = await fetch(API_P + '/browserctl-gate/notify?' + q, { cache: 'no-store' })
       const j = await r.json().catch(() => ({}))
-      setToast({ text: (r.ok && j.ok) ? t('pushTestOk') : ((j && j.error) || t('pushTestFail')), ok: !!(r.ok && j.ok) })
+      const ok = !!(r.ok && j && j.ok)
+      setToast({ text: ok ? t('pushTestOk') : ((j && j.error) || t('pushTestFail')), ok })
+      if (ok) loadPoll()   // 主动刷新「最近推送」:否则按钮看起来没生效,用户会连点刷屏(kb/10)
     } catch {
       setToast({ text: t('pushTestFail'), ok: false })
     } finally {
@@ -2638,6 +2640,7 @@ function PushCard({ t, reloadToken }) {
       if (r.ok && j.ok) {
         setItems(Array.isArray(j.items) ? j.items.slice(0, 10) : [])
         setCfg(c => ({ ...(c || {}), enabled: !!j.enabled, since: j.since || (c && c.since) || 0 }))
+        setCfgErr('')   // 闸机已应答:清掉可能过期的红字(如短暂 401/离线后恢复)
       }
     } catch {
       // 闸机未运行等场景:保持列表不变

@@ -3881,8 +3881,14 @@ color:#fff;text-decoration:none;font-size:14px}
     # ---- 消息推送 ----
 
     def _gate_push_config_read(self):
-        """读推送配置。需通过会话验证(避免向陌生人泄漏开关状态)。"""
-        if not self._gate_ok():
+        """读推送配置。已验证会话或本机管理令牌。
+
+        只认会话会把桌面面板锁死:本机 GUI 经插件反代调闸机,不带 bc-gate Cookie,
+        只有管理令牌(X-BC-Admin,且 _is_admin_call 要求回环)——原实现一律 401,
+        面板红字「未通过验证」永不消失(开关却显示开启,因为 push-poll 认 admin)。
+        改为与 push-poll/notify/写开关同一放行口径;公网陌生人既无回环也无令牌,
+        开关状态不外泄。"""
+        if not (self._is_admin_call() or self._gate_ok()):
             self._send_json(401, {"ok": False, "error": "未通过验证"})
             return
         st = gate_state()

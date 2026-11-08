@@ -32,7 +32,7 @@ var import_dsh_client_store = require("@deepseek-ai/dsh-client-store");
 var import_jsx_runtime = require("react/jsx-runtime");
 var NS = "browserctl";
 var STYLE_ID = "browserctl/styles";
-var VERSION = true ? "1.0.39" : "dev";
+var VERSION = true ? "1.0.41" : "dev";
 var ABOUT_LINKS = {
   website: "https://remote.ymzcc.com/dsh-remote/",
   github: "https://github.com/Memorial-coder/dsh-remote-plugin",
@@ -2532,7 +2532,9 @@ function PushCard({ t, reloadToken }) {
       const q = new URLSearchParams({ kind: "test", title: t("pushTestTitle"), body: t("pushTestBody") }).toString();
       const r = await fetch(API_P + "/browserctl-gate/notify?" + q, { cache: "no-store" });
       const j = await r.json().catch(() => ({}));
-      setToast({ text: r.ok && j.ok ? t("pushTestOk") : j && j.error || t("pushTestFail"), ok: !!(r.ok && j.ok) });
+      const ok = !!(r.ok && j && j.ok);
+      setToast({ text: ok ? t("pushTestOk") : j && j.error || t("pushTestFail"), ok });
+      if (ok) loadPoll();
     } catch {
       setToast({ text: t("pushTestFail"), ok: false });
     } finally {
@@ -2548,6 +2550,7 @@ function PushCard({ t, reloadToken }) {
       if (r.ok && j.ok) {
         setItems(Array.isArray(j.items) ? j.items.slice(0, 10) : []);
         setCfg((c) => ({ ...c || {}, enabled: !!j.enabled, since: j.since || c && c.since || 0 }));
+        setCfgErr("");
       }
     } catch {
     } finally {
