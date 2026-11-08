@@ -66,6 +66,9 @@ def _run_hidden(cmd, **kw):
     return subprocess.run(cmd, creationflags=CREATE_NO_WINDOW, **kw)
 FWD_LOG = HERE / "browserctl_fwd.log"
 FRPC_LOG = HERE / "browserctl_frpc.log"
+WATCH_LOG = HERE / "browserctl_watch.log"
+# win_push.py(Windows 通知驻留)的推送水位文件:含设备/会话指纹,一并纳入 ACL 硬化
+PUSHWIN_STATE = HERE / "pushwin_state.json"
 
 PUBLIC_HOST = "remote.ymzcc.com"
 
@@ -96,7 +99,12 @@ def _select_fwd_port():
     # 否则上一份(可能提权)没杀掉时,两份闸机同时写同一个 state 互相覆盖 → 隧道一会好一会坏
     # (2026-11-07 实测「frpc 进程未运行」间歇失败就是这原因)。
     # 例外:pid 记录过但已死、端口还被占 → 可能是别的程序占了我们旧端口,这时才顺延新端口。
-    if cur and _port_open(cur) and (not pid or _pid_alive(pid)):
+    # ⚠️ (2026-11-08 双副本并存)pid 压根没记录时,「端口开着」不再直接复用:必须验明
+    # 监听者是本副本(_gate_is_ours 管理令牌探测)。否则绑定竞态输给另一份插件的闸机后,
+    # state 会一直指着别人的闸机——隧道照常,配对/踢人却全打到别人那里,插件 QR 恒报
+    # 「配对创建仅限本机管理员调用」(2026-11-08 实测,点多少次「开始控制」都好不了)。
+    if (cur and _port_open(cur) and (not pid or _pid_alive(pid))
+            and (pid or _gate_is_ours(cur))):
         FWD_PORT = cur
         os.environ["BC_FWD_PORT"] = str(cur)
         return cur
@@ -222,6 +230,26 @@ def load_secrets():
     return data
 
 
+# secrets show 明文白名单(2026-11-08 审计 P2):这些键不是机密(主机/用户名/端口),
+# 明文显示便于核对配置;白名单之外的键一律掩码——secrets 文件里历史上可能被塞进
+# server_link_secret / totp_secret / cookie 等任何键,不能靠逐个点名来排漏。
+SECRETS_PLAINTEXT_KEYS = frozenset((
+    "ssh_host", "ssh_user", "ssh_port", "server_addr", "server_port",
+    "frp_server_port", "frp_server_host",
+))
+
+
+def _mask_secret(value):
+    """secrets show 掩码:前四后二 + 长度,够核对是哪张卡,不足以还原原文。
+    空值返回空串;≤6 字符的值没有可安全展示的前缀,整串打星。"""
+    s = "" if value is None else str(value)
+    if not s:
+        return ""
+    if len(s) <= 6:
+        return "*" * len(s)
+    return "%s…%s(len=%d)" % (s[:4], s[-2:], len(s))
+
+
 _perm_warned = set()
 
 
@@ -254,10 +282,17 @@ def harden_credential_files():
 
     这些文件里有 SSH 口令、FRP token、TOTP 密钥、30 天 DSH Cookie、设备 IP/UA。
     历史上它们的 ACL 继承了 CodexSandboxUsers:(I)(M) 之类的条目,同机其它账户可读。
+
+    2026-11-08 审计(P1 本地 ACL 回宽复发)补充:三个进程日志、frpc 配置(含
+    token 明文)与 pushwin 水位文件同样含敏感内容,一并纳入;文件不存在时跳过
+    (新机器首次启动前日志/toml 尚未生成,不报错)。
     """
     for p in (SECRETS_FILE, STATE, SESSIONS_FILE, EVENTS_FILE, BLACKLIST_FILE,
               DEVICES_FILE, NOTIFS_FILE, BOOTSTRAP_FILE, ADMIN_TOKEN_FILE, KNOWN_HOSTS,
-              GRANTS_FILE):
+              GRANTS_FILE,
+              # 日志/frpc 配置/pushwin 水位(2026-11-08 补齐,均 HERE 相对路径)
+              FWD_LOG, FRPC_LOG, WATCH_LOG, HERE / "browserctl_frpc.toml",
+              PUSHWIN_STATE):
         try:
             if p.exists():
                 harden_file_perms(p)
@@ -1160,6 +1195,38 @@ def brute_fail(ip):
 def brute_clear(ip):
     with _gate_lock:
         _fail_counts.pop(ip, None)
+
+
+# ---- 全局防爆破熔断(2026-11-08 审计 P1-2③,配合防火墙把 16000-16999 收口) ----
+# 单 IP 限速(FAIL_LIMIT 5 次/15min)挡不住"伪造海量源 IP"的分布式爆破:攻击者每次
+# 换一个假 X-Real-IP 就是一张新桶。这里跨 IP 汇总:15 分钟滚动窗口内 /verify 的
+# TOTP 失败总数超过阈值 → 熔断,所有 /verify 直接 429(与 IP 无关)。
+# 内存计数即可,进程重启清零;结构自 bounding:窗口一过整体清零,不会无限增长。
+VERIFY_GLOBAL_WINDOW = 15 * 60   # 统计窗口(秒),与单 IP 冻结时长一致
+VERIFY_GLOBAL_FAIL_LIMIT = 200   # 窗口内全局失败上限,超过即熔断
+_verify_global = {"count": 0, "ts": 0.0}   # count:窗口内失败数;ts:窗口起点
+
+
+def _verify_global_window_check_locked(now):
+    """持锁判定当前窗口:过期则重置(惰性),返回 (count, tripped)。"""
+    if now - _verify_global["ts"] > VERIFY_GLOBAL_WINDOW:
+        _verify_global["count"] = 0
+        _verify_global["ts"] = now
+    return _verify_global["count"], _verify_global["count"] > VERIFY_GLOBAL_FAIL_LIMIT
+
+
+def verify_global_tripped():
+    """/verify 入口先问一次:熔断中所有请求直接 429。"""
+    with _gate_lock:
+        _, tripped = _verify_global_window_check_locked(time.time())
+        return tripped
+
+
+def verify_global_fail_bump():
+    """每次 TOTP/verify 失败调用:计入全局窗口。"""
+    with _gate_lock:
+        _verify_global_window_check_locked(time.time())
+        _verify_global["count"] += 1
 
 
 def claim_allowed(ip):
@@ -2500,18 +2567,30 @@ class GateHandler(BaseHTTPRequestHandler):
         - X-Real-IP 由 nginx 用 $remote_addr 覆盖写入,客户端无法伪造 → 优先取它。
         - X-Forwarded-For 取"最后一跳"(nginx 的 $proxy_add_x_forwarded_for 把真实
           $remote_addr 追加在末尾);前面的值都是客户端/中间层可伪造的,一律丢弃。
+        - 一致性校验(2026-11-08 审计):X-Real-IP 与 XFF 最后一跳同时存在时两者
+          必须相等(nginx 正常配置下都是真实 $remote_addr);不一致说明链路上有
+          中间层改写或直连伪造,视为不可信,回退 socket 对端地址。配合防火墙把
+          16000-16999 收口成 loopback-only 后,回环+转发头的来源只剩边缘 nginx。
         """
         peer = self.client_address[0] if self.client_address else ""
         if peer not in ("127.0.0.1", "::1", "::ffff:127.0.0.1"):
             return peer or "local"
         real = self.headers.get("X-Real-IP", "").strip()
-        if real:
-            return real.split(",")[0].strip() or peer
         fwd = self.headers.get("X-Forwarded-For", "").strip()
+        fwd_last = ""
         if fwd:
             ips = [x.strip() for x in fwd.split(",") if x.strip()]
             if ips:
-                return ips[-1]  # nginx 追加的最后一跳才是真实客户端
+                fwd_last = ips[-1]  # nginx 追加的最后一跳才是真实客户端
+        if real:
+            real = real.split(",")[0].strip()
+            if not fwd_last or fwd_last == real:
+                return real or peer
+            # 头之间自相矛盾:不可信,退回 socket 对端(回环),交给单 IP 限速/
+            # 黑名单按 127.0.0.1 处理,并叠加全局防爆破熔断兜底
+            return peer or "local"
+        if fwd_last:
+            return fwd_last
         return peer or "local"
 
     def send_response(self, code, message=None):
@@ -3190,7 +3269,35 @@ class GateHandler(BaseHTTPRequestHandler):
         cache_ctl = None
         etag = None
         if not streaming:
-            data = resp.read()
+            # 有界读(2026-11-08 审计 P2):上游 Content-Length 未知(chunked)时,
+            # 上面缓存面板/HTML 分支的 (not upstream_len or ...) 恒真 → 会无条件
+            # resp.read() 把整个响应读进内存。改为分块累计,超过 MAX_RESPONSE_BYTES
+            # (64MB,与非流式/流式分界同一条线,注释见常量定义处)立即中止:
+            # 上游连接关闭不回池、客户端回 502(与既有错误页同风格)、记一条事件。
+            # 已知长度超限的响应在前面的 upstream_len > MAX_RESPONSE_BYTES 分支
+            # 已改判流式透传,不会走到这里。
+            parts = []
+            total = 0
+            over_limit = False
+            while True:
+                chunk = resp.read(262144)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > MAX_RESPONSE_BYTES:
+                    over_limit = True
+                    break
+                parts.append(chunk)
+            if over_limit:
+                _upstream_release(port, conn, reusable=False)
+                # 日志只记路径,不带 ?k=/at= 等 query(与本文件异常兜底同一脱敏口径)
+                _p = urllib.parse.urlsplit(self.path).path
+                _append_event("error", "上游响应超过 %dMB 上限,中止转发 %s %s"
+                              % (MAX_RESPONSE_BYTES // (1024 * 1024), self.command, _p))
+                self._send(502, "<h1>502</h1><p>上游响应超过 %dMB 上限,已中止转发。</p>"
+                           % (MAX_RESPONSE_BYTES // (1024 * 1024),))
+                return
+            data = b"".join(parts)
             if panel_root_html:
                 data = self._inject_pwa_tags(data)  # 在压缩前注入,ETag 才覆盖注入后的字节
             elif is_html_doc:
@@ -3999,6 +4106,13 @@ color:#fff;text-decoration:none;font-size:14px}
 
     def _gate_verify(self):
         ip = self._client_ip()
+        # 全局熔断优先于单 IP 限速:跨 IP 汇总失败数超阈值(200 次/15min)说明
+        # 正在被分布式爆破,所有 /verify 一律 429,不给任何 IP 继续试码的机会。
+        if verify_global_tripped():
+            _append_event("verify", "全局熔断中,拒绝 /verify IP=%s" % ip)
+            self._send_json(429, {"ok": False,
+                                  "error": "验证尝试过多,已临时关闭,请约 15 分钟后再试"})
+            return
         if not brute_check(ip):
             self._send_json(429, {"ok": False, "error": "错误次数过多,已冻结 15 分钟"})
             return
@@ -4013,6 +4127,7 @@ color:#fff;text-decoration:none;font-size:14px}
         code = str(data.get("code", "")).strip()
         if not totp_verify(secret, code):
             brute_fail(ip)
+            verify_global_fail_bump()  # 全局熔断计数:跨 IP 汇总(见防爆破区常量)
             self._send_json(401, {"ok": False, "error": "动态码错误"})
             return
         brute_clear(ip)
@@ -4308,10 +4423,14 @@ color:#fff;text-decoration:none;font-size:14px}
             pass  # 客户端提前断开,正常现象
         except BaseException as e:
             try:
-                print("[gate] 请求处理异常 %s %s: %r" % (self.command, self.path, e), flush=True)
+                # 2026-11-08 审计 P2:self.path 含 query,而配对/引导链路用 ?k=/&kind=、
+                # 管理端点支持 ?at=<管理令牌>——把完整 self.path 写进 fwd.log/events
+                # 等于把凭据落盘。这里与所有日志口径统一只记路径部分。
+                _p = urllib.parse.urlsplit(self.path).path
+                print("[gate] 请求处理异常 %s %s: %r" % (self.command, _p, e), flush=True)
                 traceback.print_exc()
                 _append_event("error", "请求异常 %s %s: %s"
-                              % (self.command, self.path, str(e)[:120]))
+                              % (self.command, _p, str(e)[:120]))
             except BaseException:
                 pass
             if not self._responded:
@@ -4548,6 +4667,38 @@ def _port_open(port, timeout=1.0):
         return True
     except OSError:
         return False
+
+
+def _gate_is_ours(port, timeout=1.5):
+    """端口上监听的闸机是否「本副本」。
+
+    双副本并存(工作区测试版 + 镜像正式版)时,两份 browserctl.py 各自读**自己目录**的
+    browserctl_admin_token。带本副本令牌 GET /browserctl-gate/pair/status:
+      200 + JSON 有 ok 键 = 本副本(令牌同一目录,闸机才会放行);
+      403               = 另一份副本的闸机(它校验的是它目录的令牌,必拒);
+      连接失败/非 JSON   = 非闸机程序或端口已空。
+    再加一道反证:换一个**错误令牌**再探一次,必须被拒(403)。双 200 说明监听者
+    不是直连闸机——例如 DSH 里另一份 browserctl 插件把 /browserctl-gate 反代给了
+    真闸机(反代会替请求补上它自己的管理令牌),绝不能认成自己的。
+    这是端口被占时唯一可靠的身份判据——端口开着只说明「有东西在听」,
+    不说明是自己的闸机(2026-11-08 绑定竞态实测:state 指着镜像副本的闸机,
+    插件 QR 恒报「配对创建仅限本机管理员调用」且点开始控制也自愈不了)。"""
+    def _probe(tok):
+        try:
+            req = urllib.request.Request(
+                "http://127.0.0.1:%d/browserctl-gate/pair/status?g=__identity_probe__" % int(port),
+                headers={"X-BC-Admin": tok} if tok else {})
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                if r.status != 200:
+                    return False
+                body = json.loads(r.read().decode("utf-8", "replace"))
+                return isinstance(body, dict) and ("ok" in body or "exists" in body)
+        except Exception:
+            return False
+    if not _probe(admin_token(create=False)):
+        return False
+    # 反证:错误令牌必须被拒。双 200 = 监听者是反代/宽松服务,不是本副本直连闸机。
+    return not _probe("__wrong_token__")
 
 
 # ---- 闸机心跳（阶段4：时长计量，契约 docs/notes/签到与时长后台增强计划.md §2.5）----
@@ -5325,12 +5476,39 @@ def _live_frpc_pids():
         return []
 
 
+def _fwd_move_port(reason):
+    """本副本闸机换下一个空闲端口,并把 state.fwd_port 字段级写回。
+
+    双副本并存时 3080 可能被正式版闸机(硬编码 3080)占着:本副本必须挪走,
+    绝不跟它抢、更不能把它的闸机当成自己的。插件 gatePort()/win_push.py 都读
+    state.fwd_port,这里落盘后整条链路自动跟随。"""
+    global FWD_PORT
+    new_port = _pick_free_port(FWD_PORT)
+    print("[提示] %s,本副本闸机改用端口 %d" % (reason, new_port), flush=True)
+    FWD_PORT = new_port
+    os.environ["BC_FWD_PORT"] = str(new_port)
+    # 字段级写:只落 fwd_port(kb/06 第 24 条),不回写旧快照
+    try:
+        update_state(lambda s: {**s, "fwd_port": new_port})
+    except Exception as e:
+        print("[警告] fwd_port 写回失败: %r" % e, flush=True)
+    return new_port
+
+
 def ensure_forwarder():
+    global FWD_PORT
     # 已有转发器(pid 存活)则复用;避免仅凭端口误判(旧进程被杀后端口短暂未释放)
     state = read_state()
     pid = state.get("fwd_pid")
     if pid and _pid_alive(pid):
         print("本地转发器已在运行(pid=%d)" % pid)
+        return
+    # (2026-11-08 双副本并存)pid 没了但端口开着:先验明监听者身份——只有「本副本
+    # 的闸机」(管理令牌同一目录)才直接接管(pid 记账丢了但闸机还活着);别人的
+    # 监听者走下面的换端口。以前这里只看端口,曾把镜像副本的闸机当成自己的
+    # 转发器:pid 50568 早死了、3080 上跑的是别人,配对/踢人全打到别人闸机。
+    if _port_open(FWD_PORT) and _gate_is_ours(FWD_PORT):
+        print("本地闸机已在运行(端口 %d,pid 记录丢失,复用)" % FWD_PORT)
         return
     # 端口被占但 fwd_pid 已死:旧进程刚被杀,等端口释放(最多 ~3s)再接管
     for _ in range(10):
@@ -5338,19 +5516,26 @@ def ensure_forwarder():
             break
         time.sleep(0.3)
     if _port_open(FWD_PORT):
-        raise SystemExit("端口 %d 仍被占用(旧进程未完全释放),请稍后重试" % FWD_PORT)
+        # 等满 3s 还开着 = 不是我们刚杀的旧进程(另一份插件的闸机/随机程序在听)。
+        # 换下一个空闲端口继续,而不是报「稍后重试」——别人不腾端口,重试永远失败。
+        _fwd_move_port("端口 %d 被其它程序/另一份插件的闸机占用" % FWD_PORT)
     p = spawn_detached([sys.executable, str(Path(__file__).resolve()), "fwd"], FWD_LOG)
-    # 探活:冷启动(首次 import / 杀软扫描)可能偏慢,重试最多 6 秒,不依赖单次 1+2 秒窗口
+    # 探活:冷启动(首次 import / 杀软扫描)可能偏慢,重试最多 ~10s,不依赖单次窗口。
+    # (2026-11-08)「端口通了」不再直接算成功:绑定竞态下可能是别人抢走了刚挑好的
+    # 端口(2026-11-08 实测:本副本 fwd 与镜像 fwd 同秒启动,镜像抢到 3080,本副本
+    # 子进程「闸机端口已被在运行实例占用,本副本退出」,而这里只看端口照样报
+    # 「本地转发器已启动」)——必须带本副本令牌验明监听者,失败就换端口重来。
     ok = False
-    for _ in range(10):
+    for _ in range(16):
         time.sleep(0.6)
-        try:
-            s = socket.create_connection(("127.0.0.1", FWD_PORT), timeout=1)
-            s.close()
+        if not _port_open(FWD_PORT):
+            continue
+        if _gate_is_ours(FWD_PORT):
             ok = True
             break
-        except OSError:
-            continue
+        # 端口通了但监听者不是本副本:绑定竞态输了,换下一个空闲端口再拉一份
+        _fwd_move_port("端口 %d 被其它进程抢先绑定(绑定竞态)" % FWD_PORT)
+        p = spawn_detached([sys.executable, str(Path(__file__).resolve()), "fwd"], FWD_LOG)
     if not ok:
         raise SystemExit("转发器启动失败,详见 %s" % FWD_LOG)
     print("本地转发器已启动(pid=%d)" % p.pid)
@@ -5866,9 +6051,6 @@ def read_state():
     return {}
 
 
-_perms_hardened = False
-
-
 def _write_json_file_atomic(path, payload):
     """原子写(tmp + os.replace),失败时退化为直接覆盖写。
 
@@ -5919,22 +6101,29 @@ def _write_json_file_atomic(path, payload):
 
 
 def write_state(st):
-    """原子写(tmp + os.replace)+ 首次创建时收紧 ACL,避免半截文件与权限继承。"""
-    global _perms_hardened
+    """原子写(tmp + os.replace),每次写盘完成后把 state 文件 ACL 再收紧一次。
+
+    2026-11-08 审计(P1 本地 ACL 回宽复发):非本进程写方(插件 Node 的原子
+    rename / win_push / PowerShell)重建 state 文件时会继承根目录宽 ACL
+    (CodexSandboxUsers:(I)(M) + 沙箱 SID),原「每进程只收紧一次」的
+    _perms_hardened 挡不住——别人重建一次,ACL 就回宽一次。改为 os.replace
+    之后每次都调 harden_file_perms(STATE):icacls 幂等且不落盘内容,
+    不会回头触发 write_state,无递归/死锁风险;失败经 _perm_warned 只告警一次。
+    """
     payload = json.dumps(st, ensure_ascii=False, indent=2)
     with state_lock():
         _write_json_file_atomic(STATE, payload)
-    if not _perms_hardened:
-        harden_file_perms(STATE)
-        _perms_hardened = True
+    harden_file_perms(STATE)
 
 
 def update_state(mutator):
-    """读-改-写整体持锁,防并发覆盖(看门狗/闸机/CLI 同时写)。"""
+    """读-改-写整体持锁,防并发覆盖(看门狗/闸机/CLI 同时写)。
+    写盘完成后同样收紧一次 ACL(理由见 write_state)。"""
     with state_lock():
         st = read_state()
         out = mutator(st) or st
         _write_json_file_atomic(STATE, json.dumps(out, ensure_ascii=False, indent=2))
+        harden_file_perms(STATE)
     return out
 
 
@@ -6274,9 +6463,11 @@ def main():
     elif args.command == "secrets":
         if args.action == "show":
             sec = load_secrets()
-            shown = dict(sec)
-            shown["ssh_password"] = "***" if sec["ssh_password"] else ""
-            shown["frp_token"] = ("***" + sec["frp_token"][-4:]) if sec["frp_token"] else ""
+            # 2026-11-08 审计 P2 修复:原来只掩 ssh_password/frp_token,文件里其它键
+            # (如历史遗留的 server_link_secret/totp_secret/cookie)会整串明文打出。
+            # 改为默认全掩码,只有 SECRETS_PLAINTEXT_KEYS 白名单里的非机密键明文。
+            shown = {k: (v if k in SECRETS_PLAINTEXT_KEYS else _mask_secret(v))
+                     for k, v in sec.items()}
             print(json.dumps(shown, ensure_ascii=False, indent=2))
         else:
             cmd_secrets_init()
