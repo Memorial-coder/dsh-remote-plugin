@@ -4426,6 +4426,8 @@ color:#fff;text-decoration:none;font-size:14px}
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
             self._responded = True  # 手工发头路径也要标记,异常兜底不再重复回包
+            if self.command == "HEAD":
+                return  # HEAD 只回头不回体,写体会破坏响应语义
             with open(target, "rb") as f:
                 while True:
                     chunk = f.read(262144)
