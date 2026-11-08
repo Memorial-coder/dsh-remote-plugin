@@ -3074,6 +3074,15 @@ class GateHandler(BaseHTTPRequestHandler):
                     if s.strip():
                         _seg.append(s.strip())
                 continue
+            if k.lower() == "host":
+                # Host 无条件改写 authority(与 HTTP 反代同一修复对齐,2026-11-08):
+                # WS 握手同样校验 dsh-auth Cookie 的 authority,Host 带端口
+                # (本机直连 127.0.0.1:3080)时 DSH 401,面板永远「重新连接中」。
+                head += ("Host: %s\r\n" % AUTHORITY).encode("latin-1")
+                continue
+            if k.lower() == "origin":
+                head += ("Origin: http://%s\r\n" % AUTHORITY).encode("latin-1")
+                continue
             head += ("%s: %s\r\n" % (k, v)).encode("latin-1", "replace")
         if _cn and _cv:
             _seg = [s for s in _seg if not s.startswith(_cn + "=")]
