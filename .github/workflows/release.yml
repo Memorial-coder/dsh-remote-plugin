@@ -171,11 +171,15 @@ jobs:
           set -euo pipefail
           # npm version 用显式版本号,一次改齐 package.json 与 package-lock.json(npm ci 要求两者同步)
           (cd dsh-plugin-browserctl && npm version "${VERSION}" --no-git-tag-version --allow-same-version)
+          # 仓库根 manifest 必须与子包同版:scripts/check-manifests.mjs 强校验,漏了这条 CI 永远红
+          npm pkg set "version=${VERSION}"
           V="$(node -p "require('./dsh-plugin-browserctl/package.json').version")"
+          R="$(node -p "require('./package.json').version")"
           [ "$V" = "$VERSION" ] || { echo "::error::版本号没写进去 V=$V 期望=${VERSION}"; exit 1; }
+          [ "$R" = "$VERSION" ] || { echo "::error::根 manifest 版本没同步 R=$R 期望=${VERSION}"; exit 1; }
           grep -q "\"version\": \"${VERSION}\"" dsh-plugin-browserctl/package-lock.json \
             || { echo "::error::package-lock.json 版本没同步"; exit 1; }
-          git add dsh-plugin-browserctl/package.json dsh-plugin-browserctl/package-lock.json
+          git add package.json dsh-plugin-browserctl/package.json dsh-plugin-browserctl/package-lock.json
           git commit -m "chore(release): bump ${VERSION}"
           echo "committed=true" >> "$GITHUB_OUTPUT"
 
