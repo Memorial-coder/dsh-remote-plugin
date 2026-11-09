@@ -2804,6 +2804,99 @@ var __BC_P=(function(){
 
 # ---- 闸机 HTTP Handler ----
 
+# ---- WS 压缩桥(permessage-deflate,2026-11-09) ----
+# 背景:DSH 的 mux WS 不支持 permessage-deflate(握手探针实测 101 响应无
+# sec-websocket-extensions),全量同步/会话切换历史/状态推送全部裸帧过隧道,
+# 实测一次首同步 5.6-8.2MB(见 docs/notes/链路测速-20261109.md),按聚合
+# 480KB/s 要 12-18s 独占链路 —— 这就是手机端「切换会话/重连后转圈」的主因。
+# 方案:闸机对客户端宣称协商成功(在透传 DSH 的 101 时注入
+# Sec-WebSocket-Extensions),对 DSH 保持裸帧(闸机=WS 客户端角色,帧必须掩码);
+# 泵逐帧处理:DSH→客户端方向对 ≥ 阈值的 text/binary 完整帧现场压缩(逐帧复位,
+# = server_no_context_takeover);客户端→DSH 方向解压客户端的压缩帧再重新掩码
+# 发给 DSH。控制帧(0x8/0x9/0xA)与分片帧原样透传 —— 不压缩任何消息在
+# permessage-deflate 里永远合法,所以最坏情况只是「白转发」,不会破坏协议。
+# 注意:_ws_pong_for_dsh 的代答 PONG 不受影响(RFC 7692 控制帧永不压缩)。
+WS_PMD_MIN_BYTES = 256          # 小于该值的帧压缩无收益,直接透传
+WS_PMD_INFLATE_CAP = 16 * 1024 * 1024  # 单条解压上限(内存护栏)
+_WS_EXT_PMD = ("permessage-deflate; client_no_context_takeover; "
+               "server_no_context_takeover")
+_WS_DEFLATE_TAIL = b"\x00\x00\xff\xff"  # permessage-deflate 会剥掉的块尾
+
+
+def _ws_build_frame(opcode, payload, rsv1=False, mask_key=None, fin=True):
+    """组装一个 WS 帧;mask_key 给定则按客户端角色加掩码,否则按服务端角色裸发。
+    注意 MASK 位在字节 1 的最高位(与字节 0 的 FIN 位无关)。"""
+    b0 = (0x80 if fin else 0) | (0x40 if rsv1 else 0) | (opcode & 0x0F)
+    n = len(payload)
+    if n <= 125:
+        b1, ext = n, b""
+    elif n <= 0xFFFF:
+        b1, ext = 126, n.to_bytes(2, "big")
+    else:
+        b1, ext = 127, n.to_bytes(8, "big")
+    if mask_key is None:
+        return bytes([b0, b1]) + ext + payload
+    return bytes([b0, b1 | 0x80]) + ext + mask_key + bytes(
+        payload[i] ^ mask_key[i % 4] for i in range(n))
+
+
+def _ws_compress_body(payload):
+    """permessage-deflate 压缩一帧正文(server_no_context_takeover:逐帧复位,
+    wbits=-15 = 原始 deflate 流);末尾块尾按 RFC 7692 剥掉。压缩不赚就返回 None。"""
+    try:
+        co = zlib.compressobj(6, zlib.DEFLATED, -15)
+        # 必须用 Z_SYNC_FLUSH:块尾 00 00 FF FF 只由 sync flush 产生,剥掉后接收方
+        # 补回即可解压;Z_FINISH 不生成该块尾,不符合 RFC 7692 帧格式
+        data = co.compress(payload) + co.flush(zlib.Z_SYNC_FLUSH)
+    except Exception:
+        return None
+    if not data.endswith(_WS_DEFLATE_TAIL):
+        return None
+    data = data[:-4]
+    if len(data) >= len(payload):
+        return None
+    return data
+
+
+def _ws_frame_head(buf):
+    """解析缓冲区首帧头。返回 (fin, rsv1, opcode, mask_key, hlen, plen) 或
+    None(数据不足)。mask_key 为 b'' 表示未掩码(服务端帧)。"""
+    if len(buf) < 2:
+        return None
+    b0, b1 = buf[0], buf[1]
+    fin = bool(b0 & 0x80)
+    rsv1 = bool(b0 & 0x40)
+    opcode = b0 & 0x0F
+    masked = bool(b1 & 0x80)
+    ln = b1 & 0x7F
+    off = 2
+    if ln == 126:
+        if len(buf) < 4:
+            return None
+        ln = int.from_bytes(buf[2:4], "big")
+        off = 4
+    elif ln == 127:
+        if len(buf) < 10:
+            return None
+        ln = int.from_bytes(buf[2:10], "big")
+        off = 10
+    mask_key = b""
+    if masked:
+        if len(buf) < off + 4:
+            return None
+        mask_key = bytes(buf[off:off + 4])
+        off += 4
+    if len(buf) < off + ln:
+        return None
+    return (fin, rsv1, opcode, mask_key, off, ln)
+
+
+def _ws_unmask(payload, mask_key):
+    if not mask_key:
+        return bytes(payload)
+    return bytes(payload[i] ^ mask_key[i % 4] for i in range(len(payload)))
+
+
 class GateHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     # keep-alive 空闲回收:浏览器/nginx 断开前不再占用线程死等(线程随连接存活)。
@@ -3135,6 +3228,14 @@ class GateHandler(BaseHTTPRequestHandler):
         head += b"\r\n"
         remote = socket.create_connection(("127.0.0.1", port), timeout=10)
         remote.sendall(head)
+        # WS 压缩桥:客户端报价 permessage-deflate 时,对客户端注入协商应答,
+        # 由闸机泵双向压/解压(DSH 侧保持裸帧,见模块级注释)。
+        try:
+            inject_pmd = "permessage-deflate" in (
+                self.headers.get("Sec-WebSocket-Extensions") or "").lower()
+        except Exception:
+            inject_pmd = False
+        _pmd_active = [False]  # 注入成功后置 True,上游泵据此压缩帧
         _ws_write_lock = threading.Lock()
 
         def _close_sockets():
@@ -3193,6 +3294,12 @@ class GateHandler(BaseHTTPRequestHandler):
                             continue
                         head = bytes(buf[:i + 4])
                         del buf[:i + 4]
+                        if inject_pmd and b"101 Switching Protocols" in head \
+                                and b"sec-websocket-extensions" not in head.lower():
+                            # 对客户端注入压缩协商(客户端报价了,DSH 不支持 → 闸机桥接)
+                            _ext_line = ("Sec-WebSocket-Extensions: %s\r\n" % _WS_EXT_PMD).encode("latin-1")
+                            head = head[:-2] + _ext_line + b"\r\n"
+                            _pmd_active[0] = True
                         dst.sendall(head)
                         hdr_done = head.split(b"\r\n", 1)[0].endswith(b"101 Switching Protocols")
                         data = bytes(buf)
@@ -3210,6 +3317,7 @@ class GateHandler(BaseHTTPRequestHandler):
                     while len(buf) >= 2:
                         opcode = buf[0] & 0x0F
                         fin = buf[0] & 0x80
+                        rsv1 = bool(buf[0] & 0x40)
                         ln = buf[1] & 0x7F
                         off = 2
                         if ln == 126:
@@ -3228,7 +3336,16 @@ class GateHandler(BaseHTTPRequestHandler):
                         del buf[:off + ln]
                         if opcode == 0x9 and fin:  # PING → 立即代答 PONG
                             _send_remote(_ws_pong_for_dsh(frame[off:off + ln]))
-                        dst.sendall(frame)
+                        # 压缩桥:完整 text/binary 帧 + 对客户端注入过协商 → 现场压缩
+                        # (分片/控制帧/已在压缩的帧一律原样透传,不压缩永远合法)
+                        fw = frame
+                        if _pmd_active[0] and opcode in (0x1, 0x2) and fin \
+                                and not rsv1 and ln >= WS_PMD_MIN_BYTES:
+                            body = _ws_compress_body(frame[off:off + ln])
+                            if body is not None:
+                                fw = _ws_build_frame(opcode, body, rsv1=True)
+                        dst.sendall(fw)
+                        self._resp_bytes += len(fw)  # 逐请求日志字节数(实际下行字节)
             except OSError:
                 pass
             finally:
@@ -3239,13 +3356,55 @@ class GateHandler(BaseHTTPRequestHandler):
                 _close_sockets()
 
         def pump(src, dst):
+            # 客户端→DSH 方向。客户端帧带掩码;若对客户端注入了压缩协商,数据帧可能
+            # 带 RSV1(permessage-deflate):解压后按"闸机=客户端"重新掩码发给 DSH
+            # (DSH 侧从未协商压缩,只认裸帧)。分片压缩消息攒齐后整条解压、以单帧
+            # 转发(把分片合并成单帧在协议里永远合法)。控制帧原样转发(解掩再掩)。
+            buf = bytearray()
+            infl = zlib.decompressobj(-15)   # 每连接一个,不复位(兼容客户端 context takeover)
+            frag = None                      # (opcode, [parts]) 分片压缩消息重组
             try:
                 while True:
                     data = src.recv(65536)
                     if not data:
                         break
-                    _send_remote(data)
-            except OSError:
+                    buf.extend(data)
+                    while True:
+                        h = _ws_frame_head(buf)
+                        if h is None:
+                            break
+                        fin, rsv1, opcode, mask_key, off, ln = h
+                        payload = bytes(buf[off:off + ln])
+                        del buf[:off + ln]
+                        if mask_key:
+                            payload = _ws_unmask(payload, mask_key)
+                        mk = os.urandom(4)
+                        if opcode in (0x1, 0x2):
+                            if rsv1 and not fin:
+                                frag = (opcode, [payload])  # 分片压缩消息开始
+                                continue
+                            if frag is not None:
+                                # 未完成分片中间插入独立帧:连接状态未知,断开回收
+                                raise ValueError("ws pmd: frame inside fragmented message")
+                            if rsv1:
+                                payload = infl.decompress(payload + _WS_DEFLATE_TAIL)
+                                if len(payload) > WS_PMD_INFLATE_CAP:
+                                    raise ValueError("ws pmd: inflated body over cap")
+                            _send_remote(_ws_build_frame(opcode, payload, mask_key=mk))
+                        elif opcode == 0x0:
+                            if frag is None:
+                                raise ValueError("ws pmd: continuation without start")
+                            frag[1].append(payload)
+                            if fin:
+                                whole = infl.decompress(b"".join(frag[1]) + _WS_DEFLATE_TAIL)
+                                if len(whole) > WS_PMD_INFLATE_CAP:
+                                    raise ValueError("ws pmd: inflated body over cap")
+                                _send_remote(_ws_build_frame(frag[0], whole, mask_key=mk))
+                                frag = None
+                        else:
+                            # 0x8 close / 0x9 ping / 0xA pong:控制帧不压缩,原样转发
+                            _send_remote(_ws_build_frame(opcode, payload, mask_key=mk))
+            except (OSError, ValueError, zlib.error):
                 pass
             finally:
                 try:
