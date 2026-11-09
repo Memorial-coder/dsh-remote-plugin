@@ -2513,7 +2513,7 @@ function TotpCard({ t, reloadToken, onRefresh, disabled }) {
     ] })
   ] });
 }
-var PUSH_KIND = { test: "Test", verify: "Verify", kick: "Kick", ban: "Ban", totp: "Totp", pair: "Pair", join: "Join", dev: "Dev", msg: "Msg" };
+var PUSH_KIND = { test: "Test", verify: "Verify", kick: "Kick", ban: "Ban", totp: "Totp", pair: "Pair", join: "Join", dev: "Dev", msg: "Msg", announce: "Announce" };
 function pushKindLabel(t, kind) {
   const key = PUSH_KIND[kind];
   return key ? t("pushKind" + key) : kind || "";
@@ -4033,7 +4033,8 @@ function apply(ctx) {
       pushKindPair: "\u914D\u5BF9",
       pushKindJoin: "\u8BBE\u5907\u8FDE\u5165",
       pushKindDev: "\u8BBE\u5907",
-      pushKindMsg: "\u6D88\u606F"
+      pushKindMsg: "\u6D88\u606F",
+      pushKindAnnounce: "\u516C\u544A"
     },
     en: {
       tab: "DshRemote",
@@ -4241,7 +4242,8 @@ function apply(ctx) {
       pushKindPair: "Pair",
       pushKindJoin: "Connect",
       pushKindDev: "Device",
-      pushKindMsg: "Message"
+      pushKindMsg: "Message",
+      pushKindAnnounce: "Announcement"
     }
   }), "browserctl: dictionaries");
   ctx.effect(() => installStyles(), "browserctl: styles");

@@ -5360,7 +5360,44 @@ def _gate_heartbeat_tick():
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=8) as r:
-            r.read()
+            raw = r.read()
+        # 官网公告搭车:心跳响应里带最新一条「弹窗推送」消息(官网消息中心发的),
+        # 见到新 id 就本地入队弹窗(手机 App + win_push,尊重推送总开关)。失败全静默。
+        try:
+            _hb_data = json.loads(raw.decode("utf-8")) if raw else {}
+        except Exception:
+            _hb_data = {}
+        _gate_announce_tick(_hb_data.get("announce") if isinstance(_hb_data, dict) else None)
+    except Exception:
+        pass
+
+
+def _gate_announce_tick(ann):
+    """官网公告随心跳搭车 → 本地入队弹窗(尊重推送总开关,_push_notify 内部把关)。
+
+    水位 announce_last 存 state:
+    ① state 里还没有水位(新部署/首次见到)只记不弹——避免上线瞬间把部署前
+       就存在的历史公告重放给所有用户;
+    ② id 回退(服务器重置过 seq)忽略;
+    ③ 出现更大 id 就入队并推进水位;即使因总开关关闭没弹也推进——同一条消息
+       用户在官网/App 消息中心能看到,不该等几小时后再弹旧闻。"""
+    try:
+        if not isinstance(ann, dict):
+            return
+        m = re.match(r"^m(\d+)$", str(ann.get("id") or ""))
+        if not m:
+            return
+        seq = int(m.group(1))
+        last = read_state().get("announce_last")
+        if not isinstance(last, int):
+            update_state(lambda st: st.update({"announce_last": seq}) or st)
+            return
+        if seq <= last:
+            return
+        title = str(ann.get("title") or "")
+        body = str(ann.get("body") or "")
+        _push_notify("announce", title, body)
+        update_state(lambda st: st.update({"announce_last": seq}) or st)
     except Exception:
         pass
 

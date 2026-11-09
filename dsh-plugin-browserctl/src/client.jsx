@@ -2596,7 +2596,7 @@ function TotpCard({ t, reloadToken, onRefresh, disabled }) {
 }
 
 /* ---------- 「推送」页签:接收手机推送 + 系统安全事件 + 测试推送 + 最近推送 ---------- */
-const PUSH_KIND = { test: 'Test', verify: 'Verify', kick: 'Kick', ban: 'Ban', totp: 'Totp', pair: 'Pair', join: 'Join', dev: 'Dev', msg: 'Msg' }
+const PUSH_KIND = { test: 'Test', verify: 'Verify', kick: 'Kick', ban: 'Ban', totp: 'Totp', pair: 'Pair', join: 'Join', dev: 'Dev', msg: 'Msg', announce: 'Announce' }
 
 function pushKindLabel(t, kind) {
   const key = PUSH_KIND[kind]
@@ -4239,6 +4239,7 @@ export function apply(ctx) {
       pushKindJoin: '设备连入',
       pushKindDev: '设备',
       pushKindMsg: '消息',
+      pushKindAnnounce: '公告',
     },
     en: {
       tab: 'DshRemote',
@@ -4447,6 +4448,7 @@ export function apply(ctx) {
       pushKindJoin: 'Connect',
       pushKindDev: 'Device',
       pushKindMsg: 'Message',
+      pushKindAnnounce: 'Announcement',
     },
   }), 'browserctl: dictionaries')
   ctx.effect(() => installStyles(), 'browserctl: styles')
