@@ -28,3 +28,4 @@ Thumbs.db
 # Python 缓存
 __pycache__/
 *.pyc
+browserctl_*.log.*

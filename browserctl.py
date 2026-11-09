@@ -70,6 +70,50 @@ WATCH_LOG = HERE / "browserctl_watch.log"
 # win_push.py(Windows 通知驻留)的推送水位文件:含设备/会话指纹,一并纳入 ACL 硬化
 PUSHWIN_STATE = HERE / "pushwin_state.json"
 
+# 日志滚动:三份进程日志(fwd/frpc/watch)都是 append 永不清空,会无限膨胀。
+# ① 14 天滚动:Windows 下 st_ctime=文件创建时间(append 不改),超龄把当前文件改名 .1 归档
+#   (只保留一代,下次滚动覆盖);② 8MB 大小兜底:跨平台(非 Windows 取不到创建时间)和
+#   「闸机长期不重启」时保证有界。调用时机=cmd_start 早期(旧进程已被 stop 杀掉、句柄无主,
+#   Windows 才允许改名);改名失败(旧进程还活着)静默跳过,下次 start 再滚。start.log 不在此列:
+#   它被插件以 append 句柄握着,改不动,且插件侧已有 256KB 截断保护(有界)。
+LOG_KEEP_DAYS = 14
+LOG_MAX_BYTES = 8 * 1024 * 1024
+
+
+def _log_age_days(p):
+    """日志文件年龄(天)。仅 Windows 能拿到创建时间;非 Windows 返回 0(靠大小兜底)。"""
+    try:
+        st = os.stat(p)
+    except OSError:
+        return 0.0
+    if os.name == "nt":
+        try:
+            return (time.time() - st.st_ctime) / 86400.0
+        except (OSError, ValueError):
+            return 0.0
+    return 0.0
+
+
+def _rotate_logs():
+    for p in (FWD_LOG, FRPC_LOG, WATCH_LOG):
+        try:
+            if not p.exists():
+                continue
+            aged = _log_age_days(p) > LOG_KEEP_DAYS
+            oversized = p.stat().st_size > LOG_MAX_BYTES
+            if not (aged or oversized):
+                continue
+            dst = p.with_name(p.name + ".1")
+            try:
+                if dst.exists():
+                    dst.unlink()
+            except OSError:
+                return   # 连旧的归档都删不掉,跳过本轮,下次再试
+            p.replace(dst)   # os.replace 原子改名;句柄被占用时抛 PermissionError(OSError)
+        except OSError:
+            pass
+
+
 PUBLIC_HOST = "remote.ymzcc.com"
 
 
@@ -6928,6 +6972,7 @@ def cmd_start():
     # 跨进程互斥:多个并发 start(按钮连点/侧边栏自动 ensure)串行化,防重复进程
     with _ctl_release(_ctl_lock()):
         _clean_elevated_leftovers()   # 提权残留先自动用管理员权限清掉,再挑端口/起闸机
+        _rotate_logs()   # 日志 14 天滚动(句柄此刻无主才能改名;失败静默,下次 start 再滚)
         _select_fwd_port()   # 3080 被占就顺延,并把结果传给 fwd/watch
         port = detect_port()
         print("DSH Web 端口: %d" % port)
