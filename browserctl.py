@@ -866,10 +866,15 @@ function baseName(p){
   var seg = String(p || '').split(/[\\/]/);
   return (seg[seg.length - 1] || '').trim();
 }
-function pill(name){
+/* path= 提示(2026-11-09 v21_present.mp4 实锤):交付文件可能放在工作区之外
+   (桌面 video/promo/out 等),闸机按文件名在白名单根里找不到 → 手机 404。
+   卡片 aria-label 里本来就是完整路径,原样带给闸机;闸机校验安全名单
+   (AppData/家目录点目录/系统目录拒绝)后按路径直取,不再依赖「同名取最新」。
+   老闸机不认 path 参数会忽略它,行为退回纯文件名解析。 */
+function pill(name, full){
   var a = document.createElement('a');
   a.setAttribute('data-dsh-dl', '1');
-  a.href = BASE + encodeURIComponent(name);
+  a.href = BASE + encodeURIComponent(name) + '&path=' + encodeURIComponent(full || name);
   a.textContent = '下载';
   a.title = '下载 ' + name;
   a.setAttribute('style', STYLE);
@@ -881,15 +886,16 @@ function decorate(card){
   if (done && existing) return;
   if (existing && existing.parentNode) { try { existing.parentNode.removeChild(existing); } catch (e) {} }
   var name = '';
+  var full = '';
   var els = card.querySelectorAll('[aria-label],[title]');
   for (var i = 0; i < els.length; i++){
     var s = els[i].getAttribute('aria-label') || els[i].getAttribute('title') || '';
     var m = HOST_RE.exec(s);
-    if (m) { name = baseName(m[2]); break; }
+    if (m) { full = m[2]; name = baseName(m[2]); break; }
   }
   if (!name || name.length < 4) return;
   var slot = card.querySelector('[data-slot="deliverables.file.actions"]');
-  (slot || card).appendChild(pill(name));
+  (slot || card).appendChild(pill(name, full));
   card.setAttribute('data-dsh-dl-card', '1');
 }
 function scan(){
@@ -908,7 +914,7 @@ function scan(){
     if (!name || name.length < 4) continue;
     var box = el.parentElement;
     if (!box || box.querySelector('[data-dsh-dl]')) continue;
-    try { box.appendChild(pill(name)); } catch (e) {}
+    try { box.appendChild(pill(name, m[2])); } catch (e) {}
   }
 }
 var pending = null;
@@ -1706,20 +1712,31 @@ def _download_denied(path):
     return False
 
 
-def _walk_named_files(root, name, budget=None):
+def _walk_named_files(root, name, budget=None, skip=None):
     """在一个根目录树里按文件名找候选文件。带条数与时间预算,防止超大目录
     把闸机线程拖死(3 秒 / 3 万个条目,超了就用手上已有的结果)。
-    budget 可传共享字典(多根共用同一预算)。"""
+    budget 可传共享字典(多根共用同一预算)。
+    skip:绝对路径前缀列表(小写),命中的子树整枝跳过——用户常用目录层用它
+    剪掉已单独遍历过的 frp 工作区,免得预算被重复走树吃掉。"""
     hits = []
     if not root.is_dir():
         return hits
     if budget is None:
         budget = {"entries": 30000, "deadline": time.time() + 3.0}
     target = name.lower()
+    skip = [str(s).rstrip("\\/").lower() for s in (skip or [])]
     try:
         for dirpath, dirnames, filenames in os.walk(root):
-            dirnames[:] = [d for d in dirnames
-                           if d not in _DL_PRUNE_DIRS and not d.startswith(".")]
+            keep = []
+            for d in dirnames:
+                if d in _DL_PRUNE_DIRS or d.startswith("."):
+                    continue
+                if skip:
+                    full = os.path.join(dirpath, d).lower()
+                    if any(full == s or full.startswith(s + os.sep) for s in skip):
+                        continue
+                keep.append(d)
+            dirnames[:] = keep
             if target in (f.lower() for f in filenames):
                 p = Path(dirpath) / name
                 try:
@@ -1757,6 +1774,22 @@ def _dl_search_roots():
     return roots
 
 
+def _dl_user_roots():
+    """用户常用目录层(2026-11-09 新增):交付文件实测会落在工作区之外
+    (C:\\Users\\<用户>\\Desktop\\video\\promo\\out\\v21_present.mp4 —— 只搜
+    工作区兄弟项目时名字解析找不到 → 手机 404)。桌面/下载/文档/视频/图片/
+    音乐是「电脑上找文件」最常见的落点,按共享预算再搜一层;frp 工作区子树
+    已由兄弟项目层覆盖,整枝剪掉避免重复。纯只读遍历,找不到不报错。"""
+    home = Path.home()
+    roots = [home / d for d in ("Desktop", "Downloads", "Documents",
+                                "Videos", "Pictures", "Music")]
+    try:
+        skip = [str(HERE.parent.resolve())]
+    except OSError:
+        skip = []
+    return roots, skip
+
+
 def _newest(paths):
     """mtime 最新的一个文件;stat 失败的条目忽略。"""
     best = None
@@ -1774,6 +1807,7 @@ def _newest(paths):
 def _resolve_download_candidate(name):
     """按文件名找要发给手机的文件。优先级:App 发布目录(规范 APK 存放处) >
     本副本目录 + 父目录兄弟项目树(DSH 会话工作区在同级,最新 mtime 者胜) >
+    用户常用目录(桌面/下载/文档/视频/图片/音乐,frp 子树剪除) >
     DSH 附件库(最后兜底:真实聊天附件;可能混有同名缩略图类占位,所以只作兜底)。
     找不到返回 None。"""
     app_dir = APP_DIR / name
@@ -1783,6 +1817,14 @@ def _resolve_download_candidate(name):
     hits = []
     for root in _dl_search_roots():
         hits.extend(_walk_named_files(root, name, budget))
+        if time.time() > budget["deadline"] or budget["entries"] <= 0:
+            break
+    hit = _newest(hits)
+    if hit:
+        return hit
+    user_roots, skip = _dl_user_roots()
+    for root in user_roots:
+        hits.extend(_walk_named_files(root, name, budget, skip=skip))
         if time.time() > budget["deadline"] or budget["entries"] <= 0:
             break
     hit = _newest(hits)
@@ -1808,6 +1850,59 @@ def _resolve_download_candidate(name):
             pass
         hit = _newest(hits)
     return hit
+
+
+def _path_in_denied_roots(p):
+    """路径提示的安全闸(2026-11-09):这些根下的文件绝不允许按路径点名拉走。
+    覆盖:家目录点目录(.ssh/.gnupg/.aws/.kube/.docker/.config 等凭据落点;
+    .dsh 只放行 attachments 附件库)、AppData(浏览器 Cookie/应用令牌)、
+    Windows 与 Program Files(系统与已装软件)。命中返回 True = 拒绝。"""
+    try:
+        s = str(p).lower()
+        home = str(Path.home()).lower()
+    except Exception:
+        return True
+    if not s.endswith(os.sep) and home.endswith(os.sep):
+        home = home.rstrip(os.sep)
+    if s == home or s.startswith(home + os.sep):
+        rel = s[len(home) + 1:]
+        first = rel.split(os.sep, 1)[0]
+        if first.startswith("."):
+            # 家目录点目录默认是凭据/应用私有数据;.dsh 只放行 attachments 附件库
+            if not (first == ".dsh"
+                    and rel.startswith(".dsh" + os.sep + "attachments" + os.sep)):
+                return True
+        if first == "appdata":
+            return True
+    sysroot = (os.environ.get("SystemRoot") or r"C:\Windows").lower()
+    if s == sysroot or s.startswith(sysroot + os.sep):
+        return True
+    for env_key in ("ProgramFiles", "ProgramFiles(x86)", "ProgramW6432"):
+        v = (os.environ.get(env_key) or "").lower()
+        if v and (s == v or s.startswith(v + os.sep)):
+            return True
+    return False
+
+
+def _resolve_download_by_path(raw):
+    """按客户端带来的完整路径取文件(2026-11-09 路径提示)。
+    只认:绝对路径 + 真实存在 + 通过凭据名单(_download_denied) + 不在敏感根里
+    (_path_in_denied_roots)。任何一条不过就返回 None,与「没找到」同口径 404,
+    不暴露拒绝原因;工作区白名单根之外的交付文件(桌面 video/ 等)从此可直达。"""
+    if not raw:
+        return None
+    try:
+        p = Path(raw)
+        if not p.is_absolute():
+            return None
+        rp = p.resolve()
+        if not rp.is_file():
+            return None
+    except (OSError, ValueError):
+        return None
+    if _download_denied(rp) or _path_in_denied_roots(rp):
+        return None
+    return rp
 
 
 def _content_disposition(name):
@@ -4633,12 +4728,17 @@ color:#fff;text-decoration:none;font-size:14px}
             pass
 
     def _gate_file_download(self):
-        """按文件名把本机文件发给远控端(面板文件卡片上的「下载」按钮用)。
+        """按文件名/路径把本机文件发给远控端(面板文件卡片上的「下载」按钮用)。
 
         鉴权:必须已通过 2FA/会话(_gate_ok) —— 这个端点等于把电脑上的文件
         发到对面手机,和面板同一把锁,公网陌生人拿不到任何东西。
-        客户端只允许带文件名(query ?name=),路径由闸机在白名单根里自己找
-        (App 发布目录 > 工作区 > DSH 附件库,同名取最新),天然无目录穿越。
+        ① ?name=<文件名>:路径由闸机在白名单根里自己找(App 发布目录 > 工作区 >
+           兄弟项目 > 用户常用目录 > DSH 附件库,同名取最新),天然无目录穿越;
+        ② ?path=<完整路径>(2026-11-09 新增):交付文件可能落在工作区之外
+           (桌面 video/promo/out 实锤),纯文件名解析会 404 —— 客户端把卡片
+           aria-label 里的完整路径一并带来,闸机只认通过安全闸的路径
+           (_resolve_download_by_path:存在 + 凭据名单 + 敏感根拒绝),
+           任何一条不过都按「没找到」同口径 404,不暴露原因。
         流式分块发送,不整包进内存;中文文件名走 RFC 5987 双写法。"""
         if not self._gate_ok():
             self._send_json(401, {"ok": False, "error": "未通过验证"})
@@ -4646,19 +4746,32 @@ color:#fff;text-decoration:none;font-size:14px}
         from urllib.parse import urlsplit, parse_qs
         q = parse_qs(urlsplit(self.path).query)
         name = (q.get("name") or [""])[0].strip()
-        safe_name = Path(name).name if name else ""
-        if (not safe_name or safe_name in (".", "..")
-                or "/" in name or "\\" in name or len(safe_name) > 200
-                or any(ord(c) < 32 for c in safe_name)):
-            self._send_json(400, {"ok": False, "error": "缺少或非法的文件名"})
-            return
-        target = _resolve_download_candidate(safe_name)
-        if target is None or _download_denied(target):
-            # 拒绝名单二次复核(纵深防御):解析层已过滤,这里再拦一次,
-            # 且拒绝与"没找到"同口径回复,不暴露文件是否存在
-            self._send_json(404, {"ok": False,
-                                  "error": "电脑上没找到这个文件（可能已被移动或删除）"})
-            return
+        raw_path = (q.get("path") or [""])[0].strip()
+        if raw_path and ("\\" in raw_path or "/" in raw_path):
+            target = _resolve_download_by_path(raw_path)
+            if target is None:
+                # 与「没找到」同口径:不暴露是拒绝名单还是真不存在
+                _append_event("file_dl", "路径未放行或不存在 name=%s"
+                              % (name or target or "?")[:80])
+                self._send_json(404, {"ok": False,
+                                      "error": "电脑上没找到这个文件（可能已被移动或删除）"})
+                return
+            safe_name = target.name   # 以真实路径的名字为准,不信任 name 参数
+        else:
+            safe_name = Path(name).name if name else ""
+            if (not safe_name or safe_name in (".", "..")
+                    or "/" in name or "\\" in name or len(safe_name) > 200
+                    or any(ord(c) < 32 for c in safe_name)):
+                self._send_json(400, {"ok": False, "error": "缺少或非法的文件名"})
+                return
+            target = _resolve_download_candidate(safe_name)
+            if target is None or _download_denied(target):
+                # 拒绝名单二次复核(纵深防御):解析层已过滤,这里再拦一次,
+                # 且拒绝与"没找到"同口径回复,不暴露文件是否存在
+                _append_event("file_dl", "未找到 name=%s" % safe_name[:80])
+                self._send_json(404, {"ok": False,
+                                      "error": "电脑上没找到这个文件（可能已被移动或删除）"})
+                return
         try:
             size = target.stat().st_size
         except OSError:
@@ -4668,6 +4781,7 @@ color:#fff;text-decoration:none;font-size:14px}
             self._send_json(413, {"ok": False,
                                   "error": "文件超过 512MB，暂不支持手机下载"})
             return
+        _append_event("file_dl", "发送 name=%s %dB" % (safe_name[:80], size))
         ctype = _DL_MIME.get(target.suffix.lower(), "application/octet-stream")
         try:
             self.send_response(200)
