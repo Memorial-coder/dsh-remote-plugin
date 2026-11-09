@@ -32,7 +32,7 @@ var import_dsh_client_store = require("@deepseek-ai/dsh-client-store");
 var import_jsx_runtime = require("react/jsx-runtime");
 var NS = "browserctl";
 var STYLE_ID = "browserctl/styles";
-var VERSION = true ? "1.0.53" : "dev";
+var VERSION = true ? "1.0.55" : "dev";
 var ABOUT_LINKS = {
   website: "https://remote.ymzcc.com/dsh-remote/",
   github: "https://github.com/Memorial-coder/dsh-remote-plugin",

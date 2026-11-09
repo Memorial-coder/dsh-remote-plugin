@@ -4627,7 +4627,7 @@ function adminHeaders() {
   }
   return {};
 }
-var VERSION = true ? "1.0.53" : "dev";
+var VERSION = true ? "1.0.55" : "dev";
 var sessionTunnel = false;
 var ensureRunning = null;
 var lastEnsureError = "";
@@ -5068,9 +5068,9 @@ function runBrowserctl(args) {
   const fd = startLogFd();
   const child = spawn(py.cmd, [...py.pre, script, ...args], {
     cwd: path.dirname(script),
-    // PYTHONUTF8:强制 Python 子进程按 UTF-8 写 stdout/stderr 与默认 open() —— 否则中文 Windows
-    // 上日志按 GBK 落盘,导出/面板里中文变 □(2026-11-09 实测根因;闸机/看门狗子进程会继承)。
-    env: { ...process.env, PYTHONUTF8: "1", PYTHONIOENCODING: "utf-8" },
+    // 不注入 PYTHONUTF8/PYTHONIOENCODING(2026-11-09 已撤):强制 UTF-8 后,闸机父进程
+    // 按 UTF-8 解码 tasklist/netstat 等 GBK 输出,_readerthread 直接 UnicodeDecodeError、
+    // 输出整段丢失(自愈路径失灵)。日志乱码由 decodeLogBuffer 按行转码兜底,足够且无副作用。
     // 有 fd 就把子进程输出落盘(失败原因可回读);拿不到 fd 才退回忽略
     stdio: fd === null ? "ignore" : ["ignore", fd, fd],
     detached: true,
@@ -5103,8 +5103,7 @@ function runBrowserctlAsync(args, timeoutMs = 8e3) {
     let done = false;
     const child = spawn(py.cmd, [...py.pre, script, ...args], {
       cwd: path.dirname(script),
-      // 与 runBrowserctl 同理:统一让 Python 子进程按 UTF-8 输出(见 runBrowserctl 注释)
-      env: { ...process.env, PYTHONUTF8: "1", PYTHONIOENCODING: "utf-8" },
+      // 同 runBrowserctl:不注入 PYTHONUTF8(见其注释,2026-11-09 已撤)。
       stdio: "ignore",
       detached: true,
       creationflags
@@ -5345,11 +5344,21 @@ async function buildTunnel() {
     }
   }
   const result = runBrowserctl(["start"]);
+  const hasLeftovers = (() => {
+    try {
+      const s = readState();
+      return Array.isArray(s.elevated_leftovers) && s.elevated_leftovers.length > 0;
+    } catch {
+      return false;
+    }
+  })();
+  const fwdDeadlineMs = hasLeftovers ? 45e3 : 15e3;
+  const tunnelDeadlineMs = hasLeftovers ? 6e4 : 26e3;
   if (result.started === false) {
     return { ok: false, ...result, forwarder: false };
   }
   let fwd = false;
-  const deadline = Date.now() + 15e3;
+  const deadline = Date.now() + fwdDeadlineMs;
   while (Date.now() < deadline) {
     fwd = await portOpen(3080);
     if (fwd) break;
@@ -5365,7 +5374,7 @@ async function buildTunnel() {
       logTail: tail
     };
   }
-  const tunnel = await waitTunnelReady(startedAt + 26e3);
+  const tunnel = await waitTunnelReady(startedAt + tunnelDeadlineMs);
   if (!tunnel.ok) {
     const tail = startLogTail(20);
     return {

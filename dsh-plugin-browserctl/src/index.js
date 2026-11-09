@@ -640,9 +640,9 @@ function runBrowserctl(args) {
   const fd = startLogFd()
   const child = spawn(py.cmd, [...py.pre, script, ...args], {
     cwd: path.dirname(script),
-    // PYTHONUTF8:强制 Python 子进程按 UTF-8 写 stdout/stderr 与默认 open() —— 否则中文 Windows
-    // 上日志按 GBK 落盘,导出/面板里中文变 □(2026-11-09 实测根因;闸机/看门狗子进程会继承)。
-    env: { ...process.env, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8' },
+    // 不注入 PYTHONUTF8/PYTHONIOENCODING(2026-11-09 已撤):强制 UTF-8 后,闸机父进程
+    // 按 UTF-8 解码 tasklist/netstat 等 GBK 输出,_readerthread 直接 UnicodeDecodeError、
+    // 输出整段丢失(自愈路径失灵)。日志乱码由 decodeLogBuffer 按行转码兜底,足够且无副作用。
     // 有 fd 就把子进程输出落盘(失败原因可回读);拿不到 fd 才退回忽略
     stdio: fd === null ? 'ignore' : ['ignore', fd, fd],
     detached: true,
@@ -674,8 +674,7 @@ function runBrowserctlAsync(args, timeoutMs = 8000) {
     let done = false
     const child = spawn(py.cmd, [...py.pre, script, ...args], {
       cwd: path.dirname(script),
-      // 与 runBrowserctl 同理:统一让 Python 子进程按 UTF-8 输出(见 runBrowserctl 注释)
-      env: { ...process.env, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8' },
+      // 同 runBrowserctl:不注入 PYTHONUTF8(见其注释,2026-11-09 已撤)。
       stdio: 'ignore',
       detached: true,
       creationflags,
@@ -946,14 +945,27 @@ async function buildTunnel() {
     } catch (e) { /* state 写失败不影响启动 */ }
   }
   const result = runBrowserctl(['start'])
+  // 防呆(2026-11-07):上面的 stop 可能刚把 elevated_leftovers 标记写进 state(上次以管理员
+  // 身份启动的提权进程普通权限杀不掉);cmd_start 会先自动弹 UAC 请求管理员权限清理再起闸机,
+  // 这段时间要等用户点「是」,所以检测到残留时把「等闸机/等隧道」时限放宽,免得点慢了误报失败。
+  // 必须在 start 之前读(而不是 buildTunnel 开头读)——标记是这次 stop 才写进去的。
+  const hasLeftovers = (() => {
+    try {
+      const s = readState()
+      return Array.isArray(s.elevated_leftovers) && s.elevated_leftovers.length > 0
+    } catch { return false }
+  })()
+  const fwdDeadlineMs = hasLeftovers ? 45000 : 15000
+  const tunnelDeadlineMs = hasLeftovers ? 60000 : 26000
   // 解释器/脚本压根没起来(如找不到 Python)时立刻返回,不空等 15s;
   // 并且把 ok 置 false,让前端能弹出具体原因,而不是"点了没反应"。
   if (result.started === false) {
     return { ok: false, ...result, forwarder: false }
   }
-  // 轮询等待闸机 3080 就绪(最多 ~15s),避免固定等待在冷启动/端口释放/锁等待时误报失败
+  // 轮询等待闸机就绪(正常 ~15s;有提权残留要等 UAC 时放宽到 ~45s),避免固定等待
+  // 在冷启动/端口释放/锁等待/管理员清理时误报失败
   let fwd = false
-  const deadline = Date.now() + 15000
+  const deadline = Date.now() + fwdDeadlineMs
   while (Date.now() < deadline) {
     fwd = await portOpen(3080)
     if (fwd) break
@@ -978,8 +990,8 @@ async function buildTunnel() {
   // 3080 通了只说明闸机(fwd)在跑,不代表 frp 隧道已连通:
   // browserctl.py start 现在会自己等最多 15s 到 frpc 日志出现 `start proxy success`,
   // 但插件是 detached 启动拿不到 stdout,所以必须回读 state 再判一次 tunnel_ok。
-  // 冷启动时 start 内部可能已消耗 ~15s,这里给到总共约 26s(15s fwd + 余量)。
-  const tunnel = await waitTunnelReady(startedAt + 26000)
+  // 冷启动时 start 内部可能已消耗 ~15s,这里给到总共约 26s(15s fwd + 余量);有提权残留放宽到 60s。
+  const tunnel = await waitTunnelReady(startedAt + tunnelDeadlineMs)
   if (!tunnel.ok) {
     const tail = startLogTail(20)
     return {
