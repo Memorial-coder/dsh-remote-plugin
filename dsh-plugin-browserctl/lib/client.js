@@ -36,7 +36,8 @@ var VERSION = true ? "1.0.50" : "dev";
 var ABOUT_LINKS = {
   website: "https://remote.ymzcc.com/dsh-remote/",
   github: "https://github.com/Memorial-coder/dsh-remote-plugin",
-  app: "https://github.com/Memorial-coder/dsh-remote-plugin/releases/latest"
+  app: "https://github.com/Memorial-coder/dsh-remote-plugin/releases/latest",
+  qq: "https://qm.qq.com/q/K6RXqOKLAu"
 };
 function apiPrefix() {
   try {
@@ -1723,6 +1724,12 @@ var Svg = {
   ticket: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("svg", { ...svgProps, style: { ...svgProps.style, marginRight: 0 }, children: [
     /* @__PURE__ */ (0, import_jsx_runtime.jsx)("path", { d: "M21 12a8 8 0 0 1-8 8H4.5l2.4-2.4A8 8 0 1 1 21 12z" }),
     /* @__PURE__ */ (0, import_jsx_runtime.jsx)("path", { d: "M8.5 10.5h7M8.5 13.5h4.5" })
+  ] }),
+  group: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("svg", { ...svgProps, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("circle", { cx: "9", cy: "8.5", r: "3.2" }),
+    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("path", { d: "M3.5 19.5a5.5 5.5 0 0 1 11 0" }),
+    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("circle", { cx: "16.5", cy: "9.5", r: "2.6" }),
+    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("path", { d: "M15.5 14.6a4.8 4.8 0 0 1 5 4.9" })
   ] })
 };
 function fmtPlatform(ua) {
@@ -2839,7 +2846,8 @@ function AboutPanel({ t, onClose }) {
   const links = [
     { key: "website", href: ABOUT_LINKS.website, icon: "globe", label: t("aboutWebsite") },
     { key: "github", href: ABOUT_LINKS.github, icon: "link", label: t("aboutGithub") },
-    { key: "app", href: ABOUT_LINKS.app, icon: "phone", label: t("aboutApp") }
+    { key: "app", href: ABOUT_LINKS.app, icon: "phone", label: t("aboutApp") },
+    { key: "qq", href: ABOUT_LINKS.qq, icon: "group", label: t("aboutQq") }
   ];
   async function checkUpdate() {
     if (checkState === "loading") return;
@@ -4109,6 +4117,7 @@ function apply(ctx) {
       aboutWebsite: "\u5B98\u7F51",
       aboutGithub: "GitHub",
       aboutApp: "App \u4E0B\u8F7D",
+      aboutQq: "\u52A0\u5165QQ\u7FA4",
       updateCheck: "\u68C0\u67E5\u66F4\u65B0",
       updateChecking: "\u68C0\u67E5\u4E2D\u2026",
       updateRecheck: "\u91CD\u65B0\u68C0\u67E5",
@@ -4345,6 +4354,7 @@ function apply(ctx) {
       aboutWebsite: "Website",
       aboutGithub: "GitHub",
       aboutApp: "App Download",
+      aboutQq: "QQ Group",
       updateCheck: "Check for updates",
       updateChecking: "Checking\u2026",
       updateRecheck: "Check again",

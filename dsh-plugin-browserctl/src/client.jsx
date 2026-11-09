@@ -9,11 +9,12 @@ const STYLE_ID = 'browserctl/styles'
 // build.mjs 用 esbuild --define:__DSHREMOTE_VERSION__ 注入,浏览器端只认这个注入值
 // (不能 import fs/package.json,浏览器 bundle 里没有 Node 能力);源码未构建时显示 dev。
 const VERSION = typeof __DSHREMOTE_VERSION__ === 'string' ? __DSHREMOTE_VERSION__ : 'dev'
-// 「关于」面板三个外部链接,集中一处管理,日后发布一次改齐
+// 「关于」面板外部链接,集中一处管理,日后发布一次改齐
 const ABOUT_LINKS = {
   website: 'https://remote.ymzcc.com/dsh-remote/',
   github: 'https://github.com/Memorial-coder/dsh-remote-plugin',
   app: 'https://github.com/Memorial-coder/dsh-remote-plugin/releases/latest',
+  qq: 'https://qm.qq.com/q/K6RXqOKLAu',
 }
 
 // ---------- API 路径前缀(远程访问适配) ----------
@@ -1678,6 +1679,9 @@ const Svg = {
   ticket: (
     <svg {...svgProps} style={{ ...svgProps.style, marginRight: 0 }}><path d="M21 12a8 8 0 0 1-8 8H4.5l2.4-2.4A8 8 0 1 1 21 12z" /><path d="M8.5 10.5h7M8.5 13.5h4.5" /></svg>
   ),
+  group: (
+    <svg {...svgProps}><circle cx="9" cy="8.5" r="3.2" /><path d="M3.5 19.5a5.5 5.5 0 0 1 11 0" /><circle cx="16.5" cy="9.5" r="2.6" /><path d="M15.5 14.6a4.8 4.8 0 0 1 5 4.9" /></svg>
+  ),
 }
 
 function fmtPlatform(ua) {
@@ -2943,6 +2947,7 @@ function AboutPanel({ t, onClose }) {
     { key: 'website', href: ABOUT_LINKS.website, icon: 'globe', label: t('aboutWebsite') },
     { key: 'github', href: ABOUT_LINKS.github, icon: 'link', label: t('aboutGithub') },
     { key: 'app', href: ABOUT_LINKS.app, icon: 'phone', label: t('aboutApp') },
+    { key: 'qq', href: ABOUT_LINKS.qq, icon: 'group', label: t('aboutQq') },
   ]
   async function checkUpdate() {
     if (checkState === 'loading') return
@@ -4310,6 +4315,7 @@ export function apply(ctx) {
       aboutWebsite: '官网',
       aboutGithub: 'GitHub',
       aboutApp: 'App 下载',
+      aboutQq: '加入QQ群',
       updateCheck: '检查更新',
       updateChecking: '检查中…',
       updateRecheck: '重新检查',
@@ -4546,6 +4552,7 @@ export function apply(ctx) {
       aboutWebsite: 'Website',
       aboutGithub: 'GitHub',
       aboutApp: 'App Download',
+      aboutQq: 'QQ Group',
       updateCheck: 'Check for updates',
       updateChecking: 'Checking…',
       updateRecheck: 'Check again',
