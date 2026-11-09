@@ -178,7 +178,7 @@ def _elevated_taskkill(pids):
               "Write-Output ('EXIT=' + $LASTEXITCODE)" % pid_args)
     try:
         subprocess.run(["powershell", "-NoProfile", "-Command", script],
-                       capture_output=True, text=True, timeout=120,
+                       capture_output=True, text=True, errors="replace", timeout=120,
                        creationflags=CREATE_NO_WINDOW)
     except Exception:
         return False
@@ -306,7 +306,7 @@ def harden_file_perms(path):
             user = os.environ.get("USERNAME") or ""
             if user:
                 r = _run_hidden(["icacls", str(path), "/inheritance:r", "/grant:r", "%s:F" % user],
-                                capture_output=True, text=True, timeout=20)
+                                capture_output=True, text=True, errors="replace", timeout=20)
                 ok = r.returncode == 0
         else:
             os.chmod(path, 0o600)
@@ -429,7 +429,7 @@ def dsh_candidates():
                     pass
         if pids:
             ns = _run_hidden(
-                ["netstat", "-ano", "-p", "tcp"], capture_output=True, text=True, timeout=15,
+                ["netstat", "-ano", "-p", "tcp"], capture_output=True, text=True, errors="replace", timeout=15,
             ).stdout
             for line in ns.splitlines():
                 f = line.split()
@@ -6142,7 +6142,7 @@ def ensure_tunnel(remote_port=REMOTE_PORT):
                   % (running_port, int(remote_port)), flush=True)
             try:
                 _run_hidden(["taskkill", "/PID", str(pid), "/T", "/F"],
-                            capture_output=True, text=True, timeout=15)
+                            capture_output=True, text=True, errors="replace", timeout=15)
             except Exception as e:  # noqa: BLE001
                 print("[警告] 结束旧 frpc(pid=%d)失败: %r" % (pid, e), flush=True)
             for _ in range(40):
@@ -6234,7 +6234,7 @@ def ensure_tunnel(remote_port=REMOTE_PORT):
 def _pid_alive(pid):
     try:
         out = _run_hidden(["tasklist", "/FI", "PID eq %d" % pid, "/FO", "CSV", "/NH"],
-                          capture_output=True, text=True, timeout=10).stdout
+                          capture_output=True, text=True, errors="replace", timeout=10).stdout
         # 中文 Windows 输出 "信息: 没有运行的任务...";直接看 PID 是否出现在 CSV 行里
         return ('"%d"' % pid) in out
     except Exception:
@@ -6254,7 +6254,7 @@ def _live_frpc_pids():
         ps = ("Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'frpc.exe' } "
               "| ForEach-Object { $_.ProcessId }")
         out = _run_hidden(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
-                          capture_output=True, text=True, timeout=20).stdout
+                          capture_output=True, text=True, errors="replace", timeout=20).stdout
         return [int(x) for x in (out or "").split() if x.strip().isdigit()]
     except Exception:
         return []
@@ -7066,7 +7066,7 @@ def cmd_stop():
                     "| ForEach-Object { $_.ProcessId }; "
                     "$pids | Where-Object { $_ -ne %d }" % (_here_pat, _here_pat, _own_pid))
                 out = subprocess.run(["powershell", "-NoProfile", "-Command", ps],
-                                     capture_output=True, text=True, timeout=30,
+                                     capture_output=True, text=True, errors="replace", timeout=30,
                                      creationflags=CREATE_NO_WINDOW)
                 for line in out.stdout.splitlines():
                     tok = line.strip()
