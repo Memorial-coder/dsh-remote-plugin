@@ -3387,18 +3387,24 @@ class GateHandler(BaseHTTPRequestHandler):
                                 # 未完成分片中间插入独立帧:连接状态未知,断开回收
                                 raise ValueError("ws pmd: frame inside fragmented message")
                             if rsv1:
-                                payload = infl.decompress(payload + _WS_DEFLATE_TAIL)
-                                if len(payload) > WS_PMD_INFLATE_CAP:
-                                    raise ValueError("ws pmd: inflated body over cap")
+                                # 安全:max_length 流式解压,超限立刻断——压缩炸弹帧
+                                # (几 KB 压缩可膨胀 GB 级)不能先整块展开再检查长度
+                                payload = infl.decompress(
+                                    payload + _WS_DEFLATE_TAIL, WS_PMD_INFLATE_CAP + 1)
+                                if infl.unconsumed_tail or len(payload) > WS_PMD_INFLATE_CAP:
+                                    raise ValueError("ws pmd: inflate bomb rejected")
                             _send_remote(_ws_build_frame(opcode, payload, mask_key=mk))
                         elif opcode == 0x0:
                             if frag is None:
                                 raise ValueError("ws pmd: continuation without start")
                             frag[1].append(payload)
+                            if sum(len(p) for p in frag[1]) > WS_PMD_INFLATE_CAP:
+                                raise ValueError("ws pmd: fragmented body over raw cap")
                             if fin:
-                                whole = infl.decompress(b"".join(frag[1]) + _WS_DEFLATE_TAIL)
-                                if len(whole) > WS_PMD_INFLATE_CAP:
-                                    raise ValueError("ws pmd: inflated body over cap")
+                                whole = infl.decompress(
+                                    b"".join(frag[1]) + _WS_DEFLATE_TAIL, WS_PMD_INFLATE_CAP + 1)
+                                if infl.unconsumed_tail or len(whole) > WS_PMD_INFLATE_CAP:
+                                    raise ValueError("ws pmd: inflate bomb rejected")
                                 _send_remote(_ws_build_frame(frag[0], whole, mask_key=mk))
                                 frag = None
                         else:
