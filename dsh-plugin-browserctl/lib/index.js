@@ -4627,7 +4627,7 @@ function adminHeaders() {
   }
   return {};
 }
-var VERSION = true ? "1.0.47" : "dev";
+var VERSION = true ? "1.0.50" : "dev";
 var sessionTunnel = false;
 var ensureRunning = null;
 var lastEnsureError = "";
@@ -4705,6 +4705,38 @@ function pidAlive(pid) {
     return !!e && e.code === "EPERM";
   }
 }
+var DIAG_UTF8_STRICT = new TextDecoder("utf-8", { fatal: true });
+var DIAG_GBK_DECODER = null;
+try {
+  DIAG_GBK_DECODER = new TextDecoder("gbk");
+} catch {
+  DIAG_GBK_DECODER = null;
+}
+function decodeLogLine(lineBuf) {
+  try {
+    return DIAG_UTF8_STRICT.decode(lineBuf);
+  } catch {
+  }
+  if (DIAG_GBK_DECODER) {
+    try {
+      return DIAG_GBK_DECODER.decode(lineBuf);
+    } catch {
+    }
+  }
+  return lineBuf.toString("utf8");
+}
+function decodeLogBuffer(buf) {
+  let out = "";
+  let i = 0;
+  const n = buf.length;
+  while (i < n) {
+    let j = buf.indexOf(10, i);
+    if (j < 0) j = n;
+    out += decodeLogLine(buf.subarray(i, j < n ? j + 1 : n));
+    i = j < n ? j + 1 : n;
+  }
+  return out;
+}
 function readTextTail(file, maxBytes = 65536) {
   try {
     const info = statSync(file);
@@ -4715,7 +4747,7 @@ function readTextTail(file, maxBytes = 65536) {
     try {
       const buf = Buffer.alloc(len);
       readSync(fd, buf, 0, len, start);
-      return buf.toString("utf8");
+      return decodeLogBuffer(buf);
     } finally {
       closeSync(fd);
     }
@@ -4950,7 +4982,7 @@ function startLogFd() {
 }
 function startLogTail(n = 25) {
   try {
-    const txt = readFileSync(START_LOG, "utf8");
+    const txt = decodeLogBuffer(readFileSync(START_LOG));
     const lines = txt.split(/\r?\n/).filter((l) => l.trim());
     return lines.slice(-n).join("\n");
   } catch {
@@ -4972,7 +5004,7 @@ function tailLogText(file, maxBytes) {
     try {
       const buf = Buffer.alloc(Number(st.size) - start);
       readSync(fd, buf, 0, buf.length, start);
-      let text = buf.toString("utf8");
+      let text = decodeLogBuffer(buf);
       if (start > 0) {
         const nl = text.indexOf("\n");
         if (nl >= 0 && nl < text.length - 1) text = text.slice(nl + 1);
@@ -5036,6 +5068,9 @@ function runBrowserctl(args) {
   const fd = startLogFd();
   const child = spawn(py.cmd, [...py.pre, script, ...args], {
     cwd: path.dirname(script),
+    // PYTHONUTF8:强制 Python 子进程按 UTF-8 写 stdout/stderr 与默认 open() —— 否则中文 Windows
+    // 上日志按 GBK 落盘,导出/面板里中文变 □(2026-11-09 实测根因;闸机/看门狗子进程会继承)。
+    env: { ...process.env, PYTHONUTF8: "1", PYTHONIOENCODING: "utf-8" },
     // 有 fd 就把子进程输出落盘(失败原因可回读);拿不到 fd 才退回忽略
     stdio: fd === null ? "ignore" : ["ignore", fd, fd],
     detached: true,
@@ -5068,6 +5103,8 @@ function runBrowserctlAsync(args, timeoutMs = 8e3) {
     let done = false;
     const child = spawn(py.cmd, [...py.pre, script, ...args], {
       cwd: path.dirname(script),
+      // 与 runBrowserctl 同理:统一让 Python 子进程按 UTF-8 输出(见 runBrowserctl 注释)
+      env: { ...process.env, PYTHONUTF8: "1", PYTHONIOENCODING: "utf-8" },
       stdio: "ignore",
       detached: true,
       creationflags
@@ -6365,6 +6402,8 @@ export {
   PY_NOT_FOUND,
   apply,
   coreNotFoundError,
+  decodeLogBuffer,
+  decodeLogLine,
   diagRedact,
   inject,
   name,

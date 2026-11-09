@@ -208,6 +208,40 @@ function pidAlive(pid) {
   }
 }
 
+// 日志文件编码自愈(2026-11-09 用户实测导出仍有方块):
+// 中文 Windows 上 Python 子进程默认按 ANSI/GBK 写日志(browserctl_fwd/start/watch.log 实测全是 GBK),
+// 而 frpc.exe(Go)写 UTF-8 —— 同一份诊断导出里两种编码混着。Buffer.toString('utf8') 遇 GBK 字节
+// 会把失效序列替换成 U+FFFD,任何查看器都渲染成 □(记事本也救不了)。对策:按行解码,先 utf8 严格
+// (fatal),失败退 GBK,再失败才让 utf8 宽松兜底出 U+FFFD。GBK 多字节对的尾字节 ≥0x40,不可能是
+// \n(0x0A),所以按 \n 切行不会劈开一个 GBK/UTF-8 编码单元。TextDecoder('gbk') 依赖 ICU,
+// Node/Electron 默认全量 ICU;个别精简构建拿不到时跳过 GBK 档(退回旧行为)。
+const DIAG_UTF8_STRICT = new TextDecoder('utf-8', { fatal: true })
+let DIAG_GBK_DECODER = null
+try { DIAG_GBK_DECODER = new TextDecoder('gbk') } catch { DIAG_GBK_DECODER = null }
+
+/** 单行字节 → 文本:utf8 严格 → GBK → utf8 宽松(兜底 U+FFFD)。 */
+export function decodeLogLine(lineBuf) {
+  try { return DIAG_UTF8_STRICT.decode(lineBuf) } catch { /* 试下一档 */ }
+  if (DIAG_GBK_DECODER) {
+    try { return DIAG_GBK_DECODER.decode(lineBuf) } catch { /* 试兜底档 */ }
+  }
+  return lineBuf.toString('utf8')
+}
+
+/** 日志字节流按 \n 切行逐行转码(换行原样保留)。 */
+export function decodeLogBuffer(buf) {
+  let out = ''
+  let i = 0
+  const n = buf.length
+  while (i < n) {
+    let j = buf.indexOf(0x0a, i)
+    if (j < 0) j = n
+    out += decodeLogLine(buf.subarray(i, j < n ? j + 1 : n))
+    i = j < n ? j + 1 : n
+  }
+  return out
+}
+
 /** 读文本文件尾部(最多 maxBytes)。读不到返回 ''。 */
 function readTextTail(file, maxBytes = 65536) {
   try {
@@ -219,7 +253,7 @@ function readTextTail(file, maxBytes = 65536) {
     try {
       const buf = Buffer.alloc(len)
       readSync(fd, buf, 0, len, start)
-      return buf.toString('utf8')
+      return decodeLogBuffer(buf)
     } finally {
       closeSync(fd)
     }
@@ -510,7 +544,7 @@ function startLogFd() {
 /** 读启动日志尾部,给面板显示失败原因用。最多取最后 n 行。 */
 function startLogTail(n = 25) {
   try {
-    const txt = readFileSync(START_LOG, 'utf8')
+    const txt = decodeLogBuffer(readFileSync(START_LOG))
     const lines = txt.split(/\r?\n/).filter(l => l.trim())
     return lines.slice(-n).join('\n')
   } catch { return '' }
@@ -536,7 +570,7 @@ export function tailLogText(file, maxBytes) {
     try {
       const buf = Buffer.alloc(Number(st.size) - start)
       readSync(fd, buf, 0, buf.length, start)
-      let text = buf.toString('utf8')
+      let text = decodeLogBuffer(buf)
       if (start > 0) {
         const nl = text.indexOf('\n')
         if (nl >= 0 && nl < text.length - 1) text = text.slice(nl + 1)
@@ -606,6 +640,9 @@ function runBrowserctl(args) {
   const fd = startLogFd()
   const child = spawn(py.cmd, [...py.pre, script, ...args], {
     cwd: path.dirname(script),
+    // PYTHONUTF8:强制 Python 子进程按 UTF-8 写 stdout/stderr 与默认 open() —— 否则中文 Windows
+    // 上日志按 GBK 落盘,导出/面板里中文变 □(2026-11-09 实测根因;闸机/看门狗子进程会继承)。
+    env: { ...process.env, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8' },
     // 有 fd 就把子进程输出落盘(失败原因可回读);拿不到 fd 才退回忽略
     stdio: fd === null ? 'ignore' : ['ignore', fd, fd],
     detached: true,
@@ -637,6 +674,8 @@ function runBrowserctlAsync(args, timeoutMs = 8000) {
     let done = false
     const child = spawn(py.cmd, [...py.pre, script, ...args], {
       cwd: path.dirname(script),
+      // 与 runBrowserctl 同理:统一让 Python 子进程按 UTF-8 输出(见 runBrowserctl 注释)
+      env: { ...process.env, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8' },
       stdio: 'ignore',
       detached: true,
       creationflags,
