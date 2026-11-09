@@ -844,7 +844,13 @@ try{
 if (window.__dshFileDl) return;
 window.__dshFileDl = 1;
 if (!(matchMedia('(any-pointer: coarse)').matches || navigator.maxTouchPoints > 0)) return;
-var BASE = location.origin + '/browserctl-gate/file?name=';
+/* BASE 必须按当前页面目录解析(2026-11-09 502 实锤):绝对根 /browserctl-gate/ 只在
+   官方 /p/<port>/ 形态配套的 nginx 根 location(写死 17901)下有效;uid 形态
+   (/dsh-remote/p/u<uid>/)点它会打到 17901 —— 该端口在多用户迁移后已无 frpc 注册,
+   ss 实测无人监听 → nginx 502。改成页面相对路径后:
+   官方 /p/17901/ → nginx $p_path 剥前缀 → 闸机 ✓;
+   uid /dsh-remote/p/u<uid>/ → 服务器 resolveUidPort 剥 /p/u<uid>/ → 各自闸机 ✓。 */
+var BASE = location.origin + location.pathname.replace(/[^/]*$/, '') + 'browserctl-gate/file?name=';
 var STYLE = 'display:inline-flex;align-items:center;align-self:center;padding:3px 10px;margin:0 2px 0 6px;'
   + 'font-size:11px;line-height:1.5;border-radius:8px;border:1px solid rgba(140,140,150,.5);'
   + 'color:inherit;opacity:.9;text-decoration:none;flex:0 0 auto;white-space:nowrap;'
