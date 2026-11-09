@@ -4571,6 +4571,7 @@ import { spawn, spawnSync } from "node:child_process";
 import crypto from "node:crypto";
 import net from "node:net";
 import { existsSync, readdirSync, readFileSync, writeFileSync, renameSync, rmSync, openSync, closeSync, readSync, truncateSync, statSync, chmodSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 var name = "browserctl";
@@ -4615,6 +4616,8 @@ var DEVICES_PATH = path.join(CORE_DIR, "browserctl_devices.json");
 var SCRIPT_PATH = path.join(CORE_DIR, "browserctl.py");
 var SECRETS_PATH = path.join(CORE_DIR, "browserctl_secrets.json");
 var FRPC_LOG = path.join(CORE_DIR, "browserctl_frpc.log");
+var FWD_LOG = path.join(CORE_DIR, "browserctl_fwd.log");
+var WATCH_LOG = path.join(CORE_DIR, "browserctl_watch.log");
 var ADMIN_TOKEN_PATH = path.join(CORE_DIR, "browserctl_admin_token");
 function adminHeaders() {
   try {
@@ -4624,7 +4627,7 @@ function adminHeaders() {
   }
   return {};
 }
-var VERSION = true ? "1.0.46" : "dev";
+var VERSION = true ? "1.0.47" : "dev";
 var sessionTunnel = false;
 var ensureRunning = null;
 var lastEnsureError = "";
@@ -4953,6 +4956,74 @@ function startLogTail(n = 25) {
   } catch {
     return "";
   }
+}
+var TICKET_DIAG_LOG_SPECS = [
+  { name: "browserctl_fwd.log", file: FWD_LOG, max: 64 * 1024 },
+  { name: "browserctl_frpc.log", file: FRPC_LOG, max: 48 * 1024 },
+  { name: "browserctl_start.log", file: START_LOG, max: 48 * 1024 },
+  { name: "browserctl_watch.log", file: WATCH_LOG, max: 48 * 1024 }
+];
+function tailLogText(file, maxBytes) {
+  try {
+    const st = statSync(file);
+    if (!Number(st.size)) return { text: "", truncated: false };
+    const start = Math.max(0, Number(st.size) - maxBytes);
+    const fd = openSync(file, "r");
+    try {
+      const buf = Buffer.alloc(Number(st.size) - start);
+      readSync(fd, buf, 0, buf.length, start);
+      let text = buf.toString("utf8");
+      if (start > 0) {
+        const nl = text.indexOf("\n");
+        if (nl >= 0 && nl < text.length - 1) text = text.slice(nl + 1);
+        return { text: "\u2026\uFF08\u65E5\u5FD7\u8FC7\u957F\uFF0C\u4EC5\u4FDD\u7559\u6700\u540E " + Math.round(maxBytes / 1024) + " KB\uFF09\n" + text, truncated: true };
+      }
+      return { text, truncated: false };
+    } finally {
+      closeSync(fd);
+    }
+  } catch {
+    return { text: "", truncated: false };
+  }
+}
+function diagRedact(input) {
+  let s = String(input == null ? "" : input);
+  s = s.replace(/\u001b\[[0-9;]*[A-Za-z]/g, "");
+  s = s.replace(/\beyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\b/g, "***");
+  s = s.replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]{8,}/gi, "$1***");
+  s = s.replace(/\b(token|secret|password|passwd|pwd|sig|signature|apikey|api_key|access_key|auth_key|privkey)\s*([=:])\s*("[^"]*"|'[^']*'|[^\s,;&"'}]+)/gi, "$1$2***");
+  s = s.replace(/(^|[\s\[])(cookie|set-cookie|authorization)[ \t]*:[ \t]*[^\r\n]+/gim, "$1$2: ***");
+  s = s.replace(/\b[0-9a-f]{32,}\b/gi, "***");
+  s = s.replace(/\b[A-Za-z0-9_-]{40,}\b/g, "***");
+  s = s.replace(/[A-Z]:\\Users\\[^\\\s"']+/gi, (m) => m.split("\\").slice(0, 2).join("\\") + "\\***");
+  s = s.replace(/\/home\/[^/\s"']+/g, "/home/***");
+  s = s.replace(/\b[A-Za-z0-9._%+-]+@([A-Za-z0-9.-]+\.[A-Za-z]{2,})\b/g, "***@$1");
+  s = s.replace(/(?<![\w./-])(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})(?![\w.])/g, (m, a, b, c, d) => {
+    const n = [a, b, c, d].map(Number);
+    if (n.some((x) => x > 255)) return m;
+    if (m === "127.0.0.1" || m === "0.0.0.0" || m === "255.255.255.255") return m;
+    return a + "." + b + ".x.x";
+  });
+  return s;
+}
+function exportDir() {
+  let base = String(process.env.USERPROFILE || process.env.HOME || ".");
+  try {
+    base = os.homedir();
+  } catch {
+  }
+  const candidates = [
+    path.join(base, "Desktop"),
+    path.join(base, "Downloads"),
+    base
+  ];
+  for (const dir of candidates) {
+    try {
+      if (existsSync(dir) && statSync(dir).isDirectory()) return dir;
+    } catch {
+    }
+  }
+  return base;
 }
 function runBrowserctl(args) {
   const script = SCRIPT_PATH;
@@ -6023,6 +6094,120 @@ function apply(ctx, config = {}) {
         });
         return;
       }
+      if (route === "/browserctl/api/ticket/export-diag") {
+        if ((req.method || "GET") !== "GET") {
+          sendJson(res, 405, { ok: false, error: "GET only" });
+          return;
+        }
+        if (!apiAuthorized(req)) {
+          sendJson(res, 401, { ok: false, error: "\u672A\u6388\u6743:\u8BF7\u901A\u8FC7\u9762\u677F\u8BBF\u95EE" });
+          return;
+        }
+        const dirParam = String(url.searchParams.get("dir") || "").trim();
+        const withText = url.searchParams.get("withText") === "1";
+        let targetDir = exportDir();
+        if (dirParam) {
+          let resolved = "";
+          try {
+            resolved = path.resolve(dirParam);
+          } catch (e) {
+            resolved = "";
+          }
+          let okDir = false;
+          try {
+            okDir = !!resolved && existsSync(resolved) && statSync(resolved).isDirectory();
+          } catch {
+            okDir = false;
+          }
+          if (!okDir) {
+            sendJson(res, 400, { ok: false, error: "\u76EE\u5F55\u4E0D\u5B58\u5728\u6216\u4E0D\u662F\u6587\u4EF6\u5939: " + (resolved || dirParam) });
+            return;
+          }
+          targetDir = resolved;
+        }
+        const st = readState();
+        const sec = readSecrets();
+        const pad = (n) => String(n).padStart(2, "0");
+        const now = /* @__PURE__ */ new Date();
+        const y = now.getFullYear();
+        const mo = pad(now.getMonth() + 1);
+        const dd = pad(now.getDate());
+        const hh = pad(now.getHours());
+        const mi = pad(now.getMinutes());
+        const ss = pad(now.getSeconds());
+        const parts = [];
+        parts.push("DSH \u8FDC\u7A0B\u52A9\u624B \xB7 \u8BCA\u65AD\u65E5\u5FD7\u5BFC\u51FA");
+        parts.push("\u5BFC\u51FA\u65F6\u95F4: " + y + "-" + mo + "-" + dd + " " + hh + ":" + mi + ":" + ss);
+        parts.push("\u63D2\u4EF6\u7248\u672C: " + VERSION);
+        parts.push("\u8FDE\u63A5\u6A21\u5F0F: " + String(sec.server_mode || "unknown"));
+        parts.push("\u95F8\u673A: running=" + !!st.fwd_pid + " port=" + (Number(st.fwd_port) || 3080) + " remotePort=" + (Number(st.remote_port) || 0) + " tunnelOk=" + (st.tunnel_ok === true) + " dshPort=" + (Number(st.dsh_port) || 0));
+        if (st.last_error) parts.push("\u6700\u8FD1\u9519\u8BEF: " + diagRedact(String(st.last_error)));
+        parts.push("");
+        let logCount = 0;
+        for (const spec of TICKET_DIAG_LOG_SPECS) {
+          const r = tailLogText(spec.file, spec.max);
+          if (!r.text || !r.text.trim()) continue;
+          logCount++;
+          parts.push("==================== " + spec.name + (r.truncated ? "\uFF08\u622A\u5C3E\uFF09" : "") + " ====================");
+          parts.push(diagRedact(r.text));
+          parts.push("");
+        }
+        if (!logCount) parts.push("\uFF08\u672C\u673A\u6682\u65E0\u53EF\u8BFB\u53D6\u7684\u8FD0\u884C\u65E5\u5FD7:\u95F8\u673A\u53EF\u80FD\u8FD8\u6CA1\u542F\u52A8\u8FC7\uFF09");
+        const content = parts.join("\n");
+        const baseName = "DSH\u8BCA\u65AD\u65E5\u5FD7-" + y + mo + dd + "-" + hh + mi + ss + ".txt";
+        let name2 = baseName;
+        for (let i = 2; i <= 9; i++) {
+          if (!existsSync(path.join(targetDir, name2))) break;
+          name2 = baseName.replace(/\.txt$/, "-" + i + ".txt");
+        }
+        const full = path.join(targetDir, name2);
+        const fileContent = "\uFEFF" + content;
+        try {
+          writeFileSync(full, fileContent, "utf8");
+        } catch (e) {
+          sendJson(res, 500, { ok: false, error: "\u5199\u5165\u5931\u8D25: " + String(e && e.message || e) });
+          return;
+        }
+        const fileBytes = Buffer.byteLength(fileContent);
+        sendJson(res, 200, withText ? { ok: true, name: name2, path: full, bytes: fileBytes, content } : { ok: true, name: name2, path: full, bytes: fileBytes });
+        return;
+      }
+      if (route === "/browserctl/api/ticket/reveal") {
+        if ((req.method || "GET") !== "GET") {
+          sendJson(res, 405, { ok: false, error: "GET only" });
+          return;
+        }
+        if (!apiAuthorized(req) || csrfBlocked(req)) {
+          sendJson(res, 403, { ok: false, error: "\u672A\u6388\u6743:\u8BF7\u901A\u8FC7\u9762\u677F\u8BBF\u95EE" });
+          return;
+        }
+        if (process.platform !== "win32") {
+          sendJson(res, 400, { ok: false, error: "\u4EC5\u652F\u6301 Windows" });
+          return;
+        }
+        const p = String(url.searchParams.get("path") || "").trim();
+        let resolved = "";
+        try {
+          resolved = p ? path.resolve(p) : "";
+        } catch {
+          resolved = "";
+        }
+        if (!resolved || !existsSync(resolved)) {
+          sendJson(res, 400, { ok: false, error: "\u6587\u4EF6\u4E0D\u5B58\u5728: " + (resolved || p) });
+          return;
+        }
+        try {
+          const child = spawn("explorer", ["/select," + resolved], { detached: true, stdio: "ignore" });
+          child.on("error", () => {
+          });
+          child.unref();
+        } catch (e) {
+          sendJson(res, 500, { ok: false, error: "\u6253\u5F00\u5931\u8D25: " + String(e && e.message || e) });
+          return;
+        }
+        sendJson(res, 200, { ok: true });
+        return;
+      }
       sendJson(res, 404, { error: "unknown route" });
     }
   }), "dshremote: routes");
@@ -6180,9 +6365,11 @@ export {
   PY_NOT_FOUND,
   apply,
   coreNotFoundError,
+  diagRedact,
   inject,
   name,
   resolveCoreRoot,
   resolvePython,
+  tailLogText,
   tunnelReady
 };

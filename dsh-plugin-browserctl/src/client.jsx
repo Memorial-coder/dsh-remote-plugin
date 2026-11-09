@@ -1422,6 +1422,44 @@ div[data-slot='sidebar.footer.action'] > * {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* ---------- 工单反馈弹窗(导出日志 → 选去向) ---------- */
+.dshBrowserCtlPanelTicket { width: min(600px, 94vw); overflow: hidden; }
+.dshBrowserCtlTicketBody {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding-right: 2px;
+}
+.dshBrowserCtlTicketBody > * { flex: 0 0 auto; }
+.dshBrowserCtlTicketInput {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13px;
+  line-height: 19px;
+  color: var(--dsw-alias-label-primary, inherit);
+  background: var(--dsw-alias-bg-layer-1, rgba(255,255,255,0.03));
+  border: 1px solid var(--dsw-alias-border-l2, #2a2c33);
+  border-radius: 9px;
+  outline: none;
+}
+.dshBrowserCtlTicketInput:focus { border-color: var(--dsw-alias-state-success-primary, #34b371); }
+.dshBrowserCtlTicketDest {
+  display: flex; flex-direction: column; gap: 3px; width: 100%;
+  margin: 0 0 8px; padding: 10px 12px; text-align: left;
+  border-radius: 9px; border: 1px solid var(--dsw-alias-border-secondary, #3a3c41);
+  background: transparent; color: inherit; font: inherit; cursor: pointer;
+}
+.dshBrowserCtlTicketDest:hover { background: var(--dsw-alias-bg-layer-2, rgba(255,255,255,0.06)); }
+.dshBrowserCtlTicketDest:disabled { opacity: .5; cursor: default; }
+.dshBrowserCtlTicketDestTitle { font-size: 13px; font-weight: 600; line-height: 18px; }
+.dshBrowserCtlTicketDestDesc { font-size: 11.5px; line-height: 16px; color: var(--dsw-alias-label-tertiary, #8b8f98); }
 `
 
 function installStyles() {
@@ -1636,6 +1674,9 @@ const Svg = {
   ),
   person: (
     <svg {...svgProps} style={{ ...svgProps.style, marginRight: 0 }}><circle cx="12" cy="7.5" r="3.5" /><path d="M4.5 20a7.5 7.5 0 0 1 15 0" /></svg>
+  ),
+  ticket: (
+    <svg {...svgProps} style={{ ...svgProps.style, marginRight: 0 }}><path d="M21 12a8 8 0 0 1-8 8H4.5l2.4-2.4A8 8 0 1 1 21 12z" /><path d="M8.5 10.5h7M8.5 13.5h4.5" /></svg>
   ),
 }
 
@@ -3440,6 +3481,199 @@ function AccountLoginModal({ t, onClose, onSaved }) {
   )
 }
 
+/* ---------- 工单反馈弹窗(导出日志 → 选去向:官网工单 / 存本地文件夹 / 复制内容) ---------- */
+// 插件端不再内嵌提交表单(表单在窄面板里体验差,且官方账号登录态与网页端是两套)。
+// 2026-11-09 起:先「生成并导出诊断日志」(host 组装+脱敏,落到桌面/下载,可另存自选目录),
+// 再从三个去向里选:
+//   1) 打开网页版工单 —— 跳官网 /app.html#tickets;未登录会被登录页接住(?next=),登录后直达工单页
+//   2) 存到其他文件夹 —— 浏览器支持目录选择器就直接选目录写入;不支持就退回手填路径(host 校验后写入)
+//   3) 复制日志内容 —— 已脱敏全文进剪贴板,可粘到聊天/文本框
+// 日志只在本机生成,不会自动上传;何时传、传不传完全由用户在网页端决定。
+const TICKET_PAGE_URL = 'https://remote.ymzcc.com/dsh-remote/app.html#tickets'
+
+async function ticketCopyText(s) {
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(s)
+      return true
+    }
+  } catch (e) { /* 非安全上下文/权限拒绝 → 走 execCommand 兜底 */ }
+  try {
+    const ta = document.createElement('textarea')
+    ta.value = s
+    ta.setAttribute('readonly', '')
+    ta.style.position = 'fixed'
+    ta.style.opacity = '0'
+    document.body.appendChild(ta)
+    ta.select()
+    const ok = document.execCommand('copy')
+    ta.remove()
+    return ok
+  } catch (e) { return false }
+}
+
+function TicketModal({ t, onClose }) {
+  const [busy, setBusy] = useState('')            // '' | export | save | reveal
+  const [err, setErr] = useState('')
+  const [info, setInfo] = useState('')
+  const [exported, setExported] = useState(null)  // {name,path,bytes,content?}
+  const [pickMode, setPickMode] = useState(false) // 无目录选择器时的路径输入
+  const [pickPath, setPickPath] = useState('')
+
+  const doExport = async (dir, tag) => {
+    if (busy) return
+    setBusy(tag || 'export'); setErr(''); setInfo('')
+    try {
+      const q = '?withText=1' + (dir ? '&dir=' + encodeURIComponent(dir) : '')
+      const r = await fetch(API_P + '/browserctl/api/ticket/export-diag' + q, { cache: 'no-store' })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok || !j.ok) {
+        // 404 = 宿主还是旧版本(新路由要 DSH 真正重启才会注册),给一句能照做的提示
+        setErr(r.status === 404
+          ? t('ticketExportHostOld')
+          : ((j && j.error) || ('HTTP ' + r.status)))
+        return
+      }
+      setExported(j)
+      setPickMode(false)
+      if (dir) setInfo(t('ticketSaveOk') + (j.path || ''))
+    } catch (e) {
+      setErr(String((e && e.message) || e))
+    } finally { setBusy('') }
+  }
+  const openWeb = () => { try { window.open(TICKET_PAGE_URL, '_blank', 'noopener') } catch (e) {} }
+
+  const revealFolder = async () => {
+    if (!exported || busy) return
+    setBusy('reveal'); setErr(''); setInfo('')
+    try {
+      const r = await fetch(API_P + '/browserctl/api/ticket/reveal?path=' + encodeURIComponent(exported.path || ''), { cache: 'no-store' })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok || !j.ok) setErr((j && j.error) || ('HTTP ' + r.status))
+    } catch (e) {
+      setErr(String((e && e.message) || e))
+    } finally { setBusy('') }
+  }
+
+  const copyContent = async () => {
+    if (!exported) return
+    if (!exported.content) { setErr(t('ticketNoContent')); return }
+    const ok = await ticketCopyText(exported.content)
+    setErr('')
+    setInfo(ok ? t('ticketCopyOk') : t('ticketCopyFail'))
+  }
+
+  const copyPath = async () => {
+    if (!exported) return
+    const ok = await ticketCopyText(exported.path || '')
+    if (ok) { setErr(''); setInfo(t('ticketCopyPathOk')) }
+  }
+
+  const saveToFolder = async () => {
+    if (!exported || busy) return
+    if (!exported.content) { setErr(t('ticketNoContent')); return }
+    // 优先目录选择器(Chromium/Electron 较新才有;选完直接把文件写进去)
+    if (typeof window.showDirectoryPicker === 'function') {
+      try {
+        const dir = await window.showDirectoryPicker()
+        const fh = await dir.getFileHandle(exported.name, { create: true })
+        const w = await fh.createWritable()
+        await w.write(exported.content || '')
+        await w.close()
+        setErr(''); setInfo(t('ticketSaveOk') + exported.name)
+        return
+      } catch (e) {
+        if (e && e.name === 'AbortError') return // 用户取消选择,不算错误
+        /* 选择器不可用/权限拒绝 → 退回手填路径 */
+      }
+    }
+    setPickMode(true)
+  }
+
+  const destStyle = { margin: '0 0 10px', fontSize: 12.5, lineHeight: 1.6, color: 'var(--dsw-alias-label-secondary,#a6aab2)' }
+  return (
+    <div className="dshBrowserCtlOverlay" role="dialog" aria-modal="true" aria-label={t('tickets')}>
+      <button className="dshBrowserCtlOverlayMask" type="button" aria-label={t('close')} onClick={onClose} />
+      <section className="dshBrowserCtlPanel dshBrowserCtlPanelNested dshBrowserCtlPanelTicket">
+        <header className="dshBrowserCtlHeader">
+          <div>
+            <h1>{t('tickets')}</h1>
+            <p>{t('ticketExportSubtitle')}</p>
+          </div>
+          <Tooltip label={t('close')}>
+            <Button variant="ghost" size="sm" aria-label={t('close')} icon={<IconCloseOutlineRegular />} onClick={onClose} />
+          </Tooltip>
+        </header>
+        <div className="dshBrowserCtlTicketBody">
+          {err ? <p className="dshBrowserCtlCfgErr">{err}</p> : null}
+          {info ? <p className="dshBrowserCtlCfgNote" style={{ marginTop: 0 }}>{info}</p> : null}
+          <div className="dshBrowserCtlActions" style={{ justifyContent: 'flex-start' }}>
+            <Button variant="primary" size="sm" disabled={!!busy} onClick={() => doExport('', 'export')}>
+              {busy === 'export'
+                ? (<><span className="dshBrowserCtlSpinner" aria-hidden="true" /> {t('ticketExporting')}</>)
+                : (exported ? t('ticketExportAgain') : t('ticketExportDo'))}
+            </Button>
+          </div>
+          {exported ? (
+            <div style={{
+              margin: '12px 0 2px', padding: '10px 12px', borderRadius: 9,
+              background: 'rgba(52,179,113,0.12)', border: '1px solid rgba(52,179,113,0.35)',
+            }}>
+              <div style={{ fontSize: 12.5, color: 'var(--dsw-alias-state-success-primary,#34b371)', marginBottom: 4 }}>
+                {t('ticketExportDone')}
+              </div>
+              <div style={{
+                fontSize: 11.5, lineHeight: 1.5, wordBreak: 'break-all',
+                fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+                color: 'var(--dsw-alias-label-secondary,#a6aab2)',
+              }}>{exported.path}</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+                <Button variant="secondary" size="sm" disabled={!!busy} onClick={revealFolder}>
+                  {busy === 'reveal'
+                    ? (<><span className="dshBrowserCtlSpinner" aria-hidden="true" /> {t('ticketOpening')}</>)
+                    : t('ticketOpenFolder')}
+                </Button>
+                <Button variant="secondary" size="sm" onClick={copyPath}>{t('ticketCopyPath')}</Button>
+              </div>
+            </div>
+          ) : null}
+          <p style={{ ...destStyle, margin: '14px 0 6px', fontWeight: 600, color: 'var(--dsw-alias-label-primary,inherit)' }}>{t('ticketDestTitle')}</p>
+          <button type="button" className="dshBrowserCtlTicketDest" onClick={openWeb}>
+            <span className="dshBrowserCtlTicketDestTitle">{t('ticketOpenWeb')}</span>
+            <span className="dshBrowserCtlTicketDestDesc">{t('ticketOpenWebDesc')}</span>
+          </button>
+          <button type="button" className="dshBrowserCtlTicketDest" disabled={!exported} onClick={saveToFolder}>
+            <span className="dshBrowserCtlTicketDestTitle">{t('ticketSaveOther')}</span>
+            <span className="dshBrowserCtlTicketDestDesc">{t('ticketSaveOtherDesc')}</span>
+          </button>
+          <button type="button" className="dshBrowserCtlTicketDest" disabled={!exported} onClick={copyContent}>
+            <span className="dshBrowserCtlTicketDestTitle">{t('ticketCopyContent')}</span>
+            <span className="dshBrowserCtlTicketDestDesc">{t('ticketCopyContentDesc')}</span>
+          </button>
+          {pickMode ? (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10, alignItems: 'center' }}>
+              <input
+                className="dshBrowserCtlTicketInput"
+                style={{ flex: '1 1 220px', minWidth: 0 }}
+                placeholder={t('ticketSavePathPh')}
+                value={pickPath}
+                onChange={e => setPickPath(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); if (pickPath.trim()) doExport(pickPath.trim(), 'save') } }}
+              />
+              <Button variant="secondary" size="sm" disabled={!!busy || !pickPath.trim()} onClick={() => doExport(pickPath.trim(), 'save')}>
+                {busy === 'save'
+                  ? (<><span className="dshBrowserCtlSpinner" aria-hidden="true" /> {t('ticketSaving')}</>)
+                  : t('ticketSaveGo')}
+              </Button>
+            </div>
+          ) : null}
+          <p className="dshBrowserCtlCfgNote" style={{ marginTop: 12 }}>{t('ticketExportNote')}</p>
+        </div>
+      </section>
+    </div>
+  )
+}
+
 function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
   const open = useStore(state => state.open)
   const [reloadToken, setReloadToken] = useState(0)
@@ -3456,6 +3690,8 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
   // 顶栏「账号登录」弹窗 + 未登录启动远程时的提示
   const [accountOpen, setAccountOpen] = useState(false)
   const [loginPrompt, setLoginPrompt] = useState(false)
+  // 工单反馈弹窗(独立浮层;内部复用 AccountLoginModal 处理未登录)
+  const [ticketOpen, setTicketOpen] = useState(false)
   // 启动失败的具体原因(如「找不到 Python」)。以前只 console.error,界面什么都不显示,
   // 用户只看到「点了没反应」,所以这里必须把原因原样呈现出来。
   const [startErr, setStartErr] = useState('')
@@ -3749,6 +3985,15 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
               </span>
             </Button>
           </Tooltip>
+          <Tooltip label={t('tickets')}>
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-label={t('tickets')}
+              icon={Svg.ticket}
+              onClick={() => setTicketOpen(true)}
+            />
+          </Tooltip>
           <Tooltip label={t('about')}>
             <Button variant="ghost" size="sm" aria-label={t('about')} icon={Svg.info} onClick={() => setAboutOpen(true)} />
           </Tooltip>
@@ -3965,6 +4210,9 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
       {configOpen && <ConfigPanel t={t} onClose={() => setConfigOpen(false)} onSaved={refreshAll} />}
       {accountOpen && (
         <AccountLoginModal t={t} onClose={() => setAccountOpen(false)} onSaved={refreshAll} />
+      )}
+      {ticketOpen && (
+        <TicketModal t={t} onClose={() => setTicketOpen(false)} />
       )}
       {loginPrompt && (
         <div className="dshBrowserCtlOverlay dshBrowserCtlLoginPrompt" role="dialog" aria-modal="true" aria-label={t('loginRequired')}>
@@ -4239,6 +4487,33 @@ export function apply(ctx) {
       pushKindJoin: '设备连入',
       pushKindDev: '设备',
       pushKindMsg: '消息',
+      // ---- 工单反馈(导出日志 → 网页端提交) ----
+      tickets: '工单反馈',
+      ticketExportSubtitle: '导出本机诊断日志（自动打码），然后选择日志去向。',
+      ticketExportDo: '生成并导出诊断日志',
+      ticketExporting: '正在导出…',
+      ticketExportAgain: '重新导出',
+      ticketExportDone: '已导出到：',
+      ticketDestTitle: '导出去向',
+      ticketOpenWeb: '打开网页版工单',
+      ticketOpenWebDesc: '推荐：登录后在网页端提交工单，并把这份 txt 作为「运行日志」上传。',
+      ticketSaveOther: '存到其他文件夹',
+      ticketSaveOtherDesc: '把这份日志再存一份到你选的文件夹。',
+      ticketCopyContent: '复制日志内容',
+      ticketCopyContentDesc: '把已打码的全文复制到剪贴板，可直接粘贴给别人。',
+      ticketOpenFolder: '打开所在文件夹',
+      ticketOpening: '正在打开…',
+      ticketCopyPath: '复制路径',
+      ticketCopyPathOk: '路径已复制',
+      ticketCopyOk: '日志内容已复制到剪贴板',
+      ticketCopyFail: '复制失败，请打开导出的 txt 手动复制。',
+      ticketSavePathPh: '粘贴文件夹完整路径，如 C:\\Users\\你\\Documents',
+      ticketSaveGo: '保存到这里',
+      ticketSaving: '正在保存…',
+      ticketSaveOk: '已另存到：',
+      ticketNoContent: '日志还没生成，请先「生成并导出诊断日志」。',
+      ticketExportNote: '日志只在本机生成、不会自动上传；何时上传、上传哪一版完全由你在网页端决定。',
+      ticketExportHostOld: '插件宿主还是旧版本（新功能要完全重启 DSH 才生效）。请彻底退出 DSH 再重新打开，然后重试。',
       pushKindAnnounce: '公告',
     },
     en: {
@@ -4448,6 +4723,33 @@ export function apply(ctx) {
       pushKindJoin: 'Connect',
       pushKindDev: 'Device',
       pushKindMsg: 'Message',
+      // ---- ticket feedback (export logs -> choose destination) ----
+      tickets: 'Ticket Feedback',
+      ticketExportSubtitle: 'Export the local diagnostic log (auto-redacted), then choose where it goes.',
+      ticketExportDo: 'Export diagnostic logs',
+      ticketExporting: 'Exporting…',
+      ticketExportAgain: 'Export again',
+      ticketExportDone: 'Exported to:',
+      ticketDestTitle: 'Where the log goes',
+      ticketOpenWeb: 'Open web ticket page',
+      ticketOpenWebDesc: 'Recommended: sign in, submit the ticket on the web and upload this txt as a log file.',
+      ticketSaveOther: 'Save to another folder',
+      ticketSaveOtherDesc: 'Keep another copy of this log in a folder you choose.',
+      ticketCopyContent: 'Copy log content',
+      ticketCopyContentDesc: 'Copy the redacted full text to the clipboard for pasting into a chat.',
+      ticketOpenFolder: 'Open folder',
+      ticketOpening: 'Opening…',
+      ticketCopyPath: 'Copy path',
+      ticketCopyPathOk: 'Path copied',
+      ticketCopyOk: 'Log content copied to clipboard',
+      ticketCopyFail: 'Copy failed — open the exported txt and copy manually.',
+      ticketSavePathPh: 'Paste a full folder path, e.g. C:\\Users\\you\\Documents',
+      ticketSaveGo: 'Save here',
+      ticketSaving: 'Saving…',
+      ticketSaveOk: 'Saved to: ',
+      ticketNoContent: 'Log not generated yet — click "Export diagnostic logs" first.',
+      ticketExportNote: 'Logs are generated locally and never uploaded automatically; you decide what to upload on the web.',
+      ticketExportHostOld: 'The plugin host is still the old version (this feature needs a full DSH restart). Quit DSH completely, reopen it, then try again.',
       pushKindAnnounce: 'Announcement',
     },
   }), 'browserctl: dictionaries')

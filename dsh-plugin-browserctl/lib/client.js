@@ -32,7 +32,7 @@ var import_dsh_client_store = require("@deepseek-ai/dsh-client-store");
 var import_jsx_runtime = require("react/jsx-runtime");
 var NS = "browserctl";
 var STYLE_ID = "browserctl/styles";
-var VERSION = true ? "1.0.46" : "dev";
+var VERSION = true ? "1.0.47" : "dev";
 var ABOUT_LINKS = {
   website: "https://remote.ymzcc.com/dsh-remote/",
   github: "https://github.com/Memorial-coder/dsh-remote-plugin",
@@ -1433,6 +1433,44 @@ div[data-slot='sidebar.footer.action'] > * {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* ---------- \u5DE5\u5355\u53CD\u9988\u5F39\u7A97(\u5BFC\u51FA\u65E5\u5FD7 \u2192 \u9009\u53BB\u5411) ---------- */
+.dshBrowserCtlPanelTicket { width: min(600px, 94vw); overflow: hidden; }
+.dshBrowserCtlTicketBody {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding-right: 2px;
+}
+.dshBrowserCtlTicketBody > * { flex: 0 0 auto; }
+.dshBrowserCtlTicketInput {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13px;
+  line-height: 19px;
+  color: var(--dsw-alias-label-primary, inherit);
+  background: var(--dsw-alias-bg-layer-1, rgba(255,255,255,0.03));
+  border: 1px solid var(--dsw-alias-border-l2, #2a2c33);
+  border-radius: 9px;
+  outline: none;
+}
+.dshBrowserCtlTicketInput:focus { border-color: var(--dsw-alias-state-success-primary, #34b371); }
+.dshBrowserCtlTicketDest {
+  display: flex; flex-direction: column; gap: 3px; width: 100%;
+  margin: 0 0 8px; padding: 10px 12px; text-align: left;
+  border-radius: 9px; border: 1px solid var(--dsw-alias-border-secondary, #3a3c41);
+  background: transparent; color: inherit; font: inherit; cursor: pointer;
+}
+.dshBrowserCtlTicketDest:hover { background: var(--dsw-alias-bg-layer-2, rgba(255,255,255,0.06)); }
+.dshBrowserCtlTicketDest:disabled { opacity: .5; cursor: default; }
+.dshBrowserCtlTicketDestTitle { font-size: 13px; font-weight: 600; line-height: 18px; }
+.dshBrowserCtlTicketDestDesc { font-size: 11.5px; line-height: 16px; color: var(--dsw-alias-label-tertiary, #8b8f98); }
 `;
 function installStyles() {
   let style = document.querySelector(`style[data-plugin="${STYLE_ID}"]`);
@@ -1681,6 +1719,10 @@ var Svg = {
   person: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("svg", { ...svgProps, style: { ...svgProps.style, marginRight: 0 }, children: [
     /* @__PURE__ */ (0, import_jsx_runtime.jsx)("circle", { cx: "12", cy: "7.5", r: "3.5" }),
     /* @__PURE__ */ (0, import_jsx_runtime.jsx)("path", { d: "M4.5 20a7.5 7.5 0 0 1 15 0" })
+  ] }),
+  ticket: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("svg", { ...svgProps, style: { ...svgProps.style, marginRight: 0 }, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("path", { d: "M21 12a8 8 0 0 1-8 8H4.5l2.4-2.4A8 8 0 1 1 21 12z" }),
+    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("path", { d: "M8.5 10.5h7M8.5 13.5h4.5" })
   ] })
 };
 function fmtPlatform(ua) {
@@ -3272,6 +3314,204 @@ function AccountLoginModal({ t, onClose, onSaved }) {
     ] })
   ] });
 }
+var TICKET_PAGE_URL = "https://remote.ymzcc.com/dsh-remote/app.html#tickets";
+async function ticketCopyText(s) {
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(s);
+      return true;
+    }
+  } catch (e) {
+  }
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = s;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand("copy");
+    ta.remove();
+    return ok;
+  } catch (e) {
+    return false;
+  }
+}
+function TicketModal({ t, onClose }) {
+  const [busy, setBusy] = (0, import_react.useState)("");
+  const [err, setErr] = (0, import_react.useState)("");
+  const [info, setInfo] = (0, import_react.useState)("");
+  const [exported, setExported] = (0, import_react.useState)(null);
+  const [pickMode, setPickMode] = (0, import_react.useState)(false);
+  const [pickPath, setPickPath] = (0, import_react.useState)("");
+  const doExport = async (dir, tag) => {
+    if (busy) return;
+    setBusy(tag || "export");
+    setErr("");
+    setInfo("");
+    try {
+      const q = "?withText=1" + (dir ? "&dir=" + encodeURIComponent(dir) : "");
+      const r = await fetch(API_P + "/browserctl/api/ticket/export-diag" + q, { cache: "no-store" });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j.ok) {
+        setErr(r.status === 404 ? t("ticketExportHostOld") : j && j.error || "HTTP " + r.status);
+        return;
+      }
+      setExported(j);
+      setPickMode(false);
+      if (dir) setInfo(t("ticketSaveOk") + (j.path || ""));
+    } catch (e) {
+      setErr(String(e && e.message || e));
+    } finally {
+      setBusy("");
+    }
+  };
+  const openWeb = () => {
+    try {
+      window.open(TICKET_PAGE_URL, "_blank", "noopener");
+    } catch (e) {
+    }
+  };
+  const revealFolder = async () => {
+    if (!exported || busy) return;
+    setBusy("reveal");
+    setErr("");
+    setInfo("");
+    try {
+      const r = await fetch(API_P + "/browserctl/api/ticket/reveal?path=" + encodeURIComponent(exported.path || ""), { cache: "no-store" });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j.ok) setErr(j && j.error || "HTTP " + r.status);
+    } catch (e) {
+      setErr(String(e && e.message || e));
+    } finally {
+      setBusy("");
+    }
+  };
+  const copyContent = async () => {
+    if (!exported) return;
+    if (!exported.content) {
+      setErr(t("ticketNoContent"));
+      return;
+    }
+    const ok = await ticketCopyText(exported.content);
+    setErr("");
+    setInfo(ok ? t("ticketCopyOk") : t("ticketCopyFail"));
+  };
+  const copyPath = async () => {
+    if (!exported) return;
+    const ok = await ticketCopyText(exported.path || "");
+    if (ok) {
+      setErr("");
+      setInfo(t("ticketCopyPathOk"));
+    }
+  };
+  const saveToFolder = async () => {
+    if (!exported || busy) return;
+    if (!exported.content) {
+      setErr(t("ticketNoContent"));
+      return;
+    }
+    if (typeof window.showDirectoryPicker === "function") {
+      try {
+        const dir = await window.showDirectoryPicker();
+        const fh = await dir.getFileHandle(exported.name, { create: true });
+        const w = await fh.createWritable();
+        await w.write(exported.content || "");
+        await w.close();
+        setErr("");
+        setInfo(t("ticketSaveOk") + exported.name);
+        return;
+      } catch (e) {
+        if (e && e.name === "AbortError") return;
+      }
+    }
+    setPickMode(true);
+  };
+  const destStyle = { margin: "0 0 10px", fontSize: 12.5, lineHeight: 1.6, color: "var(--dsw-alias-label-secondary,#a6aab2)" };
+  return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlOverlay", role: "dialog", "aria-modal": "true", "aria-label": t("tickets"), children: [
+    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { className: "dshBrowserCtlOverlayMask", type: "button", "aria-label": t("close"), onClick: onClose }),
+    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", { className: "dshBrowserCtlPanel dshBrowserCtlPanelNested dshBrowserCtlPanelTicket", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("header", { className: "dshBrowserCtlHeader", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("h1", { children: t("tickets") }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { children: t("ticketExportSubtitle") })
+        ] }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Tooltip, { label: t("close"), children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "ghost", size: "sm", "aria-label": t("close"), icon: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.IconCloseOutlineRegular, {}), onClick: onClose }) })
+      ] }),
+      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlTicketBody", children: [
+        err ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dshBrowserCtlCfgErr", children: err }) : null,
+        info ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dshBrowserCtlCfgNote", style: { marginTop: 0 }, children: info }) : null,
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlActions", style: { justifyContent: "flex-start" }, children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "primary", size: "sm", disabled: !!busy, onClick: () => doExport("", "export"), children: busy === "export" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlSpinner", "aria-hidden": "true" }),
+          " ",
+          t("ticketExporting")
+        ] }) : exported ? t("ticketExportAgain") : t("ticketExportDo") }) }),
+        exported ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { style: {
+          margin: "12px 0 2px",
+          padding: "10px 12px",
+          borderRadius: 9,
+          background: "rgba(52,179,113,0.12)",
+          border: "1px solid rgba(52,179,113,0.35)"
+        }, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: { fontSize: 12.5, color: "var(--dsw-alias-state-success-primary,#34b371)", marginBottom: 4 }, children: t("ticketExportDone") }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: {
+            fontSize: 11.5,
+            lineHeight: 1.5,
+            wordBreak: "break-all",
+            fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+            color: "var(--dsw-alias-label-secondary,#a6aab2)"
+          }, children: exported.path }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { style: { display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }, children: [
+            /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "secondary", size: "sm", disabled: !!busy, onClick: revealFolder, children: busy === "reveal" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
+              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlSpinner", "aria-hidden": "true" }),
+              " ",
+              t("ticketOpening")
+            ] }) : t("ticketOpenFolder") }),
+            /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "secondary", size: "sm", onClick: copyPath, children: t("ticketCopyPath") })
+          ] })
+        ] }) : null,
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { style: { ...destStyle, margin: "14px 0 6px", fontWeight: 600, color: "var(--dsw-alias-label-primary,inherit)" }, children: t("ticketDestTitle") }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", { type: "button", className: "dshBrowserCtlTicketDest", onClick: openWeb, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlTicketDestTitle", children: t("ticketOpenWeb") }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlTicketDestDesc", children: t("ticketOpenWebDesc") })
+        ] }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", { type: "button", className: "dshBrowserCtlTicketDest", disabled: !exported, onClick: saveToFolder, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlTicketDestTitle", children: t("ticketSaveOther") }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlTicketDestDesc", children: t("ticketSaveOtherDesc") })
+        ] }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", { type: "button", className: "dshBrowserCtlTicketDest", disabled: !exported, onClick: copyContent, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlTicketDestTitle", children: t("ticketCopyContent") }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlTicketDestDesc", children: t("ticketCopyContentDesc") })
+        ] }),
+        pickMode ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { style: { display: "flex", flexWrap: "wrap", gap: 8, marginTop: 10, alignItems: "center" }, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+            "input",
+            {
+              className: "dshBrowserCtlTicketInput",
+              style: { flex: "1 1 220px", minWidth: 0 },
+              placeholder: t("ticketSavePathPh"),
+              value: pickPath,
+              onChange: (e) => setPickPath(e.target.value),
+              onKeyDown: (e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  if (pickPath.trim()) doExport(pickPath.trim(), "save");
+                }
+              }
+            }
+          ),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "secondary", size: "sm", disabled: !!busy || !pickPath.trim(), onClick: () => doExport(pickPath.trim(), "save"), children: busy === "save" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
+            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlSpinner", "aria-hidden": "true" }),
+            " ",
+            t("ticketSaving")
+          ] }) : t("ticketSaveGo") })
+        ] }) : null,
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dshBrowserCtlCfgNote", style: { marginTop: 12 }, children: t("ticketExportNote") })
+      ] })
+    ] })
+  ] });
+}
 function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
   const open = useStore((state) => state.open);
   const [reloadToken, setReloadToken] = (0, import_react.useState)(0);
@@ -3283,6 +3523,7 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
   const [configOpen, setConfigOpen] = (0, import_react.useState)(false);
   const [accountOpen, setAccountOpen] = (0, import_react.useState)(false);
   const [loginPrompt, setLoginPrompt] = (0, import_react.useState)(false);
+  const [ticketOpen, setTicketOpen] = (0, import_react.useState)(false);
   const [startErr, setStartErr] = (0, import_react.useState)("");
   const [canElevate, setCanElevate] = (0, import_react.useState)(false);
   const [elevNeed, setElevNeed] = (0, import_react.useState)("");
@@ -3574,6 +3815,16 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
             ]
           }
         ) }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Tooltip, { label: t("tickets"), children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+          import_dsh_client_ui_primitives.Button,
+          {
+            variant: "ghost",
+            size: "sm",
+            "aria-label": t("tickets"),
+            icon: Svg.ticket,
+            onClick: () => setTicketOpen(true)
+          }
+        ) }),
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Tooltip, { label: t("about"), children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "ghost", size: "sm", "aria-label": t("about"), icon: Svg.info, onClick: () => setAboutOpen(true) }) }),
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Tooltip, { label: t("config"), children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "ghost", size: "sm", "aria-label": t("config"), icon: Svg.gear, onClick: () => setConfigOpen(true) }) }),
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Tooltip, { label: t("close"), children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
@@ -3771,6 +4022,7 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
     aboutOpen && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(AboutPanel, { t, onClose: () => setAboutOpen(false) }),
     configOpen && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(ConfigPanel, { t, onClose: () => setConfigOpen(false), onSaved: refreshAll }),
     accountOpen && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(AccountLoginModal, { t, onClose: () => setAccountOpen(false), onSaved: refreshAll }),
+    ticketOpen && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(TicketModal, { t, onClose: () => setTicketOpen(false) }),
     loginPrompt && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlOverlay dshBrowserCtlLoginPrompt", role: "dialog", "aria-modal": "true", "aria-label": t("loginRequired"), children: [
       /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { className: "dshBrowserCtlOverlayMask", type: "button", "aria-label": t("close"), onClick: () => setLoginPrompt(false) }),
       /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", { className: "dshBrowserCtlPanel", children: [
@@ -4034,6 +4286,33 @@ function apply(ctx) {
       pushKindJoin: "\u8BBE\u5907\u8FDE\u5165",
       pushKindDev: "\u8BBE\u5907",
       pushKindMsg: "\u6D88\u606F",
+      // ---- 工单反馈(导出日志 → 网页端提交) ----
+      tickets: "\u5DE5\u5355\u53CD\u9988",
+      ticketExportSubtitle: "\u5BFC\u51FA\u672C\u673A\u8BCA\u65AD\u65E5\u5FD7\uFF08\u81EA\u52A8\u6253\u7801\uFF09\uFF0C\u7136\u540E\u9009\u62E9\u65E5\u5FD7\u53BB\u5411\u3002",
+      ticketExportDo: "\u751F\u6210\u5E76\u5BFC\u51FA\u8BCA\u65AD\u65E5\u5FD7",
+      ticketExporting: "\u6B63\u5728\u5BFC\u51FA\u2026",
+      ticketExportAgain: "\u91CD\u65B0\u5BFC\u51FA",
+      ticketExportDone: "\u5DF2\u5BFC\u51FA\u5230\uFF1A",
+      ticketDestTitle: "\u5BFC\u51FA\u53BB\u5411",
+      ticketOpenWeb: "\u6253\u5F00\u7F51\u9875\u7248\u5DE5\u5355",
+      ticketOpenWebDesc: "\u63A8\u8350\uFF1A\u767B\u5F55\u540E\u5728\u7F51\u9875\u7AEF\u63D0\u4EA4\u5DE5\u5355\uFF0C\u5E76\u628A\u8FD9\u4EFD txt \u4F5C\u4E3A\u300C\u8FD0\u884C\u65E5\u5FD7\u300D\u4E0A\u4F20\u3002",
+      ticketSaveOther: "\u5B58\u5230\u5176\u4ED6\u6587\u4EF6\u5939",
+      ticketSaveOtherDesc: "\u628A\u8FD9\u4EFD\u65E5\u5FD7\u518D\u5B58\u4E00\u4EFD\u5230\u4F60\u9009\u7684\u6587\u4EF6\u5939\u3002",
+      ticketCopyContent: "\u590D\u5236\u65E5\u5FD7\u5185\u5BB9",
+      ticketCopyContentDesc: "\u628A\u5DF2\u6253\u7801\u7684\u5168\u6587\u590D\u5236\u5230\u526A\u8D34\u677F\uFF0C\u53EF\u76F4\u63A5\u7C98\u8D34\u7ED9\u522B\u4EBA\u3002",
+      ticketOpenFolder: "\u6253\u5F00\u6240\u5728\u6587\u4EF6\u5939",
+      ticketOpening: "\u6B63\u5728\u6253\u5F00\u2026",
+      ticketCopyPath: "\u590D\u5236\u8DEF\u5F84",
+      ticketCopyPathOk: "\u8DEF\u5F84\u5DF2\u590D\u5236",
+      ticketCopyOk: "\u65E5\u5FD7\u5185\u5BB9\u5DF2\u590D\u5236\u5230\u526A\u8D34\u677F",
+      ticketCopyFail: "\u590D\u5236\u5931\u8D25\uFF0C\u8BF7\u6253\u5F00\u5BFC\u51FA\u7684 txt \u624B\u52A8\u590D\u5236\u3002",
+      ticketSavePathPh: "\u7C98\u8D34\u6587\u4EF6\u5939\u5B8C\u6574\u8DEF\u5F84\uFF0C\u5982 C:\\Users\\\u4F60\\Documents",
+      ticketSaveGo: "\u4FDD\u5B58\u5230\u8FD9\u91CC",
+      ticketSaving: "\u6B63\u5728\u4FDD\u5B58\u2026",
+      ticketSaveOk: "\u5DF2\u53E6\u5B58\u5230\uFF1A",
+      ticketNoContent: "\u65E5\u5FD7\u8FD8\u6CA1\u751F\u6210\uFF0C\u8BF7\u5148\u300C\u751F\u6210\u5E76\u5BFC\u51FA\u8BCA\u65AD\u65E5\u5FD7\u300D\u3002",
+      ticketExportNote: "\u65E5\u5FD7\u53EA\u5728\u672C\u673A\u751F\u6210\u3001\u4E0D\u4F1A\u81EA\u52A8\u4E0A\u4F20\uFF1B\u4F55\u65F6\u4E0A\u4F20\u3001\u4E0A\u4F20\u54EA\u4E00\u7248\u5B8C\u5168\u7531\u4F60\u5728\u7F51\u9875\u7AEF\u51B3\u5B9A\u3002",
+      ticketExportHostOld: "\u63D2\u4EF6\u5BBF\u4E3B\u8FD8\u662F\u65E7\u7248\u672C\uFF08\u65B0\u529F\u80FD\u8981\u5B8C\u5168\u91CD\u542F DSH \u624D\u751F\u6548\uFF09\u3002\u8BF7\u5F7B\u5E95\u9000\u51FA DSH \u518D\u91CD\u65B0\u6253\u5F00\uFF0C\u7136\u540E\u91CD\u8BD5\u3002",
       pushKindAnnounce: "\u516C\u544A"
     },
     en: {
@@ -4243,6 +4522,33 @@ function apply(ctx) {
       pushKindJoin: "Connect",
       pushKindDev: "Device",
       pushKindMsg: "Message",
+      // ---- ticket feedback (export logs -> choose destination) ----
+      tickets: "Ticket Feedback",
+      ticketExportSubtitle: "Export the local diagnostic log (auto-redacted), then choose where it goes.",
+      ticketExportDo: "Export diagnostic logs",
+      ticketExporting: "Exporting\u2026",
+      ticketExportAgain: "Export again",
+      ticketExportDone: "Exported to:",
+      ticketDestTitle: "Where the log goes",
+      ticketOpenWeb: "Open web ticket page",
+      ticketOpenWebDesc: "Recommended: sign in, submit the ticket on the web and upload this txt as a log file.",
+      ticketSaveOther: "Save to another folder",
+      ticketSaveOtherDesc: "Keep another copy of this log in a folder you choose.",
+      ticketCopyContent: "Copy log content",
+      ticketCopyContentDesc: "Copy the redacted full text to the clipboard for pasting into a chat.",
+      ticketOpenFolder: "Open folder",
+      ticketOpening: "Opening\u2026",
+      ticketCopyPath: "Copy path",
+      ticketCopyPathOk: "Path copied",
+      ticketCopyOk: "Log content copied to clipboard",
+      ticketCopyFail: "Copy failed \u2014 open the exported txt and copy manually.",
+      ticketSavePathPh: "Paste a full folder path, e.g. C:\\Users\\you\\Documents",
+      ticketSaveGo: "Save here",
+      ticketSaving: "Saving\u2026",
+      ticketSaveOk: "Saved to: ",
+      ticketNoContent: 'Log not generated yet \u2014 click "Export diagnostic logs" first.',
+      ticketExportNote: "Logs are generated locally and never uploaded automatically; you decide what to upload on the web.",
+      ticketExportHostOld: "The plugin host is still the old version (this feature needs a full DSH restart). Quit DSH completely, reopen it, then try again.",
       pushKindAnnounce: "Announcement"
     }
   }), "browserctl: dictionaries");

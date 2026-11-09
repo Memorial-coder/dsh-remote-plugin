@@ -11,6 +11,7 @@ import { spawn, spawnSync } from 'node:child_process'
 import crypto from 'node:crypto'
 import net from 'node:net'
 import { existsSync, readdirSync, readFileSync, writeFileSync, renameSync, rmSync, openSync, closeSync, readSync, truncateSync, statSync, chmodSync } from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import QRCode from 'qrcode'
@@ -76,6 +77,9 @@ const SECRETS_PATH = path.join(CORE_DIR, 'browserctl_secrets.json')
 // frpc 日志:隧道就绪的**唯一权威依据**是日志里出现 `start proxy success`(端口注册成功)。
 // tunnelReady() 用它自愈 state 里滞后的 tunnel_ok(详见下面的自愈注释)。
 const FRPC_LOG = path.join(CORE_DIR, 'browserctl_frpc.log')
+// 工单「导出诊断日志」还要读闸机日志(fwd/主进程/watch)与 frpc 日志(常量见上)。
+const FWD_LOG = path.join(CORE_DIR, 'browserctl_fwd.log')
+const WATCH_LOG = path.join(CORE_DIR, 'browserctl_watch.log')
 // 本地管理令牌:闸机把特权端点(生成链接/配对码/改推送开关)从「loopback 即管理员」
 // 改成「loopback + 持有令牌」。每次调用都重新读,这样闸机重启后新建的令牌能立刻生效。
 const ADMIN_TOKEN_PATH = path.join(CORE_DIR, 'browserctl_admin_token')
@@ -510,6 +514,83 @@ function startLogTail(n = 25) {
     const lines = txt.split(/\r?\n/).filter(l => l.trim())
     return lines.slice(-n).join('\n')
   } catch { return '' }
+}
+
+// ---- 工单诊断日志:本机日志尾部 + 脱敏 -------------------------------------
+// 与服务端 src/ticketdiag.js 同一套思路(顺序很重要:JWT/Bearer 必须在通用 KV 规则之前,
+// 否则 Authorization 整行会被吞掉)。这里的结果会原样展示给用户预览,再随工单上传。
+const TICKET_DIAG_LOG_SPECS = [
+  { name: 'browserctl_fwd.log', file: FWD_LOG, max: 64 * 1024 },
+  { name: 'browserctl_frpc.log', file: FRPC_LOG, max: 48 * 1024 },
+  { name: 'browserctl_start.log', file: START_LOG, max: 48 * 1024 },
+  { name: 'browserctl_watch.log', file: WATCH_LOG, max: 48 * 1024 },
+]
+
+/** 读文件尾部 maxBytes 字节(从行首切,避免半行);返回 {text, truncated}。 */
+export function tailLogText(file, maxBytes) {
+  try {
+    const st = statSync(file)
+    if (!Number(st.size)) return { text: '', truncated: false }
+    const start = Math.max(0, Number(st.size) - maxBytes)
+    const fd = openSync(file, 'r')
+    try {
+      const buf = Buffer.alloc(Number(st.size) - start)
+      readSync(fd, buf, 0, buf.length, start)
+      let text = buf.toString('utf8')
+      if (start > 0) {
+        const nl = text.indexOf('\n')
+        if (nl >= 0 && nl < text.length - 1) text = text.slice(nl + 1)
+        return { text: '…（日志过长，仅保留最后 ' + Math.round(maxBytes / 1024) + ' KB）\n' + text, truncated: true }
+      }
+      return { text, truncated: false }
+    } finally { closeSync(fd) }
+  } catch { return { text: '', truncated: false } }
+}
+
+/** 日志脱敏:令牌/凭据/签名/IP 末两段/账号目录/他人邮箱。 */
+export function diagRedact(input) {
+  let s = String(input == null ? '' : input)
+  // ANSI 颜色控制符
+  s = s.replace(/\u001b\[[0-9;]*[A-Za-z]/g, '')
+  // JWT
+  s = s.replace(/\beyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\b/g, '***')
+  // Bearer xxx(必须早于通用 KV,否则会把整行吞掉)
+  s = s.replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]{8,}/gi, '$1***')
+  // 敏感键值:token=xxx / password: xxx / sig=xxx ...
+  s = s.replace(/\b(token|secret|password|passwd|pwd|sig|signature|apikey|api_key|access_key|auth_key|privkey)\s*([=:])\s*("[^"]*"|'[^']*'|[^\s,;&"'}]+)/gi, '$1$2***')
+  // Cookie / Authorization 头(日志行常带时间戳/模块前缀,所以不能按行首锚定)
+  s = s.replace(/(^|[\s\[])(cookie|set-cookie|authorization)[ \t]*:[ \t]*[^\r\n]+/gim, '$1$2: ***')
+  // 长十六进制串 / 长 base64url 串(会话令牌、签名片段)
+  s = s.replace(/\b[0-9a-f]{32,}\b/gi, '***')
+  s = s.replace(/\b[A-Za-z0-9_-]{40,}\b/g, '***')
+  // 账号目录
+  s = s.replace(/[A-Z]:\\Users\\[^\\\s"']+/gi, m => m.split('\\').slice(0, 2).join('\\') + '\\***')
+  s = s.replace(/\/home\/[^/\s"']+/g, '/home/***')
+  // 邮箱:保留域名,本地部分打码
+  s = s.replace(/\b[A-Za-z0-9._%+-]+@([A-Za-z0-9.-]+\.[A-Za-z]{2,})\b/g, '***@$1')
+  // IPv4:保留前两段(回环/未指定不做处理);前后向断言避免把版本号当 IP
+  s = s.replace(/(?<![\w./-])(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})(?![\w.])/g, (m, a, b, c, d) => {
+    const n = [a, b, c, d].map(Number)
+    if (n.some(x => x > 255)) return m
+    if (m === '127.0.0.1' || m === '0.0.0.0' || m === '255.255.255.255') return m
+    return a + '.' + b + '.x.x'
+  })
+  return s
+}
+
+// 诊断日志导出的落盘目录:优先桌面(用户最容易找到),其次下载,再退用户主目录。
+function exportDir() {
+  let base = String(process.env.USERPROFILE || process.env.HOME || '.')
+  try { base = os.homedir() } catch { /* 用环境变量兜底 */ }
+  const candidates = [
+    path.join(base, 'Desktop'),
+    path.join(base, 'Downloads'),
+    base,
+  ]
+  for (const dir of candidates) {
+    try { if (existsSync(dir) && statSync(dir).isDirectory()) return dir } catch { /* 忽略 */ }
+  }
+  return base
 }
 
 function runBrowserctl(args) {
@@ -1653,6 +1734,115 @@ export function apply(ctx, config = {}) {
             downloadUrl: (j && j.downloadUrl) || '',
             notes: Array.isArray(j && j.notes) ? j.notes : [],
           })
+          return
+        }
+        // ---- 工单反馈:提交/附件走网页版,本机只保留「导出诊断日志」----
+        if (route === '/browserctl/api/ticket/export-diag') {
+          // 「自己导出日志」:把本机诊断日志(已脱敏)拼成一份 txt 写到桌面/下载目录,
+          // 前端拿到完整路径后引导用户去网页版工单页上传提交。纯本地操作,不需要官方登录。
+          // 2026-11-09:支持 ?dir=<绝对路径>(另存到用户选的文件夹,必须已存在且是目录)
+          // 与 ?withText=1(响应里带 content 全文,给「复制日志内容」用,已同样脱敏)。
+          if ((req.method || 'GET') !== 'GET') { sendJson(res, 405, { ok: false, error: 'GET only' }); return }
+          if (!apiAuthorized(req)) { sendJson(res, 401, { ok: false, error: '未授权:请通过面板访问' }); return }
+          const dirParam = String(url.searchParams.get('dir') || '').trim()
+          const withText = url.searchParams.get('withText') === '1'
+          let targetDir = exportDir()
+          if (dirParam) {
+            let resolved = ''
+            try { resolved = path.resolve(dirParam) } catch (e) { resolved = '' }
+            let okDir = false
+            try { okDir = !!resolved && existsSync(resolved) && statSync(resolved).isDirectory() } catch { okDir = false }
+            if (!okDir) {
+              sendJson(res, 400, { ok: false, error: '目录不存在或不是文件夹: ' + (resolved || dirParam) })
+              return
+            }
+            targetDir = resolved
+          }
+          const st = readState()
+          const sec = readSecrets()
+          const pad = (n) => String(n).padStart(2, '0')
+          const now = new Date()
+          const y = now.getFullYear()
+          const mo = pad(now.getMonth() + 1)
+          const dd = pad(now.getDate())
+          const hh = pad(now.getHours())
+          const mi = pad(now.getMinutes())
+          const ss = pad(now.getSeconds())
+          const parts = []
+          parts.push('DSH 远程助手 · 诊断日志导出')
+          parts.push('导出时间: ' + y + '-' + mo + '-' + dd + ' ' + hh + ':' + mi + ':' + ss)
+          parts.push('插件版本: ' + VERSION)
+          parts.push('连接模式: ' + String(sec.server_mode || 'unknown'))
+          parts.push('闸机: running=' + (!!st.fwd_pid)
+            + ' port=' + (Number(st.fwd_port) || 3080)
+            + ' remotePort=' + (Number(st.remote_port) || 0)
+            + ' tunnelOk=' + (st.tunnel_ok === true)
+            + ' dshPort=' + (Number(st.dsh_port) || 0))
+          if (st.last_error) parts.push('最近错误: ' + diagRedact(String(st.last_error)))
+          parts.push('')
+          let logCount = 0
+          for (const spec of TICKET_DIAG_LOG_SPECS) {
+            const r = tailLogText(spec.file, spec.max)
+            if (!r.text || !r.text.trim()) continue
+            logCount++
+            parts.push('==================== ' + spec.name + (r.truncated ? '（截尾）' : '') + ' ====================')
+            parts.push(diagRedact(r.text))
+            parts.push('')
+          }
+          if (!logCount) parts.push('（本机暂无可读取的运行日志:闸机可能还没启动过）')
+          const content = parts.join('\n')
+          const baseName = 'DSH诊断日志-' + y + mo + dd + '-' + hh + mi + ss + '.txt'
+          // 同秒重名兜底:同名存在就顺延 -2..-9,避免把上一次的导出悄悄覆盖掉
+          let name = baseName
+          for (let i = 2; i <= 9; i++) {
+            if (!existsSync(path.join(targetDir, name))) break
+            name = baseName.replace(/\.txt$/, '-' + i + '.txt')
+          }
+          const full = path.join(targetDir, name)
+          // Windows 记事本/部分编辑器对「无 BOM 的 UTF-8」按 ANSI(GBK) 猜编码,
+          // 中文全部变方块(2026-11-09 用户实测截图)。落盘文件带 UTF-8 BOM,
+          // 编辑器就能正确识别;剪贴板/JSON 回传的 content 保持不带 BOM。
+          const fileContent = '\ufeff' + content
+          try {
+            writeFileSync(full, fileContent, 'utf8')
+          } catch (e) {
+            sendJson(res, 500, { ok: false, error: '写入失败: ' + String((e && e.message) || e) })
+            return
+          }
+          const fileBytes = Buffer.byteLength(fileContent)
+          sendJson(res, 200, withText
+            ? { ok: true, name, path: full, bytes: fileBytes, content }
+            : { ok: true, name, path: full, bytes: fileBytes })
+          return
+        }
+        if (route === '/browserctl/api/ticket/reveal') {
+          // 「打开所在文件夹」:在资源管理器里定位刚导出的 txt。GET 带副作用,
+          // 所以除 apiAuthorized 外再过一道 csrfBlocked(只接受同源/面板转发调用)。
+          if ((req.method || 'GET') !== 'GET') { sendJson(res, 405, { ok: false, error: 'GET only' }); return }
+          if (!apiAuthorized(req) || csrfBlocked(req)) {
+            sendJson(res, 403, { ok: false, error: '未授权:请通过面板访问' })
+            return
+          }
+          if (process.platform !== 'win32') {
+            sendJson(res, 400, { ok: false, error: '仅支持 Windows' })
+            return
+          }
+          const p = String(url.searchParams.get('path') || '').trim()
+          let resolved = ''
+          try { resolved = p ? path.resolve(p) : '' } catch { resolved = '' }
+          if (!resolved || !existsSync(resolved)) {
+            sendJson(res, 400, { ok: false, error: '文件不存在: ' + (resolved || p) })
+            return
+          }
+          try {
+            const child = spawn('explorer', ['/select,' + resolved], { detached: true, stdio: 'ignore' })
+            child.on('error', () => {})
+            child.unref()
+          } catch (e) {
+            sendJson(res, 500, { ok: false, error: '打开失败: ' + String((e && e.message) || e) })
+            return
+          }
+          sendJson(res, 200, { ok: true })
           return
         }
         sendJson(res, 404, { error: 'unknown route' })
