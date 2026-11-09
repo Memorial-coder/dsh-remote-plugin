@@ -32,7 +32,7 @@ var import_dsh_client_store = require("@deepseek-ai/dsh-client-store");
 var import_jsx_runtime = require("react/jsx-runtime");
 var NS = "browserctl";
 var STYLE_ID = "browserctl/styles";
-var VERSION = true ? "1.0.41" : "dev";
+var VERSION = true ? "1.0.46" : "dev";
 var ABOUT_LINKS = {
   website: "https://remote.ymzcc.com/dsh-remote/",
   github: "https://github.com/Memorial-coder/dsh-remote-plugin",
@@ -1204,6 +1204,24 @@ div[data-slot='sidebar.footer.action'] > * {
   outline: none;
   border-color: var(--dsw-alias-state-success-primary, #34b371);
 }
+/* \u6D88\u606F\u5185\u5BB9\u591A\u884C\u6846:\u4E0E CfgField input \u540C\u65CF,\u4F46\u7528\u6B63\u6587\u5B57\u4F53\u3001\u53EF\u6362\u884C */
+.dshBrowserCtlCfgField textarea {
+  min-height: 64px;
+  padding: 8px 10px;
+  border: 1px solid var(--dsw-alias-border-l2, #2a2c33);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-1, rgba(255,255,255,0.04));
+  color: var(--dsw-alias-label-primary, inherit);
+  font-size: 13px;
+  line-height: 18px;
+  font-family: inherit;
+  resize: none;
+  box-sizing: border-box;
+}
+.dshBrowserCtlCfgField textarea:focus {
+  outline: none;
+  border-color: var(--dsw-alias-state-success-primary, #34b371);
+}
 .dshBrowserCtlCfgNote {
   margin: 0;
   font-size: 11.5px;
@@ -1318,6 +1336,46 @@ div[data-slot='sidebar.footer.action'] > * {
   height: 42px !important;
   margin: 4px 0 !important;
   min-width: 128px;
+}
+/* \u624B\u52A8\u63A8\u9001\u6D88\u606F\u7F16\u8F91\u5668 */
+.dshBrowserCtlMsgCard {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--dsw-alias-border-l2, #2a2c33);
+  border-radius: 10px;
+  background: var(--dsw-alias-bg-layer-1, rgba(255,255,255,0.03));
+}
+.dshBrowserCtlMsgHead {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.dshBrowserCtlMsgTitle {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary, inherit);
+}
+.dshBrowserCtlMsgHint {
+  font-size: 11px;
+  line-height: 15px;
+  color: var(--dsw-alias-label-tertiary, #8b8f98);
+}
+.dshBrowserCtlMsgFoot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.dshBrowserCtlMsgCount {
+  flex: 1;
+  text-align: right;
+  font-size: 10.5px;
+  color: var(--dsw-alias-label-tertiary, #8b8f98);
+}
+.dshBrowserCtlMsgSendBtn {
+  height: 42px !important;
+  min-width: 96px;
 }
 /* \u6700\u8FD1\u63A8\u9001\u5217\u8868 */
 .dshBrowserCtlPushList {
@@ -2455,7 +2513,7 @@ function TotpCard({ t, reloadToken, onRefresh, disabled }) {
     ] })
   ] });
 }
-var PUSH_KIND = { test: "Test", verify: "Verify", kick: "Kick", ban: "Ban", totp: "Totp", pair: "Pair", join: "Join", dev: "Dev" };
+var PUSH_KIND = { test: "Test", verify: "Verify", kick: "Kick", ban: "Ban", totp: "Totp", pair: "Pair", join: "Join", dev: "Dev", msg: "Msg" };
 function pushKindLabel(t, kind) {
   const key = PUSH_KIND[kind];
   return key ? t("pushKind" + key) : kind || "";
@@ -2471,6 +2529,9 @@ function PushCard({ t, reloadToken }) {
   const [cfgErr, setCfgErr] = (0, import_react.useState)("");
   const [busy, setBusy] = (0, import_react.useState)("");
   const [testState, setTestState] = (0, import_react.useState)("idle");
+  const [msgTitle, setMsgTitle] = (0, import_react.useState)("");
+  const [msgBody, setMsgBody] = (0, import_react.useState)("");
+  const [msgState, setMsgState] = (0, import_react.useState)("idle");
   const [toast, setToast] = (0, import_react.useState)(null);
   const [items, setItems] = (0, import_react.useState)(null);
   const [polling, setPolling] = (0, import_react.useState)(false);
@@ -2539,6 +2600,33 @@ function PushCard({ t, reloadToken }) {
       setToast({ text: t("pushTestFail"), ok: false });
     } finally {
       setTestState("idle");
+    }
+  }
+  async function sendMessage() {
+    if (msgState === "loading") return;
+    const body = msgBody.trim();
+    if (!body) return;
+    setMsgState("loading");
+    setToast(null);
+    try {
+      if (!enabled) {
+        setToast({ text: t("pushSendOff"), ok: false });
+        return;
+      }
+      const q = new URLSearchParams({ kind: "msg", title: msgTitle.trim().slice(0, 120), body: body.slice(0, 500) }).toString();
+      const r = await fetch(API_P + "/browserctl-gate/notify?" + q, { cache: "no-store" });
+      const j = await r.json().catch(() => ({}));
+      const ok = !!(r.ok && j && j.ok && j.pushed !== false);
+      if (ok) {
+        setMsgTitle("");
+        setMsgBody("");
+        loadPoll();
+      }
+      setToast({ text: ok ? t("pushSendOk") : j && j.pushed === false ? t("pushSendOff") : j && j.error || t("pushSendFail"), ok });
+    } catch {
+      setToast({ text: t("pushSendFail"), ok: false });
+    } finally {
+      setMsgState("idle");
     }
   }
   async function loadPoll() {
@@ -2620,6 +2708,57 @@ function PushCard({ t, reloadToken }) {
         )
       ] }),
       cfgErr && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dshBrowserCtlCardDesc", style: { color: "var(--dsw-alias-state-error-primary,#e5655c)" }, children: cfgErr }),
+      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlMsgCard", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlMsgHead", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlMsgTitle", children: t("pushComposerTitle") }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlMsgHint", children: t("pushComposerHint") })
+        ] }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", { className: "dshBrowserCtlCfgField", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: t("pushMsgTitleLabel") }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+            "input",
+            {
+              value: msgTitle,
+              onChange: (e) => setMsgTitle(e.target.value),
+              placeholder: t("pushMsgTitlePh"),
+              maxLength: 120,
+              spellCheck: false,
+              disabled: msgState === "loading"
+            }
+          )
+        ] }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", { className: "dshBrowserCtlCfgField", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: t("pushMsgBodyLabel") }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+            "textarea",
+            {
+              value: msgBody,
+              onChange: (e) => setMsgBody(e.target.value),
+              placeholder: t("pushMsgBodyPh"),
+              maxLength: 500,
+              rows: 3,
+              disabled: msgState === "loading"
+            }
+          )
+        ] }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlMsgFoot", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { className: "dshBrowserCtlMsgCount", children: [
+            msgBody.length,
+            "/500"
+          ] }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+            import_dsh_client_ui_primitives.Button,
+            {
+              variant: "primary",
+              size: "sm",
+              className: "dshBrowserCtlMsgSendBtn",
+              disabled: msgState === "loading" || !msgBody.trim(),
+              onClick: sendMessage,
+              children: msgState === "loading" ? t("pushSending") : t("pushSend")
+            }
+          )
+        ] })
+      ] }),
       /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlActions", children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
         import_dsh_client_ui_primitives.Button,
         {
@@ -3869,6 +4008,17 @@ function apply(ctx) {
       pushTestBody: "\u8FD9\u662F\u4E00\u6761\u6765\u81EA DSH \u8FDC\u7A0B\u52A9\u624B\u7684\u6D4B\u8BD5\u63A8\u9001\u6D88\u606F",
       pushTestOk: "\u6D4B\u8BD5\u63A8\u9001\u5DF2\u53D1\u9001",
       pushTestFail: "\u6D4B\u8BD5\u63A8\u9001\u53D1\u9001\u5931\u8D25",
+      pushComposerTitle: "\u53D1\u9001\u6D88\u606F",
+      pushComposerHint: "\u53D1\u9001\u540E,\u624B\u673A App \u4E0E\u672C\u673A\u901A\u77E5\u4E2D\u5FC3\u90FD\u4F1A\u5F39\u51FA\u8FD9\u6761\u6D88\u606F",
+      pushMsgTitleLabel: "\u6807\u9898(\u53EF\u9009)",
+      pushMsgTitlePh: "\u4E0D\u586B\u5219\u53EA\u663E\u793A\u6D88\u606F\u5185\u5BB9",
+      pushMsgBodyLabel: "\u5185\u5BB9",
+      pushMsgBodyPh: "\u8F93\u5165\u8981\u63A8\u9001\u7684\u6D88\u606F\u2026",
+      pushSend: "\u53D1\u9001",
+      pushSending: "\u53D1\u9001\u4E2D\u2026",
+      pushSendOk: "\u6D88\u606F\u5DF2\u63A8\u9001",
+      pushSendOff: "\u63A8\u9001\u5F00\u5173\u672A\u5F00\u542F,\u6D88\u606F\u672A\u53D1\u51FA",
+      pushSendFail: "\u6D88\u606F\u53D1\u9001\u5931\u8D25",
       pushSaveFailed: "\u8BBE\u7F6E\u4FDD\u5B58\u5931\u8D25",
       pushRecent: "\u6700\u8FD1\u63A8\u9001",
       pushRefresh: "\u5237\u65B0",
@@ -3882,7 +4032,8 @@ function apply(ctx) {
       pushKindTotp: "2FA",
       pushKindPair: "\u914D\u5BF9",
       pushKindJoin: "\u8BBE\u5907\u8FDE\u5165",
-      pushKindDev: "\u8BBE\u5907"
+      pushKindDev: "\u8BBE\u5907",
+      pushKindMsg: "\u6D88\u606F"
     },
     en: {
       tab: "DshRemote",
@@ -4065,6 +4216,17 @@ function apply(ctx) {
       pushTestBody: "This is a test push from DSH Remote Assistant",
       pushTestOk: "Test push sent",
       pushTestFail: "Failed to send test push",
+      pushComposerTitle: "Send a message",
+      pushComposerHint: "The message pops up on the phone App and in this PC's notification centre",
+      pushMsgTitleLabel: "Title (optional)",
+      pushMsgTitlePh: "Leave empty to show the message only",
+      pushMsgBodyLabel: "Content",
+      pushMsgBodyPh: "Type the message to push\u2026",
+      pushSend: "Send",
+      pushSending: "Sending\u2026",
+      pushSendOk: "Message pushed",
+      pushSendOff: "Push is off \u2014 message not sent",
+      pushSendFail: "Failed to send message",
       pushSaveFailed: "Failed to save settings",
       pushRecent: "Recent pushes",
       pushRefresh: "Refresh",
@@ -4078,7 +4240,8 @@ function apply(ctx) {
       pushKindTotp: "2FA",
       pushKindPair: "Pair",
       pushKindJoin: "Connect",
-      pushKindDev: "Device"
+      pushKindDev: "Device",
+      pushKindMsg: "Message"
     }
   }), "browserctl: dictionaries");
   ctx.effect(() => installStyles(), "browserctl: styles");

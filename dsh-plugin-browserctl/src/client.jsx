@@ -1193,6 +1193,24 @@ div[data-slot='sidebar.footer.action'] > * {
   outline: none;
   border-color: var(--dsw-alias-state-success-primary, #34b371);
 }
+/* 消息内容多行框:与 CfgField input 同族,但用正文字体、可换行 */
+.dshBrowserCtlCfgField textarea {
+  min-height: 64px;
+  padding: 8px 10px;
+  border: 1px solid var(--dsw-alias-border-l2, #2a2c33);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-1, rgba(255,255,255,0.04));
+  color: var(--dsw-alias-label-primary, inherit);
+  font-size: 13px;
+  line-height: 18px;
+  font-family: inherit;
+  resize: none;
+  box-sizing: border-box;
+}
+.dshBrowserCtlCfgField textarea:focus {
+  outline: none;
+  border-color: var(--dsw-alias-state-success-primary, #34b371);
+}
 .dshBrowserCtlCfgNote {
   margin: 0;
   font-size: 11.5px;
@@ -1307,6 +1325,46 @@ div[data-slot='sidebar.footer.action'] > * {
   height: 42px !important;
   margin: 4px 0 !important;
   min-width: 128px;
+}
+/* 手动推送消息编辑器 */
+.dshBrowserCtlMsgCard {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--dsw-alias-border-l2, #2a2c33);
+  border-radius: 10px;
+  background: var(--dsw-alias-bg-layer-1, rgba(255,255,255,0.03));
+}
+.dshBrowserCtlMsgHead {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.dshBrowserCtlMsgTitle {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary, inherit);
+}
+.dshBrowserCtlMsgHint {
+  font-size: 11px;
+  line-height: 15px;
+  color: var(--dsw-alias-label-tertiary, #8b8f98);
+}
+.dshBrowserCtlMsgFoot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.dshBrowserCtlMsgCount {
+  flex: 1;
+  text-align: right;
+  font-size: 10.5px;
+  color: var(--dsw-alias-label-tertiary, #8b8f98);
+}
+.dshBrowserCtlMsgSendBtn {
+  height: 42px !important;
+  min-width: 96px;
 }
 /* 最近推送列表 */
 .dshBrowserCtlPushList {
@@ -2538,7 +2596,7 @@ function TotpCard({ t, reloadToken, onRefresh, disabled }) {
 }
 
 /* ---------- 「推送」页签:接收手机推送 + 系统安全事件 + 测试推送 + 最近推送 ---------- */
-const PUSH_KIND = { test: 'Test', verify: 'Verify', kick: 'Kick', ban: 'Ban', totp: 'Totp', pair: 'Pair', join: 'Join', dev: 'Dev' }
+const PUSH_KIND = { test: 'Test', verify: 'Verify', kick: 'Kick', ban: 'Ban', totp: 'Totp', pair: 'Pair', join: 'Join', dev: 'Dev', msg: 'Msg' }
 
 function pushKindLabel(t, kind) {
   const key = PUSH_KIND[kind]
@@ -2557,6 +2615,9 @@ function PushCard({ t, reloadToken }) {
   const [cfgErr, setCfgErr] = useState('')
   const [busy, setBusy] = useState('')          // '' | 'enabled' | 'system' —— 开关 loading 态
   const [testState, setTestState] = useState('idle') // idle | loading
+  const [msgTitle, setMsgTitle] = useState('')  // 手动推送:标题(可选)
+  const [msgBody, setMsgBody] = useState('')    // 手动推送:内容
+  const [msgState, setMsgState] = useState('idle') // idle | loading
   const [toast, setToast] = useState(null)      // { text, ok } | null,2.2s 自动消失
   const [items, setItems] = useState(null)
   const [polling, setPolling] = useState(false)
@@ -2627,6 +2688,36 @@ function PushCard({ t, reloadToken }) {
       setToast({ text: t('pushTestFail'), ok: false })
     } finally {
       setTestState('idle')
+    }
+  }
+
+  // 手动推送一条消息:入队后手机 App 与本机 Windows 通知中心(win_push)都会弹出(kind=msg)
+  async function sendMessage() {
+    if (msgState === 'loading') return
+    const body = msgBody.trim()
+    if (!body) return
+    setMsgState('loading')
+    setToast(null)
+    try {
+      if (!enabled) {
+        // 总开关没开就不打闸机,直接给明确提示(反馈要可懂,不留死按钮)
+        setToast({ text: t('pushSendOff'), ok: false })
+        return
+      }
+      const q = new URLSearchParams({ kind: 'msg', title: msgTitle.trim().slice(0, 120), body: body.slice(0, 500) }).toString()
+      const r = await fetch(API_P + '/browserctl-gate/notify?' + q, { cache: 'no-store' })
+      const j = await r.json().catch(() => ({}))
+      const ok = !!(r.ok && j && j.ok && j.pushed !== false)
+      if (ok) {
+        setMsgTitle('')
+        setMsgBody('')
+        loadPoll()   // 主动刷新「最近推送」:否则按钮看起来没生效,用户会连点刷屏(kb/10)
+      }
+      setToast({ text: ok ? t('pushSendOk') : (j && j.pushed === false ? t('pushSendOff') : ((j && j.error) || t('pushSendFail'))), ok })
+    } catch {
+      setToast({ text: t('pushSendFail'), ok: false })
+    } finally {
+      setMsgState('idle')
     }
   }
 
@@ -2711,6 +2802,47 @@ function PushCard({ t, reloadToken }) {
           </button>
         </div>
         {cfgErr && <p className="dshBrowserCtlCardDesc" style={{ color: 'var(--dsw-alias-state-error-primary,#e5655c)' }}>{cfgErr}</p>}
+        {/* 手动发送消息:手机 App + 本机通知中心都会弹出 */}
+        <div className="dshBrowserCtlMsgCard">
+          <div className="dshBrowserCtlMsgHead">
+            <span className="dshBrowserCtlMsgTitle">{t('pushComposerTitle')}</span>
+            <span className="dshBrowserCtlMsgHint">{t('pushComposerHint')}</span>
+          </div>
+          <label className="dshBrowserCtlCfgField">
+            <span>{t('pushMsgTitleLabel')}</span>
+            <input
+              value={msgTitle}
+              onChange={e => setMsgTitle(e.target.value)}
+              placeholder={t('pushMsgTitlePh')}
+              maxLength={120}
+              spellCheck={false}
+              disabled={msgState === 'loading'}
+            />
+          </label>
+          <label className="dshBrowserCtlCfgField">
+            <span>{t('pushMsgBodyLabel')}</span>
+            <textarea
+              value={msgBody}
+              onChange={e => setMsgBody(e.target.value)}
+              placeholder={t('pushMsgBodyPh')}
+              maxLength={500}
+              rows={3}
+              disabled={msgState === 'loading'}
+            />
+          </label>
+          <div className="dshBrowserCtlMsgFoot">
+            <span className="dshBrowserCtlMsgCount">{msgBody.length}/500</span>
+            <Button
+              variant="primary"
+              size="sm"
+              className="dshBrowserCtlMsgSendBtn"
+              disabled={msgState === 'loading' || !msgBody.trim()}
+              onClick={sendMessage}
+            >
+              {msgState === 'loading' ? t('pushSending') : t('pushSend')}
+            </Button>
+          </div>
+        </div>
         <div className="dshBrowserCtlActions">
           <Button
             variant="secondary"
@@ -4081,6 +4213,17 @@ export function apply(ctx) {
       pushTestBody: '这是一条来自 DSH 远程助手的测试推送消息',
       pushTestOk: '测试推送已发送',
       pushTestFail: '测试推送发送失败',
+      pushComposerTitle: '发送消息',
+      pushComposerHint: '发送后,手机 App 与本机通知中心都会弹出这条消息',
+      pushMsgTitleLabel: '标题(可选)',
+      pushMsgTitlePh: '不填则只显示消息内容',
+      pushMsgBodyLabel: '内容',
+      pushMsgBodyPh: '输入要推送的消息…',
+      pushSend: '发送',
+      pushSending: '发送中…',
+      pushSendOk: '消息已推送',
+      pushSendOff: '推送开关未开启,消息未发出',
+      pushSendFail: '消息发送失败',
       pushSaveFailed: '设置保存失败',
       pushRecent: '最近推送',
       pushRefresh: '刷新',
@@ -4095,6 +4238,7 @@ export function apply(ctx) {
       pushKindPair: '配对',
       pushKindJoin: '设备连入',
       pushKindDev: '设备',
+      pushKindMsg: '消息',
     },
     en: {
       tab: 'DshRemote',
@@ -4277,6 +4421,17 @@ export function apply(ctx) {
       pushTestBody: 'This is a test push from DSH Remote Assistant',
       pushTestOk: 'Test push sent',
       pushTestFail: 'Failed to send test push',
+      pushComposerTitle: 'Send a message',
+      pushComposerHint: 'The message pops up on the phone App and in this PC\'s notification centre',
+      pushMsgTitleLabel: 'Title (optional)',
+      pushMsgTitlePh: 'Leave empty to show the message only',
+      pushMsgBodyLabel: 'Content',
+      pushMsgBodyPh: 'Type the message to push…',
+      pushSend: 'Send',
+      pushSending: 'Sending…',
+      pushSendOk: 'Message pushed',
+      pushSendOff: 'Push is off — message not sent',
+      pushSendFail: 'Failed to send message',
       pushSaveFailed: 'Failed to save settings',
       pushRecent: 'Recent pushes',
       pushRefresh: 'Refresh',
@@ -4291,6 +4446,7 @@ export function apply(ctx) {
       pushKindPair: 'Pair',
       pushKindJoin: 'Connect',
       pushKindDev: 'Device',
+      pushKindMsg: 'Message',
     },
   }), 'browserctl: dictionaries')
   ctx.effect(() => installStyles(), 'browserctl: styles')
