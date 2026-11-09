@@ -833,7 +833,7 @@ _LOADING_SPLASH_TAG = _LOADING_SPLASH_HTML.encode('utf-8')
 # 卡片上的按钮是 POST /api/present.open「在电脑上打开」，聊天附件只有图片能拿字节。
 # 远控场景(手机/平板)需要一个「下载」按钮把文件存到手机上，靠两个部件配合：
 # ① 本脚本：在触屏设备上扫描卡片上带文件名的 aria-label/title(如「在侧边栏打开
-#    xxx.apk」)，在动作按钮旁插一个指向 /browserctl-gate/file?name= 的「下载」链接；
+#    xxx.apk」)，在动作按钮旁插一个指向 browserctl-gate/file?name= 的「下载」链接；
 # ② 闸机新端点 _gate_file_download：按文件名在本机白名单目录里找最新同名文件，
 #   带 bc-gate 会话鉴权后流式返回(Content-Disposition: attachment)。
 # App(WebView)侧配 1.0.45 起的 setDownloadListener，点链接即走系统下载管理器。
@@ -3312,6 +3312,19 @@ class GateHandler(BaseHTTPRequestHandler):
     _asset_cache = OrderedDict()   # self.path -> {"status","headers","data","etag"}
     _asset_lock = threading.Lock()
 
+    # ---- 面板根 HTML 304 早退短路(2026-11-09) ----
+    # 面板根 / 的成本大头在 DSH 端动态生成(实测 0.43-0.50s/次;连 304 revalidate 都要
+    # 0.63s——旧链路里 304 命中也得先把 DSH 全量拉回来才能算 ETag)。而注入后的根
+    # HTML 对同一 UA 变体字节级稳定(见 _cache_policy 注释),于是把「最近一次完整
+    # 拉取算出的 ETag」留在内存:HTML_304_TTL 内、同 UA 变体 + 同 gzip 接受度的
+    # If-None-Match 命中,直接回 304,不碰 DSH。TTL 过期/未命中照常回源;DSH 内容
+    # 变了最多延迟 TTL 才被发现(浏览器 304 复用旧缓存 ≤60s,可接受)。只存 etag/
+    # 时间戳/gzip 标志,不存正文,内存可忽略。附带收益:DSH 重启/未就绪时,浏览器
+    # 缓存的根页面 revalidate 仍能秒过(短路发生在 resolve_dsh 之前)。
+    HTML_304_TTL = 60.0
+    _html_304_cache = {}          # UA 变体("web"/"app") -> {"etag","gz","t"}
+    _html_304_lock = threading.Lock()
+
     @classmethod
     def _asset_cache_get(cls, key):
         with cls._asset_lock:
@@ -3350,6 +3363,47 @@ class GateHandler(BaseHTTPRequestHandler):
             return "public, max-age=%d" % self.CACHE_PLUGIN_MAX_AGE
         return None
 
+    def _panel_ua_variant(self):
+        """根页面缓存变体:App(UA 带 DshRemote/,不注工具条)与浏览器(注入)两种,
+        判定与 _inject_pwa_tags 的 is_app 保持一致。"""
+        try:
+            ua = (self.headers.get("User-Agent") or "").lower()
+        except Exception:
+            ua = ""
+        return "app" if "dshremote/" in ua else "web"
+
+    def _html_304_shortcircuit(self, extra_set_cookie):
+        """面板根 / 的 If-None-Match 早退 304:命中直接应答并返回 True(不再碰 DSH)。"""
+        if self.command != "GET" or extra_set_cookie:
+            return False
+        if self.path.split("?", 1)[0] not in ("/", ""):
+            return False
+        inm = (self.headers.get("If-None-Match") or "").replace(" ", "")
+        if not inm or inm == "*":
+            return False
+        gz = "gzip" in (self.headers.get("Accept-Encoding") or "").lower()
+        with GateHandler._html_304_lock:
+            ent = GateHandler._html_304_cache.get(self._panel_ua_variant())
+        if not ent or (time.time() - ent["t"]) > self.HTML_304_TTL:
+            return False
+        if ent["gz"] != gz or ent["etag"] not in inm.split(","):
+            return False
+        # 与下方完整链路的 304 应答同头:Cache-Control/ETag/Vary 一致,浏览器无感
+        self.send_response(304)
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("ETag", ent["etag"])
+        self.send_header("Vary", "Accept-Encoding, User-Agent")
+        self.end_headers()
+        return True
+
+    def _html_304_record(self, etag, gz):
+        """完整拉取(304 完整链路或 200)算出根页面 ETag 后刷新短路缓存。"""
+        if not etag:
+            return
+        with GateHandler._html_304_lock:
+            GateHandler._html_304_cache[self._panel_ua_variant()] = {
+                "etag": etag, "gz": bool(gz), "t": time.time()}
+
     def _proxy(self, extra_set_cookie=None):
         """反代 DSH：计时并记录逐请求日志（New API 风格使用详情）。"""
         self._resp_status = 0
@@ -3364,6 +3418,16 @@ class GateHandler(BaseHTTPRequestHandler):
                 pass
 
     def _proxy_inner(self, extra_set_cookie=None):
+        # 面板根 / 304 早退:60s 内同变体 If-None-Match 命中直接 304,
+        # 省掉 DSH 全量生成(实测 0.45s/次)。kb/06 第 15 条:发送阶段客户端断开
+        # (BrokenPipe 等)必须就地吞掉,否则线程静默死亡 → 公网 502 无日志。
+        try:
+            if self._html_304_shortcircuit(extra_set_cookie):
+                return
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            return
+        except Exception:
+            pass
         port = resolve_dsh()
         if not port:
             self._send(502, "<h1>502</h1><p>DeepSeek 助手未在本机运行。</p>")
@@ -3593,6 +3657,11 @@ class GateHandler(BaseHTTPRequestHandler):
             data = self._maybe_gzip(data, resp_headers)  # 先压缩:ETag 必须对应真实发出的字节
             if cache_ctl:
                 etag = '"%s"' % hashlib.sha1(data).hexdigest()[:20]
+                # 记录最近一次真实拉取的根页面 ETag,供 _html_304_shortcircuit 早退;
+                # 304 完整链路与 200 两种出口都经过这里,缓存时间戳随之刷新
+                if panel_root_html:
+                    self._html_304_record(
+                        etag, "gzip" in (self.headers.get("Accept-Encoding") or "").lower())
                 inm = (self.headers.get("If-None-Match") or "").replace(" ", "")
                 if inm and (inm == "*" or etag in inm.split(",")):
                     # 命中:304 零字节正文,强制刷新也只花一个 RTT(keep-alive 保持)
