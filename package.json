@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-browserctl",
-  "version": "1.0.53",
+  "version": "1.0.54",
   "type": "module",
   "description": "DSH 远程助手(DshRemote): 把 DeepSeek 助手 Web 面板安全穿透到手机与外网, 侧边栏一键开启",
   "license": "MIT",
