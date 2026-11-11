@@ -16,6 +16,21 @@ const ABOUT_LINKS = {
   app: 'https://github.com/Memorial-coder/dsh-remote-plugin/releases/latest',
   qq: 'https://qm.qq.com/q/K6RXqOKLAu',
 }
+function lsGet(k) { try { return window.localStorage.getItem(k) || '' } catch (e) { return '' } }
+function lsSet(k, v) { try { window.localStorage.setItem(k, v) } catch (e) {} }
+
+// ---------- 顶栏「通知中心」本地水位(未登录已读判断) ----------
+// 值 = 最后一次打开通知列表时见过的最大 createdAt(毫秒);新于水位即视为未读。
+const MSG_SEEN_KEY = 'dsh_msg_seen_' + NS
+function msgSeenTs() { const v = parseInt(lsGet(MSG_SEEN_KEY), 10); return Number.isFinite(v) ? v : 0 }
+function msgIsSeen(msg) { return (Number(msg && msg.createdAt) || 0) <= msgSeenTs() }
+function fmtMsgTime(ts) {
+  const t = Number(ts)
+  if (!t) return ''
+  const d = new Date(t)
+  const p = n => (n < 10 ? '0' : '') + n
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes())
+}
 
 // ---------- API 路径前缀(远程访问适配) ----------
 // 面板不只跑在本机(127.0.0.1:<dsh端口>),还会被手机/外网浏览器经隧道访问,页面带路径前缀:
@@ -1453,6 +1468,159 @@ div[data-slot='sidebar.footer.action'] > * {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* ---------- 顶栏「通知中心」铃铛 + 下拉列表 ---------- */
+.dshBrowserCtlAboutBtn { position: relative; display: inline-flex; }
+.dshBrowserCtlBadgeDot {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ff4d4f;
+  border: 1.5px solid var(--dsw-panel-bg, #fff);
+  pointer-events: none;
+}
+.dshBrowserCtlMsgMask {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  border: none;
+  background: transparent;
+  padding: 0;
+  cursor: default;
+}
+.dshBrowserCtlMsgPop {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 41;
+  width: min(340px, 88vw);
+  max-height: min(420px, 70vh);
+  display: flex;
+  flex-direction: column;
+  background: var(--dsw-alias-bg-layer-1, #1b1c20);
+  border: 1px solid var(--dsw-alias-border-l2, #2a2c33);
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+.dshBrowserCtlMsgPopHead {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary, inherit);
+}
+.dshBrowserCtlMsgList {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  padding: 0 8px 8px;
+}
+/* flex 列滚动容器必须禁子元素收缩,否则内容被压扁而不是滚动(kb/10) */
+.dshBrowserCtlMsgList > * { flex: 0 0 auto; }
+.dshBrowserCtlMsgItem {
+  padding: 10px 10px 9px;
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.dshBrowserCtlMsgItem:hover { background: var(--dsw-alias-bg-layer-2, rgba(255,255,255,0.05)); }
+.dshBrowserCtlMsgKind {
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-tertiary, #8b8f98);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.dshBrowserCtlMsgKindTag {
+  padding: 0 6px;
+  border-radius: 6px;
+  font-size: 10.5px;
+  line-height: 17px;
+  color: var(--dsw-alias-state-success-primary, #34b371);
+  background: rgba(52, 179, 113, 0.13);
+}
+.dshBrowserCtlMsgKindTag[data-personal='true'] {
+  color: var(--dsw-alias-accent-primary, #4c8bf5);
+  background: rgba(76, 139, 245, 0.13);
+}
+.dshBrowserCtlMsgTitle {
+  font-size: 13px;
+  line-height: 19px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-secondary, #a6aab2);
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  word-break: break-word;
+}
+.dshBrowserCtlMsgItem[data-unread='true'] .dshBrowserCtlMsgTitle {
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary, inherit);
+}
+.dshBrowserCtlMsgUnreadDot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #ff4d4f;
+  transform: translateY(-1px);
+}
+.dshBrowserCtlMsgBody {
+  margin: 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-secondary, #a6aab2);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.dshBrowserCtlMsgLink {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-accent-primary, #4c8bf5);
+  text-decoration: none;
+  cursor: pointer;
+  align-self: flex-start;
+}
+.dshBrowserCtlMsgLink:hover { text-decoration: underline; }
+.dshBrowserCtlMsgTime {
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-tertiary, #8b8f98);
+  font-variant-numeric: tabular-nums;
+}
+.dshBrowserCtlMsgEmpty {
+  padding: 26px 12px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--dsw-alias-label-tertiary, #8b8f98);
+}
+.dshBrowserCtlMsgErr {
+  margin: 0;
+  padding: 0 12px 10px;
+  font-size: 11.5px;
+  line-height: 17px;
+  color: var(--dsw-alias-state-error-primary, #e5655c);
+}
+.dshBrowserCtlMsgFoot {
+  flex: 0 0 auto;
+  padding: 8px 12px 10px;
+  border-top: 1px solid var(--dsw-alias-border-l2, #2a2c33);
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-tertiary, #8b8f98);
+}
 /* ---------- 工单反馈弹窗(导出日志 → 选去向) ---------- */
 .dshBrowserCtlPanelTicket { width: min(600px, 94vw); overflow: hidden; }
 .dshBrowserCtlTicketBody {
@@ -1692,6 +1860,10 @@ const Svg = {
   ),
   bell: (
     <svg {...svgProps}><path d="M18 8a6 6 0 0 0-12 0c0 7-3 8-3 8h18s-3-1-3-8" /><path d="M10 20a2.2 2.2 0 0 0 4 0" /></svg>
+  ),
+  // 头部「通知中心」铃铛:去掉通用图标外边距,与 info/gear 等头部小图标对齐
+  bellHead: (
+    <svg {...svgProps} style={{ ...svgProps.style, marginRight: 0 }}><path d="M18 8a6 6 0 0 0-12 0c0 7-3 8-3 8h18s-3-1-3-8" /><path d="M10 20a2.2 2.2 0 0 0 4 0" /></svg>
   ),
   // 头部小图标按钮专用:去掉通用图标的外边距,保持按钮内居中对齐
   info: (
@@ -3516,6 +3688,84 @@ function AccountLoginModal({ t, onClose, onSaved }) {
   )
 }
 
+/* ---------- 顶栏「通知中心」下拉(铃铛) ---------- */
+// 数据源:官方服务器「消息中心」(管理后台发放,定向到账号或全员)。
+// 已登录 → host /server/messages 带 Bearer 拉定向+全员,未读数用服务端(与官网/App 跨端同步);
+// 未登录 → 同一接口自动退回公开公告(全员公告免登录可见),未读用本地水位(localStorage)判断。
+// 打开列表即全部已读:登录态调 /server/messages/read(服务端已读),未登录只推进本地水位。
+function MsgCenter({ t, loggedInHint, onClose }) {
+  const [msgs, setMsgs] = useState(null) // null=加载中
+  const [err, setErr] = useState('')
+  const [loggedIn, setLoggedIn] = useState(false)
+  useEffect(() => {
+    let alive = true
+    fetch(API_P + '/browserctl/api/server/messages', { cache: 'no-store' })
+      .then(r => r.json().catch(() => ({ ok: false, error: 'HTTP ' + r.status })))
+      .then(j => {
+        if (!alive) return
+        if (!j || j.ok === false) { setErr((j && j.error) || t('msgLoadFail')); setMsgs([]); return }
+        setErr('')
+        setLoggedIn(!!j.loggedIn)
+        setMsgs(Array.isArray(j.messages) ? j.messages : [])
+      })
+      .catch(e => { if (alive) { setErr(String((e && e.message) || e)); setMsgs([]) } })
+    return () => { alive = false }
+    // 仅挂载时拉一次(下拉每次打开重新挂载);依赖里放 t 会在父组件重渲染时反复请求
+  }, [])
+  // 打开即全部已读(与官网个人中心一致):登录态走服务端,未登录只推进本地水位。
+  // 推进动作放在渲染后的 effect:首次渲染仍按旧水位显示未读点,关掉重开才消失。
+  useEffect(() => {
+    if (!msgs || !msgs.length) return
+    const maxTs = msgs.reduce((m, x) => Math.max(m, Number(x.createdAt) || 0), 0)
+    lsSet(MSG_SEEN_KEY, String(maxTs))
+    if (loggedIn) fetch(API_P + '/browserctl/api/server/messages/read', { method: 'POST', cache: 'no-store' }).catch(() => {})
+  }, [msgs, loggedIn])
+  return (
+    <>
+      <button className="dshBrowserCtlMsgMask" type="button" aria-label={t('close')} onClick={onClose} />
+      <div className="dshBrowserCtlMsgPop" role="dialog" aria-label={t('msgCenter')}>
+        <div className="dshBrowserCtlMsgPopHead">
+          <span>{t('msgCenter')}</span>
+          <Button variant="ghost" size="sm" aria-label={t('close')} icon={<IconCloseOutlineRegular />} onClick={onClose} />
+        </div>
+        <div className="dshBrowserCtlMsgList">
+          {msgs === null ? (
+            <div className="dshBrowserCtlMsgEmpty">{t('ticketLoading')}</div>
+          ) : !msgs.length ? (
+            <div className="dshBrowserCtlMsgEmpty">{t('msgEmpty')}</div>
+          ) : msgs.map(m => <MsgItem key={m.id} t={t} msg={m} seen={msgIsSeen(m)} />)}
+        </div>
+        {err ? <p className="dshBrowserCtlMsgErr">{t('msgLoadFail')}: {err}</p> : null}
+        {!loggedIn && !err ? <div className="dshBrowserCtlMsgFoot">{loggedInHint}</div> : null}
+      </div>
+    </>
+  )
+}
+
+function MsgItem({ t, msg, seen }) {
+  const official = msg.kind !== 'personal'
+  return (
+    <div className="dshBrowserCtlMsgItem" data-unread={!seen && !msg.read ? 'true' : 'false'}>
+      <div className="dshBrowserCtlMsgKind">
+        <span className="dshBrowserCtlMsgKindTag" data-personal={official ? 'false' : 'true'}>
+          {official ? t('msgOfficial') : t('msgPersonal')}
+        </span>
+      </div>
+      <div className="dshBrowserCtlMsgTitle">
+        {!msg.read && !seen ? <span className="dshBrowserCtlMsgUnreadDot" aria-hidden="true" /> : null}
+        <span>{msg.title}</span>
+      </div>
+      {msg.body ? <p className="dshBrowserCtlMsgBody">{msg.body}</p> : null}
+      {msg.link ? (
+        <a className="dshBrowserCtlMsgLink" href={msg.link} target="_blank" rel="noopener noreferrer">
+          {t('msgOpenLink')}
+        </a>
+      ) : null}
+      <div className="dshBrowserCtlMsgTime">{fmtMsgTime(msg.createdAt)}</div>
+    </div>
+  )
+}
+
 /* ---------- 工单反馈弹窗(导出日志 → 选去向:官网工单 / 存本地文件夹 / 复制内容) ---------- */
 // 插件端不再内嵌提交表单(表单在窄面板里体验差,且官方账号登录态与网页端是两套)。
 // 2026-11-09 起:先「生成并导出诊断日志」(host 组装+脱敏,落到桌面/下载,可另存自选目录),
@@ -3737,6 +3987,9 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
   const [elevNeed, setElevNeed] = useState('')
   // 顶栏账号按钮的登录态(登录后显示邮箱)
   const [acctMe, setAcctMe] = useState(null)
+  // 顶栏「通知中心」:消息列表 + 登录态 + 服务端未读数(未登录未读走本地水位)
+  const [msgData, setMsgData] = useState({ messages: [], loggedIn: false, unread: 0 })
+  const [msgPopOpen, setMsgPopOpen] = useState(false)
   // 当前连接模式(official/selfhost),用于判断未登录时是否显示二维码
   const [cfgMode, setCfgMode] = useState('official')
   const panel = useRef(null)
@@ -3759,6 +4012,28 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
     } catch { setAcctMe(null) }
   }
   useEffect(() => { if (open) loadAcctMe() }, [open, reloadToken])
+  // 通知中心:面板打开即拉一次,之后每 60s 轮询红点(与闸机 2 分钟心跳错开也够用);
+  // 关闭下拉时再拉一次——刚在列表里标了已读,徽标要立即归零,不等下一轮询。
+  const loadMsgs = async () => {
+    try {
+      const r = await fetch(API_P + '/browserctl/api/server/messages', { cache: 'no-store' })
+      const j = await r.json().catch(() => ({}))
+      if (j && j.ok) setMsgData({ messages: Array.isArray(j.messages) ? j.messages : [], loggedIn: !!j.loggedIn, unread: Number(j.unread) || 0 })
+    } catch {}
+  }
+  useEffect(() => { if (open) loadMsgs() }, [open, reloadToken])
+  useEffect(() => {
+    if (!open) return
+    const h = setInterval(loadMsgs, 60000)
+    return () => clearInterval(h)
+  }, [open])
+  const closeMsgPop = () => { setMsgPopOpen(false); loadMsgs() }
+  // 徽标:登录态用服务端未读数(与官网/App 跨端同步);未登录用本地水位数「新于水位的全员公告」。
+  // 下拉开着时不显示红点(列表已在眼前)。
+  const msgUnreadCount = msgData.loggedIn
+    ? (msgData.unread || 0)
+    : (msgData.messages || []).filter(m => !msgIsSeen(m)).length
+  const msgShowDot = !msgPopOpen && msgUnreadCount > 0
   // 加载连接模式(用于判断未登录时是否隐藏二维码)
   useEffect(() => {
     if (!open) return
@@ -3952,6 +4227,7 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
     const onKeyDown = (event) => {
       if (event.key !== 'Escape') return
       if (loginPrompt) { setLoginPrompt(false); return }
+      if (msgPopOpen) { closeMsgPop(); return }
       if (accountOpen) { setAccountOpen(false); return }
       if (aboutOpen) { setAboutOpen(false); return }
       if (configOpen) { setConfigOpen(false); return }
@@ -3960,7 +4236,7 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
     }
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
-  }, [actions, open, aboutOpen, configOpen, accountOpen, loginPrompt])
+  }, [actions, open, aboutOpen, configOpen, accountOpen, loginPrompt, msgPopOpen])
 
   // 心跳保活:面板一打开(任意页签)就每 2 分钟向闸机报一次活动,
   // "在线设备"卡片据此判断谁还在线;关闭面板即停止上报,10 分钟后自动转为历史设备。
@@ -4028,6 +4304,23 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
               icon={Svg.ticket}
               onClick={() => setTicketOpen(true)}
             />
+          </Tooltip>
+          <Tooltip label={t('msgCenter')}>
+            <span className="dshBrowserCtlAboutBtn">
+              <Button
+                variant="ghost"
+                size="sm"
+                aria-label={t('msgCenter')}
+                aria-haspopup="dialog"
+                aria-expanded={msgPopOpen}
+                icon={Svg.bellHead}
+                onClick={() => (msgPopOpen ? closeMsgPop() : setMsgPopOpen(true))}
+              />
+              {msgShowDot && <span className="dshBrowserCtlBadgeDot" />}
+              {msgPopOpen && (
+                <MsgCenter t={t} loggedInHint={t('msgGuestHint')} onClose={closeMsgPop} />
+              )}
+            </span>
           </Tooltip>
           <Tooltip label={t('about')}>
             <Button variant="ghost" size="sm" aria-label={t('about')} icon={Svg.info} onClick={() => setAboutOpen(true)} />
@@ -4523,6 +4816,14 @@ export function apply(ctx) {
       pushKindJoin: '设备连入',
       pushKindDev: '设备',
       pushKindMsg: '消息',
+      // ---- 顶栏通知中心(铃铛) ----
+      msgCenter: '通知中心',
+      msgEmpty: '暂无通知',
+      msgLoadFail: '通知加载失败',
+      msgOfficial: '官方公告',
+      msgPersonal: '发给我的',
+      msgOpenLink: '查看链接',
+      msgGuestHint: '当前显示全员公告;登录官方账号后可接收发给你的定向消息。',
       // ---- 工单反馈(导出日志 → 网页端提交) ----
       tickets: '工单反馈',
       ticketExportSubtitle: '导出本机诊断日志（自动打码），然后选择日志去向。',
@@ -4760,6 +5061,14 @@ export function apply(ctx) {
       pushKindJoin: 'Connect',
       pushKindDev: 'Device',
       pushKindMsg: 'Message',
+      // ---- Header notification centre (bell) ----
+      msgCenter: 'Notifications',
+      msgEmpty: 'No notifications',
+      msgLoadFail: 'Failed to load notifications',
+      msgOfficial: 'Announcement',
+      msgPersonal: 'For you',
+      msgOpenLink: 'Open link',
+      msgGuestHint: 'Showing public announcements; sign in to the official account to receive direct messages.',
       // ---- ticket feedback (export logs -> choose destination) ----
       tickets: 'Ticket Feedback',
       ticketExportSubtitle: 'Export the local diagnostic log (auto-redacted), then choose where it goes.',

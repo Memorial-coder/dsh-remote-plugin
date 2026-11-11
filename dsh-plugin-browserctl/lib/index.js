@@ -4627,7 +4627,7 @@ function adminHeaders() {
   }
   return {};
 }
-var VERSION = true ? "1.0.55" : "dev";
+var VERSION = true ? "1.0.56" : "dev";
 var sessionTunnel = false;
 var ensureRunning = null;
 var lastEnsureError = "";
@@ -5509,6 +5509,7 @@ var CSRF_PROTECTED = /* @__PURE__ */ new Set([
   "/browserctl/api/blacklist-add",
   "/browserctl/api/blacklist-remove",
   "/browserctl/api/server/logout",
+  "/browserctl/api/server/messages/read",
   "/browserctl/api/server/oauth/begin",
   "/browserctl/api/server/oauth/open",
   "/browserctl/api/server/oauth/poll",
@@ -6031,6 +6032,61 @@ function apply(ctx, config = {}) {
             return;
           }
           sendJson(res, 200, { ok: true, loggedIn: true, email: j.email, uid: j.uid, remotePort: j.remotePort, panelUrl: j.panelUrl, status: j.status });
+        } catch (e) {
+          sendJson(res, 502, { ok: false, error: "\u65E0\u6CD5\u8FDE\u63A5\u5B98\u65B9\u670D\u52A1\u5668:" + String(e && e.message || e) });
+        }
+        return;
+      }
+      if (route === "/browserctl/api/server/messages") {
+        const sec = readSecrets();
+        if (sec.server_token) {
+          try {
+            const r = await fetch(OFFICIAL_API_BASE + "/api/messages", {
+              headers: { authorization: "Bearer " + sec.server_token },
+              signal: AbortSignal.timeout(8e3)
+            });
+            if (r.status === 401) {
+            } else {
+              const j = await r.json().catch(() => ({}));
+              if (r.ok && j.ok) {
+                sendJson(res, 200, { ok: true, loggedIn: true, messages: Array.isArray(j.messages) ? j.messages : [], unread: Number(j.unread) || 0 });
+                return;
+              }
+              sendJson(res, 200, { ok: false, error: j && j.error || "HTTP " + r.status });
+              return;
+            }
+          } catch (e) {
+            sendJson(res, 200, { ok: false, error: "\u65E0\u6CD5\u8FDE\u63A5\u5B98\u65B9\u670D\u52A1\u5668:" + String(e && e.message || e) });
+            return;
+          }
+        }
+        try {
+          const r = await fetch(OFFICIAL_API_BASE + "/api/messages/public", { signal: AbortSignal.timeout(8e3) });
+          const j = await r.json().catch(() => ({}));
+          sendJson(res, 200, { ok: true, loggedIn: false, messages: Array.isArray(j.messages) ? j.messages : [] });
+        } catch (e) {
+          sendJson(res, 502, { ok: false, error: "\u65E0\u6CD5\u8FDE\u63A5\u5B98\u65B9\u670D\u52A1\u5668:" + String(e && e.message || e) });
+        }
+        return;
+      }
+      if (route === "/browserctl/api/server/messages/read") {
+        const sec = readSecrets();
+        if (!sec.server_token) {
+          sendJson(res, 200, { ok: true, unread: 0 });
+          return;
+        }
+        try {
+          const r = await fetch(OFFICIAL_API_BASE + "/api/messages/read", {
+            method: "POST",
+            headers: { authorization: "Bearer " + sec.server_token },
+            signal: AbortSignal.timeout(8e3)
+          });
+          const j = await r.json().catch(() => ({}));
+          if (!r.ok || !j.ok) {
+            sendJson(res, 200, { ok: false, error: j && j.error || "HTTP " + r.status });
+            return;
+          }
+          sendJson(res, 200, { ok: true, unread: Number(j.unread) || 0 });
         } catch (e) {
           sendJson(res, 502, { ok: false, error: "\u65E0\u6CD5\u8FDE\u63A5\u5B98\u65B9\u670D\u52A1\u5668:" + String(e && e.message || e) });
         }

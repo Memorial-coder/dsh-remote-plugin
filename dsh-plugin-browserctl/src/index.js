@@ -1174,6 +1174,7 @@ const CSRF_PROTECTED = new Set([
   '/browserctl/api/blacklist-add',
   '/browserctl/api/blacklist-remove',
   '/browserctl/api/server/logout',
+  '/browserctl/api/server/messages/read',
   '/browserctl/api/server/oauth/begin',
   '/browserctl/api/server/oauth/open',
   '/browserctl/api/server/oauth/poll',
@@ -1667,6 +1668,62 @@ export function apply(ctx, config = {}) {
               return
             }
             sendJson(res, 200, { ok: true, loggedIn: true, email: j.email, uid: j.uid, remotePort: j.remotePort, panelUrl: j.panelUrl, status: j.status })
+          } catch (e) {
+            sendJson(res, 502, { ok: false, error: '无法连接官方服务器:' + String((e && e.message) || e) })
+          }
+          return
+        }
+        if (route === '/browserctl/api/server/messages') {
+          // 面板顶栏「通知中心」数据源(铃铛)。已登录官方账号 → 带 Bearer 拉定向+全员消息
+          // (与服务端 /api/messages 同一份数据,未读数跨端同步);未登录/token 过期 → 退回
+          // /api/messages/public 只拉全员公告(公告免登录可见)。服务器异常时不硬报错,
+          // 也退回公开公告并带 error 提示,通知是弱需求,不让铃铛连累面板。
+          const sec = readSecrets()
+          if (sec.server_token) {
+            try {
+              const r = await fetch(OFFICIAL_API_BASE + '/api/messages', {
+                headers: { authorization: 'Bearer ' + sec.server_token },
+                signal: AbortSignal.timeout(8000),
+              })
+              if (r.status === 401) {
+                // token 过期:当未登录处理,退回公开公告(面板账号态由 /server/me 自己负责)
+              } else {
+                const j = await r.json().catch(() => ({}))
+                if (r.ok && j.ok) {
+                  sendJson(res, 200, { ok: true, loggedIn: true, messages: Array.isArray(j.messages) ? j.messages : [], unread: Number(j.unread) || 0 })
+                  return
+                }
+                sendJson(res, 200, { ok: false, error: (j && j.error) || ('HTTP ' + r.status) })
+                return
+              }
+            } catch (e) {
+              sendJson(res, 200, { ok: false, error: '无法连接官方服务器:' + String((e && e.message) || e) })
+              return
+            }
+          }
+          try {
+            const r = await fetch(OFFICIAL_API_BASE + '/api/messages/public', { signal: AbortSignal.timeout(8000) })
+            const j = await r.json().catch(() => ({}))
+            sendJson(res, 200, { ok: true, loggedIn: false, messages: Array.isArray(j.messages) ? j.messages : [] })
+          } catch (e) {
+            sendJson(res, 502, { ok: false, error: '无法连接官方服务器:' + String((e && e.message) || e) })
+          }
+          return
+        }
+        if (route === '/browserctl/api/server/messages/read') {
+          // 打开通知列表后「全部已读」:代理服务端 POST /api/messages/read(服务器端已读,
+          // 与官网个人中心/App 消息中心跨端同步)。未登录无此语义,直接返回。
+          const sec = readSecrets()
+          if (!sec.server_token) { sendJson(res, 200, { ok: true, unread: 0 }); return }
+          try {
+            const r = await fetch(OFFICIAL_API_BASE + '/api/messages/read', {
+              method: 'POST',
+              headers: { authorization: 'Bearer ' + sec.server_token },
+              signal: AbortSignal.timeout(8000),
+            })
+            const j = await r.json().catch(() => ({}))
+            if (!r.ok || !j.ok) { sendJson(res, 200, { ok: false, error: (j && j.error) || ('HTTP ' + r.status) }); return }
+            sendJson(res, 200, { ok: true, unread: Number(j.unread) || 0 })
           } catch (e) {
             sendJson(res, 502, { ok: false, error: '无法连接官方服务器:' + String((e && e.message) || e) })
           }

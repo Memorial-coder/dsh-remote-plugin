@@ -32,13 +32,41 @@ var import_dsh_client_store = require("@deepseek-ai/dsh-client-store");
 var import_jsx_runtime = require("react/jsx-runtime");
 var NS = "browserctl";
 var STYLE_ID = "browserctl/styles";
-var VERSION = true ? "1.0.55" : "dev";
+var VERSION = true ? "1.0.56" : "dev";
 var ABOUT_LINKS = {
   website: "https://remote.ymzcc.com/dsh-remote/",
   github: "https://github.com/Memorial-coder/dsh-remote-plugin",
   app: "https://github.com/Memorial-coder/dsh-remote-plugin/releases/latest",
   qq: "https://qm.qq.com/q/K6RXqOKLAu"
 };
+function lsGet(k) {
+  try {
+    return window.localStorage.getItem(k) || "";
+  } catch (e) {
+    return "";
+  }
+}
+function lsSet(k, v) {
+  try {
+    window.localStorage.setItem(k, v);
+  } catch (e) {
+  }
+}
+var MSG_SEEN_KEY = "dsh_msg_seen_" + NS;
+function msgSeenTs() {
+  const v = parseInt(lsGet(MSG_SEEN_KEY), 10);
+  return Number.isFinite(v) ? v : 0;
+}
+function msgIsSeen(msg) {
+  return (Number(msg && msg.createdAt) || 0) <= msgSeenTs();
+}
+function fmtMsgTime(ts) {
+  const t = Number(ts);
+  if (!t) return "";
+  const d = new Date(t);
+  const p = (n) => (n < 10 ? "0" : "") + n;
+  return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) + " " + p(d.getHours()) + ":" + p(d.getMinutes());
+}
 function apiPrefix() {
   try {
     const p = String(typeof location !== "undefined" && location.pathname || "");
@@ -1464,6 +1492,159 @@ div[data-slot='sidebar.footer.action'] > * {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* ---------- \u9876\u680F\u300C\u901A\u77E5\u4E2D\u5FC3\u300D\u94C3\u94DB + \u4E0B\u62C9\u5217\u8868 ---------- */
+.dshBrowserCtlAboutBtn { position: relative; display: inline-flex; }
+.dshBrowserCtlBadgeDot {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ff4d4f;
+  border: 1.5px solid var(--dsw-panel-bg, #fff);
+  pointer-events: none;
+}
+.dshBrowserCtlMsgMask {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  border: none;
+  background: transparent;
+  padding: 0;
+  cursor: default;
+}
+.dshBrowserCtlMsgPop {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 41;
+  width: min(340px, 88vw);
+  max-height: min(420px, 70vh);
+  display: flex;
+  flex-direction: column;
+  background: var(--dsw-alias-bg-layer-1, #1b1c20);
+  border: 1px solid var(--dsw-alias-border-l2, #2a2c33);
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+.dshBrowserCtlMsgPopHead {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary, inherit);
+}
+.dshBrowserCtlMsgList {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  padding: 0 8px 8px;
+}
+/* flex \u5217\u6EDA\u52A8\u5BB9\u5668\u5FC5\u987B\u7981\u5B50\u5143\u7D20\u6536\u7F29,\u5426\u5219\u5185\u5BB9\u88AB\u538B\u6241\u800C\u4E0D\u662F\u6EDA\u52A8(kb/10) */
+.dshBrowserCtlMsgList > * { flex: 0 0 auto; }
+.dshBrowserCtlMsgItem {
+  padding: 10px 10px 9px;
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.dshBrowserCtlMsgItem:hover { background: var(--dsw-alias-bg-layer-2, rgba(255,255,255,0.05)); }
+.dshBrowserCtlMsgKind {
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-tertiary, #8b8f98);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.dshBrowserCtlMsgKindTag {
+  padding: 0 6px;
+  border-radius: 6px;
+  font-size: 10.5px;
+  line-height: 17px;
+  color: var(--dsw-alias-state-success-primary, #34b371);
+  background: rgba(52, 179, 113, 0.13);
+}
+.dshBrowserCtlMsgKindTag[data-personal='true'] {
+  color: var(--dsw-alias-accent-primary, #4c8bf5);
+  background: rgba(76, 139, 245, 0.13);
+}
+.dshBrowserCtlMsgTitle {
+  font-size: 13px;
+  line-height: 19px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-secondary, #a6aab2);
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  word-break: break-word;
+}
+.dshBrowserCtlMsgItem[data-unread='true'] .dshBrowserCtlMsgTitle {
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary, inherit);
+}
+.dshBrowserCtlMsgUnreadDot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #ff4d4f;
+  transform: translateY(-1px);
+}
+.dshBrowserCtlMsgBody {
+  margin: 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-secondary, #a6aab2);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.dshBrowserCtlMsgLink {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-accent-primary, #4c8bf5);
+  text-decoration: none;
+  cursor: pointer;
+  align-self: flex-start;
+}
+.dshBrowserCtlMsgLink:hover { text-decoration: underline; }
+.dshBrowserCtlMsgTime {
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-tertiary, #8b8f98);
+  font-variant-numeric: tabular-nums;
+}
+.dshBrowserCtlMsgEmpty {
+  padding: 26px 12px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--dsw-alias-label-tertiary, #8b8f98);
+}
+.dshBrowserCtlMsgErr {
+  margin: 0;
+  padding: 0 12px 10px;
+  font-size: 11.5px;
+  line-height: 17px;
+  color: var(--dsw-alias-state-error-primary, #e5655c);
+}
+.dshBrowserCtlMsgFoot {
+  flex: 0 0 auto;
+  padding: 8px 12px 10px;
+  border-top: 1px solid var(--dsw-alias-border-l2, #2a2c33);
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-tertiary, #8b8f98);
+}
 /* ---------- \u5DE5\u5355\u53CD\u9988\u5F39\u7A97(\u5BFC\u51FA\u65E5\u5FD7 \u2192 \u9009\u53BB\u5411) ---------- */
 .dshBrowserCtlPanelTicket { width: min(600px, 94vw); overflow: hidden; }
 .dshBrowserCtlTicketBody {
@@ -1729,6 +1910,11 @@ var Svg = {
     /* @__PURE__ */ (0, import_jsx_runtime.jsx)("path", { d: "M14 11a5 5 0 0 0-7.5-.5L4 13a5 5 0 0 0 7 7l1.5-1.5" })
   ] }),
   bell: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("svg", { ...svgProps, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("path", { d: "M18 8a6 6 0 0 0-12 0c0 7-3 8-3 8h18s-3-1-3-8" }),
+    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("path", { d: "M10 20a2.2 2.2 0 0 0 4 0" })
+  ] }),
+  // 头部「通知中心」铃铛:去掉通用图标外边距,与 info/gear 等头部小图标对齐
+  bellHead: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("svg", { ...svgProps, style: { ...svgProps.style, marginRight: 0 }, children: [
     /* @__PURE__ */ (0, import_jsx_runtime.jsx)("path", { d: "M18 8a6 6 0 0 0-12 0c0 7-3 8-3 8h18s-3-1-3-8" }),
     /* @__PURE__ */ (0, import_jsx_runtime.jsx)("path", { d: "M10 20a2.2 2.2 0 0 0 4 0" })
   ] }),
@@ -3352,6 +3538,69 @@ function AccountLoginModal({ t, onClose, onSaved }) {
     ] })
   ] });
 }
+function MsgCenter({ t, loggedInHint, onClose }) {
+  const [msgs, setMsgs] = (0, import_react.useState)(null);
+  const [err, setErr] = (0, import_react.useState)("");
+  const [loggedIn, setLoggedIn] = (0, import_react.useState)(false);
+  (0, import_react.useEffect)(() => {
+    let alive = true;
+    fetch(API_P + "/browserctl/api/server/messages", { cache: "no-store" }).then((r) => r.json().catch(() => ({ ok: false, error: "HTTP " + r.status }))).then((j) => {
+      if (!alive) return;
+      if (!j || j.ok === false) {
+        setErr(j && j.error || t("msgLoadFail"));
+        setMsgs([]);
+        return;
+      }
+      setErr("");
+      setLoggedIn(!!j.loggedIn);
+      setMsgs(Array.isArray(j.messages) ? j.messages : []);
+    }).catch((e) => {
+      if (alive) {
+        setErr(String(e && e.message || e));
+        setMsgs([]);
+      }
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+  (0, import_react.useEffect)(() => {
+    if (!msgs || !msgs.length) return;
+    const maxTs = msgs.reduce((m, x) => Math.max(m, Number(x.createdAt) || 0), 0);
+    lsSet(MSG_SEEN_KEY, String(maxTs));
+    if (loggedIn) fetch(API_P + "/browserctl/api/server/messages/read", { method: "POST", cache: "no-store" }).catch(() => {
+    });
+  }, [msgs, loggedIn]);
+  return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
+    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { className: "dshBrowserCtlMsgMask", type: "button", "aria-label": t("close"), onClick: onClose }),
+    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlMsgPop", role: "dialog", "aria-label": t("msgCenter"), children: [
+      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlMsgPopHead", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: t("msgCenter") }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "ghost", size: "sm", "aria-label": t("close"), icon: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.IconCloseOutlineRegular, {}), onClick: onClose })
+      ] }),
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlMsgList", children: msgs === null ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlMsgEmpty", children: t("ticketLoading") }) : !msgs.length ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlMsgEmpty", children: t("msgEmpty") }) : msgs.map((m) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)(MsgItem, { t, msg: m, seen: msgIsSeen(m) }, m.id)) }),
+      err ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", { className: "dshBrowserCtlMsgErr", children: [
+        t("msgLoadFail"),
+        ": ",
+        err
+      ] }) : null,
+      !loggedIn && !err ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlMsgFoot", children: loggedInHint }) : null
+    ] })
+  ] });
+}
+function MsgItem({ t, msg, seen }) {
+  const official = msg.kind !== "personal";
+  return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlMsgItem", "data-unread": !seen && !msg.read ? "true" : "false", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlMsgKind", children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlMsgKindTag", "data-personal": official ? "false" : "true", children: official ? t("msgOfficial") : t("msgPersonal") }) }),
+    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlMsgTitle", children: [
+      !msg.read && !seen ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlMsgUnreadDot", "aria-hidden": "true" }) : null,
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: msg.title })
+    ] }),
+    msg.body ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dshBrowserCtlMsgBody", children: msg.body }) : null,
+    msg.link ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("a", { className: "dshBrowserCtlMsgLink", href: msg.link, target: "_blank", rel: "noopener noreferrer", children: t("msgOpenLink") }) : null,
+    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlMsgTime", children: fmtMsgTime(msg.createdAt) })
+  ] });
+}
 var TICKET_PAGE_URL = "https://remote.ymzcc.com/dsh-remote/app.html#tickets";
 async function ticketCopyText(s) {
   try {
@@ -3566,6 +3815,8 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
   const [canElevate, setCanElevate] = (0, import_react.useState)(false);
   const [elevNeed, setElevNeed] = (0, import_react.useState)("");
   const [acctMe, setAcctMe] = (0, import_react.useState)(null);
+  const [msgData, setMsgData] = (0, import_react.useState)({ messages: [], loggedIn: false, unread: 0 });
+  const [msgPopOpen, setMsgPopOpen] = (0, import_react.useState)(false);
   const [cfgMode, setCfgMode] = (0, import_react.useState)("official");
   const panel = (0, import_react.useRef)(null);
   const { data, error, expiresAt, status, retrying, refresh } = useQr(open, reloadToken, uses);
@@ -3595,6 +3846,28 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
   (0, import_react.useEffect)(() => {
     if (open) loadAcctMe();
   }, [open, reloadToken]);
+  const loadMsgs = async () => {
+    try {
+      const r = await fetch(API_P + "/browserctl/api/server/messages", { cache: "no-store" });
+      const j = await r.json().catch(() => ({}));
+      if (j && j.ok) setMsgData({ messages: Array.isArray(j.messages) ? j.messages : [], loggedIn: !!j.loggedIn, unread: Number(j.unread) || 0 });
+    } catch {
+    }
+  };
+  (0, import_react.useEffect)(() => {
+    if (open) loadMsgs();
+  }, [open, reloadToken]);
+  (0, import_react.useEffect)(() => {
+    if (!open) return;
+    const h = setInterval(loadMsgs, 6e4);
+    return () => clearInterval(h);
+  }, [open]);
+  const closeMsgPop = () => {
+    setMsgPopOpen(false);
+    loadMsgs();
+  };
+  const msgUnreadCount = msgData.loggedIn ? msgData.unread || 0 : (msgData.messages || []).filter((m) => !msgIsSeen(m)).length;
+  const msgShowDot = !msgPopOpen && msgUnreadCount > 0;
   (0, import_react.useEffect)(() => {
     if (!open) return;
     fetch(API_P + "/browserctl/api/config", { cache: "no-store" }).then((r) => r.json().then((j) => {
@@ -3778,6 +4051,10 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
         setLoginPrompt(false);
         return;
       }
+      if (msgPopOpen) {
+        closeMsgPop();
+        return;
+      }
       if (accountOpen) {
         setAccountOpen(false);
         return;
@@ -3795,7 +4072,7 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [actions, open, aboutOpen, configOpen, accountOpen, loginPrompt]);
+  }, [actions, open, aboutOpen, configOpen, accountOpen, loginPrompt, msgPopOpen]);
   (0, import_react.useEffect)(() => {
     if (!open) return;
     let alive = true;
@@ -3863,6 +4140,22 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
             onClick: () => setTicketOpen(true)
           }
         ) }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Tooltip, { label: t("msgCenter"), children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { className: "dshBrowserCtlAboutBtn", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+            import_dsh_client_ui_primitives.Button,
+            {
+              variant: "ghost",
+              size: "sm",
+              "aria-label": t("msgCenter"),
+              "aria-haspopup": "dialog",
+              "aria-expanded": msgPopOpen,
+              icon: Svg.bellHead,
+              onClick: () => msgPopOpen ? closeMsgPop() : setMsgPopOpen(true)
+            }
+          ),
+          msgShowDot && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlBadgeDot" }),
+          msgPopOpen && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(MsgCenter, { t, loggedInHint: t("msgGuestHint"), onClose: closeMsgPop })
+        ] }) }),
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Tooltip, { label: t("about"), children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "ghost", size: "sm", "aria-label": t("about"), icon: Svg.info, onClick: () => setAboutOpen(true) }) }),
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Tooltip, { label: t("config"), children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "ghost", size: "sm", "aria-label": t("config"), icon: Svg.gear, onClick: () => setConfigOpen(true) }) }),
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Tooltip, { label: t("close"), children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
@@ -4325,6 +4618,14 @@ function apply(ctx) {
       pushKindJoin: "\u8BBE\u5907\u8FDE\u5165",
       pushKindDev: "\u8BBE\u5907",
       pushKindMsg: "\u6D88\u606F",
+      // ---- 顶栏通知中心(铃铛) ----
+      msgCenter: "\u901A\u77E5\u4E2D\u5FC3",
+      msgEmpty: "\u6682\u65E0\u901A\u77E5",
+      msgLoadFail: "\u901A\u77E5\u52A0\u8F7D\u5931\u8D25",
+      msgOfficial: "\u5B98\u65B9\u516C\u544A",
+      msgPersonal: "\u53D1\u7ED9\u6211\u7684",
+      msgOpenLink: "\u67E5\u770B\u94FE\u63A5",
+      msgGuestHint: "\u5F53\u524D\u663E\u793A\u5168\u5458\u516C\u544A;\u767B\u5F55\u5B98\u65B9\u8D26\u53F7\u540E\u53EF\u63A5\u6536\u53D1\u7ED9\u4F60\u7684\u5B9A\u5411\u6D88\u606F\u3002",
       // ---- 工单反馈(导出日志 → 网页端提交) ----
       tickets: "\u5DE5\u5355\u53CD\u9988",
       ticketExportSubtitle: "\u5BFC\u51FA\u672C\u673A\u8BCA\u65AD\u65E5\u5FD7\uFF08\u81EA\u52A8\u6253\u7801\uFF09\uFF0C\u7136\u540E\u9009\u62E9\u65E5\u5FD7\u53BB\u5411\u3002",
@@ -4562,6 +4863,14 @@ function apply(ctx) {
       pushKindJoin: "Connect",
       pushKindDev: "Device",
       pushKindMsg: "Message",
+      // ---- Header notification centre (bell) ----
+      msgCenter: "Notifications",
+      msgEmpty: "No notifications",
+      msgLoadFail: "Failed to load notifications",
+      msgOfficial: "Announcement",
+      msgPersonal: "For you",
+      msgOpenLink: "Open link",
+      msgGuestHint: "Showing public announcements; sign in to the official account to receive direct messages.",
       // ---- ticket feedback (export logs -> choose destination) ----
       tickets: "Ticket Feedback",
       ticketExportSubtitle: "Export the local diagnostic log (auto-redacted), then choose where it goes.",
