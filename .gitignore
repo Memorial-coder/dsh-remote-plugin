@@ -29,3 +29,6 @@ Thumbs.db
 __pycache__/
 *.pyc
 browserctl_*.log.*
+
+# local security audit artifacts (contains server credentials; never publish)
+_audit/
