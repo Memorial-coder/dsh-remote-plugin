@@ -70,6 +70,7 @@ concurrency:
 
 permissions:
   contents: write # 自动 bump 推回 main、打标签、建 Release 都需要
+  id-token: write # npm 可信发布(OIDC):不存任何密钥,由 npmjs.com 上的 Trusted Publisher 登记校验
 
 jobs:
   release:
@@ -92,6 +93,7 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: dsh-plugin-browserctl/package-lock.json
+          registry-url: 'https://registry.npmjs.org' # OIDC 可信发布要求 .npmrc 指向官方源
 
       # ---------- 1. 决定:发不发、版本多少、要不要加号 ----------
       - name: 决定版本号
@@ -371,6 +373,21 @@ jobs:
             --notes-file release-notes.md \
             --latest
           echo "release=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/${TAG}" >> "$GITHUB_OUTPUT"
+
+      # ---------- 5.5 npm 同步发布(可信发布/OIDC,零密钥) ----------
+      # 市场安装命令已自动切到 npm 源(dsh plugin add dsh-plugin-browserctl),这里把同一版本发上
+      # npm,双平台保持一致。前置一次性配置:npmjs.com 包设置里登记 Trusted publisher =
+      # (Memorial-coder / dsh-remote-plugin / release.yml)。失败不影响 GitHub Release,只记进摘要。
+      - name: 发布到 npm(同步)
+        if: steps.decide.outputs.mode != 'skip' && inputs.dry_run != true
+        continue-on-error: true
+        run: |
+          npm install -g npm@latest
+          if npm publish --provenance; then
+            echo "✅ npm 已发布 dsh-plugin-browserctl@${VERSION}" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "⚠️ npm 发布失败——常见原因:npmjs.com 的 Trusted publisher 还没登记(Memorial-coder/dsh-remote-plugin / release.yml),或该版本 npm 已存在。GitHub Release 不受影响。" >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: 试跑说明
         if: steps.decide.outputs.mode != 'skip' && inputs.dry_run == true
