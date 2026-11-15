@@ -32,13 +32,14 @@ var import_dsh_client_store = require("@deepseek-ai/dsh-client-store");
 var import_jsx_runtime = require("react/jsx-runtime");
 var NS = "browserctl";
 var STYLE_ID = "browserctl/styles";
-var VERSION = true ? "1.0.56" : "dev";
+var VERSION = true ? "1.0.58" : "dev";
 var ABOUT_LINKS = {
   website: "https://remote.ymzcc.com/dsh-remote/",
   github: "https://github.com/Memorial-coder/dsh-remote-plugin",
   app: "https://github.com/Memorial-coder/dsh-remote-plugin/releases/latest",
   qq: "https://qm.qq.com/q/K6RXqOKLAu"
 };
+var MS_AUTHENTICATOR_URL = "https://www.microsoft.com/zh-cn/security/authenticator/mobile-app";
 function lsGet(k) {
   try {
     return window.localStorage.getItem(k) || "";
@@ -1315,6 +1316,55 @@ div[data-slot='sidebar.footer.action'] > * {
   height: 42px !important;
   margin: 4px 0 !important;
   min-width: 96px;
+}
+/* \u300C\u6D4B\u8BD5\u8FDE\u63A5\u300D\u7ED3\u679C\u6846:\u6210\u529F\u63CF\u7EFF\u8FB9,\u5931\u8D25\u63CF\u7EA2\u8FB9;\u65E5\u5FD7\u5C3E\u90E8\u53EF\u6EDA\u52A8 */
+.dshBrowserCtlCfgTest {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border: 1px solid var(--dsw-alias-border-l2, #2a2c33);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: var(--dsw-alias-bg-layer-1, rgba(255,255,255,0.03));
+}
+.dshBrowserCtlCfgTest.ok {
+  border-color: var(--dsw-alias-state-success-primary, #34b371);
+}
+.dshBrowserCtlCfgTest.fail {
+  border-color: var(--dsw-alias-state-error-primary, #e5655c);
+}
+.dshBrowserCtlCfgTestTitle {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 17px;
+}
+.dshBrowserCtlCfgTest.ok .dshBrowserCtlCfgTestTitle {
+  color: var(--dsw-alias-state-success-primary, #34b371);
+}
+.dshBrowserCtlCfgTest.fail .dshBrowserCtlCfgTestTitle {
+  color: var(--dsw-alias-state-error-primary, #e5655c);
+}
+.dshBrowserCtlCfgTestLine {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-secondary, #b0b3bb);
+}
+.dshBrowserCtlCfgTestLog {
+  margin: 0;
+  padding: 8px;
+  max-height: 132px;
+  overflow: auto;
+  font-size: 11px;
+  line-height: 15px;
+  font-family: ui-monospace, Consolas, Menlo, monospace;
+  color: var(--dsw-alias-label-tertiary, #8b8f98);
+  background: var(--dsw-alias-bg-layer-2, rgba(255,255,255,0.06));
+  border-radius: 8px;
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 /* \u63A8\u9001\u9875\u7B7E:\u5F00\u5173\u884C */
 .dshBrowserCtlSwitchRow {
@@ -2759,6 +2809,11 @@ function TotpCard({ t, reloadToken, onRefresh, disabled }) {
     ),
     /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlCardBody", "data-open": open, children: [
       /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { style: { margin: 0, fontSize: 12, lineHeight: "17px", color: "var(--dsw-alias-label-tertiary,#8b8f98)" }, children: t("totpHintShort") }),
+      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", { style: { margin: 0, fontSize: 12, lineHeight: "17px", color: "var(--dsw-alias-label-tertiary,#8b8f98)" }, children: [
+        t("totpAppHint"),
+        " ",
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("a", { href: MS_AUTHENTICATOR_URL, target: "_blank", rel: "noopener noreferrer", style: { color: "var(--dsw-alias-accent-strong,#4da3ff)" }, children: t("totpAppLink") })
+      ] }),
       data?.enabled && data?.svg && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlTotpQr", children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("img", { alt: t("totpBind"), src: "data:image/svg+xml;charset=utf-8," + encodeURIComponent(data.svg) }) }),
       data?.secret && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlSecretRow", children: [
         /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlSecret", title: data.secret, children: [
@@ -3179,6 +3234,49 @@ function LegalDialog({ t, doc, onClose }) {
     ] })
   ] });
 }
+function testStageView(result, t, host) {
+  const stage = String(result && result.stage || "error");
+  const v = String(result && result.frpcVersion || "");
+  const map = {
+    ok: {
+      title: t("configTestOkTitle"),
+      hint: t("configTestOkHint")
+    },
+    auth: {
+      title: t("configTestAuthTitle"),
+      hint: t("configTestAuthHint")
+    },
+    dns: {
+      title: t("configTestDnsTitle").replace("{h}", host),
+      hint: t("configTestDnsHint")
+    },
+    refused: {
+      title: t("configTestRefusedTitle"),
+      hint: t("configTestRefusedHint")
+    },
+    unreachable: {
+      title: t("configTestUnreachTitle"),
+      hint: t("configTestUnreachHint")
+    },
+    "kcp-missing": {
+      title: t("configTestKcpTitle"),
+      hint: t("configTestKcpHint")
+    },
+    protocol: {
+      title: t("configTestProtoTitle").replace("{v}", v),
+      hint: t("configTestProtoHint")
+    },
+    tool: {
+      title: t("configTestToolTitle"),
+      hint: t("configTestToolHint")
+    },
+    error: {
+      title: t("configTestErrTitle"),
+      hint: String(result && result.error || "")
+    }
+  };
+  return map[stage] || map.error;
+}
 function ConfigPanel({ t, onClose, onSaved }) {
   const [cfg, setCfg] = (0, import_react.useState)(null);
   const [mode, setMode] = (0, import_react.useState)("official");
@@ -3188,6 +3286,8 @@ function ConfigPanel({ t, onClose, onSaved }) {
   const [token, setToken] = (0, import_react.useState)("");
   const [saving, setSaving] = (0, import_react.useState)("");
   const [err, setErr] = (0, import_react.useState)("");
+  const [testing, setTesting] = (0, import_react.useState)(false);
+  const [testResult, setTestResult] = (0, import_react.useState)(null);
   (0, import_react.useEffect)(() => {
     let alive = true;
     fetch(API_P + "/browserctl/api/config", { cache: "no-store" }).then((r) => r.text().then((tx) => {
@@ -3255,6 +3355,32 @@ function ConfigPanel({ t, onClose, onSaved }) {
       setSaving("");
     }
   };
+  const testConn = async () => {
+    if (testing) return;
+    const h = host.trim();
+    if (!h) {
+      setErr(t("configHostRequired"));
+      return;
+    }
+    setErr("");
+    setTestResult(null);
+    setTesting(true);
+    try {
+      const r = await fetch(API_P + "/browserctl/api/config/test", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ host: h, port: parseInt(port, 10) || 17e3, token: token.trim() }),
+        cache: "no-store"
+      });
+      const j = await r.json().catch(() => ({}));
+      setTestResult(j && (j.stage || j.error) ? j : { ok: false, stage: "error", error: "HTTP " + r.status });
+    } catch (e) {
+      setTestResult({ ok: false, stage: "error", error: String(e && e.message || e) });
+    } finally {
+      setTesting(false);
+    }
+  };
+  const testView = testResult ? testStageView(testResult, t, String(testResult.host || host.trim())) : null;
   return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlOverlay", role: "dialog", "aria-modal": "true", "aria-label": t("config"), children: [
     /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { className: "dshBrowserCtlOverlayMask", type: "button", "aria-label": t("close"), onClick: onClose }),
     /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", { className: "dshBrowserCtlPanel dshBrowserCtlPanelNested dshBrowserCtlPanelCfg", children: [
@@ -3312,10 +3438,18 @@ function ConfigPanel({ t, onClose, onSaved }) {
         ] }),
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dshBrowserCtlCfgNote", children: t("configTokenNote") })
       ] }),
+      mode === "selfhost" && testView && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlCfgTest " + (testResult.ok ? "ok" : "fail"), role: "status", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dshBrowserCtlCfgTestTitle", children: testView.title }),
+        testResult.frpcVersion ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dshBrowserCtlCfgTestLine", children: t("configTestVer").replace("{v}", testResult.frpcVersion) }) : null,
+        testView.hint ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dshBrowserCtlCfgTestLine", children: testView.hint }) : null,
+        !testResult.ok && testResult.detail ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dshBrowserCtlCfgTestLine", children: testResult.detail }) : null,
+        !testResult.ok && testResult.logTail ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("pre", { className: "dshBrowserCtlCfgTestLog", children: testResult.logTail }) : null
+      ] }),
       err && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dshBrowserCtlCfgErr", children: err }),
       /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlCfgActions", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "secondary", size: "sm", className: "dshBrowserCtlCfgSave", disabled: saving === "loading", onClick: onClose, children: t("cancel") }),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "primary", size: "sm", className: "dshBrowserCtlCfgSave", disabled: saving === "loading", onClick: save, children: saving === "loading" ? t("saving") : saving === "done" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "secondary", size: "sm", className: "dshBrowserCtlCfgSave", disabled: saving === "loading" || testing, onClick: onClose, children: t("cancel") }),
+        mode === "selfhost" && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "secondary", size: "sm", className: "dshBrowserCtlCfgSave", disabled: saving === "loading" || testing, onClick: testConn, children: testing ? t("configTesting") : t("configTestBtn") }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "primary", size: "sm", className: "dshBrowserCtlCfgSave", disabled: saving === "loading" || testing, onClick: save, children: saving === "loading" ? t("saving") : saving === "done" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
           /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { "aria-hidden": "true", children: Svg.check }),
           t("saved")
         ] }) : t("save") })
@@ -4492,6 +4626,26 @@ function apply(ctx) {
       configTokenKeep: "\u5DF2\u4FDD\u5B58(\u7559\u7A7A\u4FDD\u6301\u4E0D\u53D8)",
       configTokenNote: "Token \u4EC5\u4FDD\u5B58\u5728\u672C\u673A browserctl_secrets.json(\u5DF2\u88AB gitignore \u6392\u9664,\u4E0D\u4F1A\u63D0\u4EA4\u6216\u4E0A\u4F20)\u3002",
       configHostRequired: "\u8BF7\u586B\u5199\u670D\u52A1\u5668\u5730\u5740",
+      configTestBtn: "\u6D4B\u8BD5\u8FDE\u63A5",
+      configTesting: "\u6D4B\u8BD5\u4E2D\u2026",
+      configTestVer: "\u63A2\u9488 frpc v{v}(\u81EA\u5EFA frps \u4E0D\u8981\u6C42\u4E0E\u5BA2\u6237\u7AEF\u7248\u672C\u5B8C\u5168\u4E00\u81F4,\u5EFA\u8BAE\u540C\u4EE3\u76F8\u8FD1)",
+      configTestOkTitle: "\u2705 \u8FDE\u63A5\u6210\u529F:frps \u53EF\u8FBE,token \u6709\u6548",
+      configTestOkHint: "\u5F53\u524D\u914D\u7F6E\u53EF\u4EE5\u6B63\u5E38\u5EFA\u7ACB\u96A7\u9053,\u70B9\u300C\u4FDD\u5B58\u300D\u540E\u5373\u53EF\u4F7F\u7528\u3002",
+      configTestAuthTitle: "\u274C \u670D\u52A1\u5668\u53EF\u8FBE,\u4F46 token \u88AB\u62D2\u7EDD",
+      configTestAuthHint: "frps \u670D\u52A1\u7684 token \u4E0E\u8FD9\u91CC\u586B\u5199\u7684\u4E0D\u4E00\u81F4:\u6838\u5BF9 frps.toml \u7684 auth.token \u4E0E\u914D\u7F6E\u9762\u677F\u91CC\u7684 token \u662F\u5426\u5B8C\u5168\u76F8\u540C(\u6CE8\u610F\u9996\u5C3E\u7A7A\u683C)\u3002",
+      configTestDnsTitle: "\u274C \u57DF\u540D\u89E3\u6790\u5931\u8D25:\u300C{h}\u300D",
+      configTestDnsHint: "\u57DF\u540D\u4E0D\u5B58\u5728\u6216\u8FD8\u6CA1\u751F\u6548:\u68C0\u67E5\u62FC\u5199\u3001DNS \u89E3\u6790(A \u8BB0\u5F55)\u662F\u5426\u5DF2\u914D\u7F6E,\u6216\u76F4\u63A5\u6539\u7528\u670D\u52A1\u5668 IP \u6D4B\u8BD5\u3002",
+      configTestRefusedTitle: "\u274C \u8FDE\u63A5\u88AB\u62D2\u7EDD(\u7AEF\u53E3\u672A\u5F00\u653E)",
+      configTestRefusedHint: "frps \u53EF\u80FD\u6CA1\u5728\u8FD0\u884C,\u6216\u7AEF\u53E3\u4E0D\u5BF9:\u786E\u8BA4\u670D\u52A1\u5668\u4E0A frps \u5DF2\u542F\u52A8,bindPort/kcpBindPort \u4E0E\u8FD9\u91CC\u586B\u7684\u7AEF\u53E3\u4E00\u81F4\u3002",
+      configTestUnreachTitle: "\u274C \u670D\u52A1\u5668\u4E0D\u53EF\u8FBE(TCP \u4E0E UDP \u90FD\u8FDE\u4E0D\u4E0A)",
+      configTestUnreachHint: "\u5730\u5740\u6216\u7AEF\u53E3\u586B\u9519\u3001frps \u6CA1\u5728\u8FD0\u884C\u3001\u6216\u9632\u706B\u5899/\u4E91\u5B89\u5168\u7EC4\u62E6\u622A:\u5148\u5728\u670D\u52A1\u5668\u4E0A\u786E\u8BA4 frps \u8FDB\u7A0B\u6D3B\u7740,\u518D\u68C0\u67E5\u5B89\u5168\u7EC4\u662F\u5426\u653E\u884C\u8BE5\u7AEF\u53E3\u7684 TCP+UDP\u3002",
+      configTestKcpTitle: "\u26A0\uFE0F frps \u53EF\u8FBE,\u4F46 KCP(UDP)\u8FDE\u4E0D\u901A",
+      configTestKcpHint: "\u63D2\u4EF6\u7684\u96A7\u9053\u8D70 KCP(UDP)\u3002\u9700\u8981\u5728 frps.toml \u91CC\u52A0 kcpBindPort = <\u7AEF\u53E3>(\u53EF\u4E0E bindPort \u540C\u53F7,TCP/UDP \u4E0D\u540C\u534F\u8BAE\u4E0D\u51B2\u7A81),\u5E76\u5728\u4E91\u5B89\u5168\u7EC4\u653E\u884C\u540C\u7AEF\u53E3\u7684 UDP\u3002",
+      configTestProtoTitle: "\u26A0\uFE0F \u8FDE\u4E0A\u4E86\u4F46\u63E1\u624B\u5931\u8D25(\u7591\u4F3C frps \u7248\u672C\u6216 TLS \u914D\u7F6E\u4E0D\u517C\u5BB9)",
+      configTestProtoHint: "\u81EA\u5EFA frps \u4E0E\u63A2\u9488 frpc({v})\u7248\u672C\u5DEE\u8DDD\u8FC7\u5927,\u6216 frps \u5F3A\u5236\u4E86\u4E0D\u540C TLS \u914D\u7F6E:\u5EFA\u8BAE\u628A frps \u5347\u7EA7\u5230 0.52+ \u7684\u540C\u4EE3\u7248\u672C\u518D\u8BD5\u3002",
+      configTestToolTitle: "\u274C frpc \u63A2\u9488\u65E0\u6CD5\u542F\u52A8",
+      configTestToolHint: "frpc.exe \u53EF\u80FD\u88AB\u5B89\u5168\u8F6F\u4EF6\u9694\u79BB:\u5148\u8FD0\u884C\u63D2\u4EF6\u76EE\u5F55\u91CC\u7684 fix-antivirus.bat,\u518D\u91CD\u8BD5\u3002",
+      configTestErrTitle: "\u274C \u6D4B\u8BD5\u5931\u8D25",
       save: "\u4FDD\u5B58",
       saving: "\u4FDD\u5B58\u4E2D\u2026",
       saved: "\u5DF2\u4FDD\u5B58",
@@ -4560,6 +4714,8 @@ function apply(ctx) {
       totpOff: "\u672A\u542F\u7528",
       totpHint: "\u542F\u7528\u540E,\u6240\u6709\u8BBE\u5907\u6253\u5F00\u9762\u677F\u524D\u5FC5\u987B\u5148\u8F93\u5165\u9A8C\u8BC1\u5668 6 \u4F4D\u52A8\u6001\u7801(RFC 6238);\u8FDE\u9519 5 \u6B21\u51BB\u7ED3 15 \u5206\u949F,\u540C\u7801\u9632\u91CD\u653E\u3002\u7ED1\u5B9A\u65B9\u5F0F:\u7528\u624B\u673A\u9A8C\u8BC1\u5668\u626B\u63CF\u4E0B\u65B9\u4E8C\u7EF4\u7801\u6216\u624B\u52A8\u8F93\u5165\u5BC6\u94A5\u3002",
       totpHintShort: "\u5F00\u542F\u540E,\u624B\u673A\u6253\u5F00\u9762\u677F\u9700\u5148\u8F93\u5165\u9A8C\u8BC1\u5668 6 \u4F4D\u52A8\u6001\u7801;\u8FDE\u9519 5 \u6B21\u51BB\u7ED3 15 \u5206\u949F\u3002",
+      totpAppHint: "\u624B\u673A\u7AEF\u9700\u8981\u5B89\u88C5\u9A8C\u8BC1\u5668 App \u751F\u6210\u52A8\u6001\u7801,\u63A8\u8350\u5FAE\u8F6F\u5B98\u65B9 Microsoft Authenticator:",
+      totpAppLink: "\u5FAE\u8F6F\u5B98\u7F51\u4E0B\u8F7D",
       totpBind: "2FA \u7ED1\u5B9A\u4E8C\u7EF4\u7801",
       totpSecretLabel: "\u5BC6\u94A5(\u624B\u52A8\u8F93\u5165\u7528)",
       totpEnable: "\u542F\u7528 2FA",
@@ -4737,6 +4893,26 @@ function apply(ctx) {
       configTokenKeep: "Saved (leave blank to keep)",
       configTokenNote: "Token is stored only in local browserctl_secrets.json (gitignored, never committed or uploaded).",
       configHostRequired: "Server address is required",
+      configTestBtn: "Test connection",
+      configTesting: "Testing\u2026",
+      configTestVer: "Probe frpc v{v} (a self-hosted frps does not need the exact same version; keep it in the same generation)",
+      configTestOkTitle: "\u2705 Connection OK: frps reachable, token valid",
+      configTestOkHint: "This configuration can establish the tunnel; click Save to use it.",
+      configTestAuthTitle: "\u274C Server reachable, but the token was rejected",
+      configTestAuthHint: "The frps token does not match what you typed: check auth.token in frps.toml against the token field here (watch for stray spaces).",
+      configTestDnsTitle: '\u274C DNS lookup failed: "{h}"',
+      configTestDnsHint: "The domain does not resolve yet: check the spelling and the DNS A record, or test with the server IP directly.",
+      configTestRefusedTitle: "\u274C Connection refused (port not open)",
+      configTestRefusedHint: "frps may not be running, or the port is wrong: make sure frps is up and its bindPort/kcpBindPort matches the port here.",
+      configTestUnreachTitle: "\u274C Server unreachable (both TCP and UDP failed)",
+      configTestUnreachHint: "Wrong address/port, frps down, or a firewall/security-group block: confirm the frps process on the server, then allow this port (TCP+UDP) in your cloud security group.",
+      configTestKcpTitle: "\u26A0\uFE0F frps reachable, but KCP (UDP) fails",
+      configTestKcpHint: "The plugin tunnel uses KCP (UDP). Add kcpBindPort = <port> to frps.toml (may equal bindPort; TCP/UDP do not conflict) and allow the same port over UDP in your security group.",
+      configTestProtoTitle: "\u26A0\uFE0F Connected but handshake failed (possible frps version or TLS mismatch)",
+      configTestProtoHint: "Your frps is too far from probe frpc ({v}) or enforces different TLS settings: upgrade frps to a same-generation release (0.52+) and retry.",
+      configTestToolTitle: "\u274C Failed to launch the frpc probe",
+      configTestToolHint: "frpc.exe may be quarantined by antivirus: run fix-antivirus.bat from the plugin folder first, then retry.",
+      configTestErrTitle: "\u274C Test failed",
       save: "Save",
       saving: "Saving\u2026",
       saved: "Saved",
@@ -4805,6 +4981,8 @@ function apply(ctx) {
       totpOff: "Disabled",
       totpHint: "When enabled, every device must pass a 6-digit authenticator code (RFC 6238) before opening the panel; 5 wrong tries lock for 15 minutes; replayed codes are rejected.",
       totpHintShort: "Devices must enter a 6-digit code to open the panel; 5 wrong tries lock for 15 minutes.",
+      totpAppHint: "An authenticator app on the phone generates the codes; Microsoft Authenticator is recommended:",
+      totpAppLink: "Get it from Microsoft",
       totpBind: "2FA binding QR code",
       totpSecretLabel: "Secret (manual entry)",
       totpEnable: "Enable 2FA",

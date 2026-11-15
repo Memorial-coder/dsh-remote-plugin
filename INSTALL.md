@@ -198,6 +198,16 @@ python browserctl.py status          # 查看隧道与闸机状态
 - 自建模式的 frp 服务器地址填 `ssh_host` 或 `frp_server_host`。
 - 官方托管不需要 `secrets init`、`ssh-trust`、`nginx`、`paramiko`，四条都只属于自建模式。
 
+### 自建 frps 版本与连接排查
+
+- **版本不要求完全一致**：插件内置 frpc 为 0.61.1，frps 用 0.52 及以上同代版本（TOML 配置这一代）都兼容，最新 0.7x 也可以。太老（0.3x 时代）的 frps 不建议。
+- **连不上时先点「测试连接」**：配置面板选「自建服务器」后有「测试连接」按钮，会用与真实隧道完全相同的方式（KCP/UDP + TLS + token）实际登录一次 frps，并明确告诉你是哪边的问题：
+  - `token 被拒绝` → 核对 frps.toml 的 `auth.token` 与面板里填的 token；
+  - `frps 可达但 KCP 连不通` → frps.toml 需要加 `kcpBindPort = <端口>`（可与 bindPort 同号），云安全组放行同端口 **UDP**；
+  - `域名解析失败` / `端口未开放` / `TCP+UDP 都不可达` → 域名、frps 进程或安全组问题；
+  - `握手失败` → frps 版本过老或 TLS 配置不一致，升级 frps 后重试。
+- 插件隧道固定走 KCP（UDP）+ TLS，这是官方服务器的线上实测结论（同链路吞吐约为 TCP 的 2.5 倍），自建 frps 也请按上面的方式开启。
+
 ## 构建插件（可选）
 
 发行包已含 `lib/`，普通安装**不需要**构建。改了插件源码才需要：

@@ -16,6 +16,8 @@ const ABOUT_LINKS = {
   app: 'https://github.com/Memorial-coder/dsh-remote-plugin/releases/latest',
   qq: 'https://qm.qq.com/q/K6RXqOKLAu',
 }
+// 手机端 2FA 需要验证器 App 生成 TOTP 动态码;2FA 卡片提示指向的官方下载页(微软官网)
+const MS_AUTHENTICATOR_URL = 'https://www.microsoft.com/zh-cn/security/authenticator/mobile-app'
 function lsGet(k) { try { return window.localStorage.getItem(k) || '' } catch (e) { return '' } }
 function lsSet(k, v) { try { window.localStorage.setItem(k, v) } catch (e) {} }
 
@@ -1291,6 +1293,55 @@ div[data-slot='sidebar.footer.action'] > * {
   height: 42px !important;
   margin: 4px 0 !important;
   min-width: 96px;
+}
+/* 「测试连接」结果框:成功描绿边,失败描红边;日志尾部可滚动 */
+.dshBrowserCtlCfgTest {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border: 1px solid var(--dsw-alias-border-l2, #2a2c33);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: var(--dsw-alias-bg-layer-1, rgba(255,255,255,0.03));
+}
+.dshBrowserCtlCfgTest.ok {
+  border-color: var(--dsw-alias-state-success-primary, #34b371);
+}
+.dshBrowserCtlCfgTest.fail {
+  border-color: var(--dsw-alias-state-error-primary, #e5655c);
+}
+.dshBrowserCtlCfgTestTitle {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 17px;
+}
+.dshBrowserCtlCfgTest.ok .dshBrowserCtlCfgTestTitle {
+  color: var(--dsw-alias-state-success-primary, #34b371);
+}
+.dshBrowserCtlCfgTest.fail .dshBrowserCtlCfgTestTitle {
+  color: var(--dsw-alias-state-error-primary, #e5655c);
+}
+.dshBrowserCtlCfgTestLine {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-secondary, #b0b3bb);
+}
+.dshBrowserCtlCfgTestLog {
+  margin: 0;
+  padding: 8px;
+  max-height: 132px;
+  overflow: auto;
+  font-size: 11px;
+  line-height: 15px;
+  font-family: ui-monospace, Consolas, Menlo, monospace;
+  color: var(--dsw-alias-label-tertiary, #8b8f98);
+  background: var(--dsw-alias-bg-layer-2, rgba(255,255,255,0.06));
+  border-radius: 8px;
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 /* 推送页签:开关行 */
 .dshBrowserCtlSwitchRow {
@@ -2814,6 +2865,10 @@ function TotpCard({ t, reloadToken, onRefresh, disabled }) {
         <p style={{ margin: 0, fontSize: 12, lineHeight: '17px', color: 'var(--dsw-alias-label-tertiary,#8b8f98)' }}>
           {t('totpHintShort')}
         </p>
+        <p style={{ margin: 0, fontSize: 12, lineHeight: '17px', color: 'var(--dsw-alias-label-tertiary,#8b8f98)' }}>
+          {t('totpAppHint')}{' '}
+          <a href={MS_AUTHENTICATOR_URL} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--dsw-alias-accent-strong,#4da3ff)' }}>{t('totpAppLink')}</a>
+        </p>
         {data?.enabled && data?.svg && (
           <div className="dshBrowserCtlTotpQr">
             <img alt={t('totpBind')} src={'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(data.svg)} />
@@ -3294,6 +3349,53 @@ function LegalDialog({ t, doc, onClose }) {
 }
 
 /* ---------- 「配置」面板:服务器选择(官方 / 自建) ---------- */
+// 「测试连接」结果 → 面板文案。stage 由 host 探针分类:
+//   ok=登录成功 auth=token被拒 dns=域名解析失败 refused=端口未开放
+//   unreachable=TCP/UDP都不可达 kcp-missing=frps没开KCP protocol=握手/版本不兼容 tool=frpc起不来
+function testStageView(result, t, host) {
+  const stage = String((result && result.stage) || 'error')
+  const v = String((result && result.frpcVersion) || '')
+  const map = {
+    ok: {
+      title: t('configTestOkTitle'),
+      hint: t('configTestOkHint'),
+    },
+    auth: {
+      title: t('configTestAuthTitle'),
+      hint: t('configTestAuthHint'),
+    },
+    dns: {
+      title: t('configTestDnsTitle').replace('{h}', host),
+      hint: t('configTestDnsHint'),
+    },
+    refused: {
+      title: t('configTestRefusedTitle'),
+      hint: t('configTestRefusedHint'),
+    },
+    unreachable: {
+      title: t('configTestUnreachTitle'),
+      hint: t('configTestUnreachHint'),
+    },
+    'kcp-missing': {
+      title: t('configTestKcpTitle'),
+      hint: t('configTestKcpHint'),
+    },
+    protocol: {
+      title: t('configTestProtoTitle').replace('{v}', v),
+      hint: t('configTestProtoHint'),
+    },
+    tool: {
+      title: t('configTestToolTitle'),
+      hint: t('configTestToolHint'),
+    },
+    error: {
+      title: t('configTestErrTitle'),
+      hint: String((result && result.error) || ''),
+    },
+  }
+  return map[stage] || map.error
+}
+
 function ConfigPanel({ t, onClose, onSaved }) {
   const [cfg, setCfg] = useState(null)
   const [mode, setMode] = useState('official')
@@ -3303,6 +3405,10 @@ function ConfigPanel({ t, onClose, onSaved }) {
   const [token, setToken] = useState('')
   const [saving, setSaving] = useState('') // '' | 'loading' | 'done'
   const [err, setErr] = useState('')
+  // 「测试连接」:testing=true 表示探针在跑(最长 KCP 7s + TCP 6s);
+  // testResult 是 host 的诊断结论 { ok, stage, detail, logTail, frpcVersion, ... }
+  const [testing, setTesting] = useState(false)
+  const [testResult, setTestResult] = useState(null)
 
   // 打开时读取当前配置(官方模式不返回 host/port/token,仅 selfhost 返回)
   useEffect(() => {
@@ -3366,6 +3472,34 @@ function ConfigPanel({ t, onClose, onSaved }) {
     }
   }
 
+  // 「测试连接」:把表单里当前填写的 host/port/token 发给 host 探针
+  // (token 走 POST body 不进 URL;留空 = 用已保存的 token,与保存语义一致)。
+  const testConn = async () => {
+    if (testing) return
+    const h = host.trim()
+    if (!h) { setErr(t('configHostRequired')); return }
+    setErr('')
+    setTestResult(null)
+    setTesting(true)
+    try {
+      const r = await fetch(API_P + '/browserctl/api/config/test', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ host: h, port: parseInt(port, 10) || 17000, token: token.trim() }),
+        cache: 'no-store',
+      })
+      const j = await r.json().catch(() => ({}))
+      setTestResult(j && (j.stage || j.error) ? j : { ok: false, stage: 'error', error: 'HTTP ' + r.status })
+    } catch (e) {
+      setTestResult({ ok: false, stage: 'error', error: String((e && e.message) || e) })
+    } finally {
+      setTesting(false)
+    }
+  }
+
+  // 结果框文案(渲染时算一次;stage→标题/建议的映射见 testStageView)
+  const testView = testResult ? testStageView(testResult, t, String(testResult.host || host.trim())) : null
+
   return (
     <div className="dshBrowserCtlOverlay" role="dialog" aria-modal="true" aria-label={t('config')}>
       <button className="dshBrowserCtlOverlayMask" type="button" aria-label={t('close')} onClick={onClose} />
@@ -3427,12 +3561,28 @@ function ConfigPanel({ t, onClose, onSaved }) {
             <p className="dshBrowserCtlCfgNote">{t('configTokenNote')}</p>
           </div>
         )}
+        {mode === 'selfhost' && testView && (
+          <div className={'dshBrowserCtlCfgTest ' + (testResult.ok ? 'ok' : 'fail')} role="status">
+            <p className="dshBrowserCtlCfgTestTitle">{testView.title}</p>
+            {testResult.frpcVersion ? (
+              <p className="dshBrowserCtlCfgTestLine">{t('configTestVer').replace('{v}', testResult.frpcVersion)}</p>
+            ) : null}
+            {testView.hint ? <p className="dshBrowserCtlCfgTestLine">{testView.hint}</p> : null}
+            {!testResult.ok && testResult.detail ? <p className="dshBrowserCtlCfgTestLine">{testResult.detail}</p> : null}
+            {!testResult.ok && testResult.logTail ? <pre className="dshBrowserCtlCfgTestLog">{testResult.logTail}</pre> : null}
+          </div>
+        )}
         {err && <p className="dshBrowserCtlCfgErr">{err}</p>}
         <div className="dshBrowserCtlCfgActions">
-          <Button variant="secondary" size="sm" className="dshBrowserCtlCfgSave" disabled={saving === 'loading'} onClick={onClose}>
+          <Button variant="secondary" size="sm" className="dshBrowserCtlCfgSave" disabled={saving === 'loading' || testing} onClick={onClose}>
             {t('cancel')}
           </Button>
-          <Button variant="primary" size="sm" className="dshBrowserCtlCfgSave" disabled={saving === 'loading'} onClick={save}>
+          {mode === 'selfhost' && (
+            <Button variant="secondary" size="sm" className="dshBrowserCtlCfgSave" disabled={saving === 'loading' || testing} onClick={testConn}>
+              {testing ? t('configTesting') : t('configTestBtn')}
+            </Button>
+          )}
+          <Button variant="primary" size="sm" className="dshBrowserCtlCfgSave" disabled={saving === 'loading' || testing} onClick={save}>
             {saving === 'loading' ? t('saving') : saving === 'done' ? (<><span aria-hidden="true">{Svg.check}</span>{t('saved')}</>) : t('save')}
           </Button>
         </div>
@@ -4690,6 +4840,26 @@ export function apply(ctx) {
       configTokenKeep: '已保存(留空保持不变)',
       configTokenNote: 'Token 仅保存在本机 browserctl_secrets.json(已被 gitignore 排除,不会提交或上传)。',
       configHostRequired: '请填写服务器地址',
+      configTestBtn: '测试连接',
+      configTesting: '测试中…',
+      configTestVer: '探针 frpc v{v}(自建 frps 不要求与客户端版本完全一致,建议同代相近)',
+      configTestOkTitle: '✅ 连接成功:frps 可达,token 有效',
+      configTestOkHint: '当前配置可以正常建立隧道,点「保存」后即可使用。',
+      configTestAuthTitle: '❌ 服务器可达,但 token 被拒绝',
+      configTestAuthHint: 'frps 服务的 token 与这里填写的不一致:核对 frps.toml 的 auth.token 与配置面板里的 token 是否完全相同(注意首尾空格)。',
+      configTestDnsTitle: '❌ 域名解析失败:「{h}」',
+      configTestDnsHint: '域名不存在或还没生效:检查拼写、DNS 解析(A 记录)是否已配置,或直接改用服务器 IP 测试。',
+      configTestRefusedTitle: '❌ 连接被拒绝(端口未开放)',
+      configTestRefusedHint: 'frps 可能没在运行,或端口不对:确认服务器上 frps 已启动,bindPort/kcpBindPort 与这里填的端口一致。',
+      configTestUnreachTitle: '❌ 服务器不可达(TCP 与 UDP 都连不上)',
+      configTestUnreachHint: '地址或端口填错、frps 没在运行、或防火墙/云安全组拦截:先在服务器上确认 frps 进程活着,再检查安全组是否放行该端口的 TCP+UDP。',
+      configTestKcpTitle: '⚠️ frps 可达,但 KCP(UDP)连不通',
+      configTestKcpHint: '插件的隧道走 KCP(UDP)。需要在 frps.toml 里加 kcpBindPort = <端口>(可与 bindPort 同号,TCP/UDP 不同协议不冲突),并在云安全组放行同端口的 UDP。',
+      configTestProtoTitle: '⚠️ 连上了但握手失败(疑似 frps 版本或 TLS 配置不兼容)',
+      configTestProtoHint: '自建 frps 与探针 frpc({v})版本差距过大,或 frps 强制了不同 TLS 配置:建议把 frps 升级到 0.52+ 的同代版本再试。',
+      configTestToolTitle: '❌ frpc 探针无法启动',
+      configTestToolHint: 'frpc.exe 可能被安全软件隔离:先运行插件目录里的 fix-antivirus.bat,再重试。',
+      configTestErrTitle: '❌ 测试失败',
       save: '保存',
       saving: '保存中…',
       saved: '已保存',
@@ -4758,6 +4928,8 @@ export function apply(ctx) {
       totpOff: '未启用',
       totpHint: '启用后,所有设备打开面板前必须先输入验证器 6 位动态码(RFC 6238);连错 5 次冻结 15 分钟,同码防重放。绑定方式:用手机验证器扫描下方二维码或手动输入密钥。',
       totpHintShort: '开启后,手机打开面板需先输入验证器 6 位动态码;连错 5 次冻结 15 分钟。',
+      totpAppHint: '手机端需要安装验证器 App 生成动态码,推荐微软官方 Microsoft Authenticator:',
+      totpAppLink: '微软官网下载',
       totpBind: '2FA 绑定二维码',
       totpSecretLabel: '密钥(手动输入用)',
       totpEnable: '启用 2FA',
@@ -4935,6 +5107,26 @@ export function apply(ctx) {
       configTokenKeep: 'Saved (leave blank to keep)',
       configTokenNote: 'Token is stored only in local browserctl_secrets.json (gitignored, never committed or uploaded).',
       configHostRequired: 'Server address is required',
+      configTestBtn: 'Test connection',
+      configTesting: 'Testing…',
+      configTestVer: 'Probe frpc v{v} (a self-hosted frps does not need the exact same version; keep it in the same generation)',
+      configTestOkTitle: '✅ Connection OK: frps reachable, token valid',
+      configTestOkHint: 'This configuration can establish the tunnel; click Save to use it.',
+      configTestAuthTitle: '❌ Server reachable, but the token was rejected',
+      configTestAuthHint: 'The frps token does not match what you typed: check auth.token in frps.toml against the token field here (watch for stray spaces).',
+      configTestDnsTitle: '❌ DNS lookup failed: "{h}"',
+      configTestDnsHint: 'The domain does not resolve yet: check the spelling and the DNS A record, or test with the server IP directly.',
+      configTestRefusedTitle: '❌ Connection refused (port not open)',
+      configTestRefusedHint: 'frps may not be running, or the port is wrong: make sure frps is up and its bindPort/kcpBindPort matches the port here.',
+      configTestUnreachTitle: '❌ Server unreachable (both TCP and UDP failed)',
+      configTestUnreachHint: 'Wrong address/port, frps down, or a firewall/security-group block: confirm the frps process on the server, then allow this port (TCP+UDP) in your cloud security group.',
+      configTestKcpTitle: '⚠️ frps reachable, but KCP (UDP) fails',
+      configTestKcpHint: 'The plugin tunnel uses KCP (UDP). Add kcpBindPort = <port> to frps.toml (may equal bindPort; TCP/UDP do not conflict) and allow the same port over UDP in your security group.',
+      configTestProtoTitle: '⚠️ Connected but handshake failed (possible frps version or TLS mismatch)',
+      configTestProtoHint: 'Your frps is too far from probe frpc ({v}) or enforces different TLS settings: upgrade frps to a same-generation release (0.52+) and retry.',
+      configTestToolTitle: '❌ Failed to launch the frpc probe',
+      configTestToolHint: 'frpc.exe may be quarantined by antivirus: run fix-antivirus.bat from the plugin folder first, then retry.',
+      configTestErrTitle: '❌ Test failed',
       save: 'Save',
       saving: 'Saving…',
       saved: 'Saved',
@@ -5003,6 +5195,8 @@ export function apply(ctx) {
       totpOff: 'Disabled',
       totpHint: 'When enabled, every device must pass a 6-digit authenticator code (RFC 6238) before opening the panel; 5 wrong tries lock for 15 minutes; replayed codes are rejected.',
       totpHintShort: 'Devices must enter a 6-digit code to open the panel; 5 wrong tries lock for 15 minutes.',
+      totpAppHint: 'An authenticator app on the phone generates the codes; Microsoft Authenticator is recommended:',
+      totpAppLink: 'Get it from Microsoft',
       totpBind: '2FA binding QR code',
       totpSecretLabel: 'Secret (manual entry)',
       totpEnable: 'Enable 2FA',

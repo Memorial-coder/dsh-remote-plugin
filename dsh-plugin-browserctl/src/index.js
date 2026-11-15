@@ -1050,6 +1050,161 @@ function readRawBody(req) {
   })
 }
 
+// ---- 自建 frps 连接测试(「测试连接」按钮) ------------------------------------
+// 用户反馈:自建 frps 连不上时,面板只会说「隧道未建立」,分不清是 token 错、
+// frps 没开 KCP(UDP)、防火墙拦截还是地址填错("不知道到底是哪边的问题")。
+// 这里用与真实隧道完全一致的方式(协议 + TLS + token)临时拉起一份不带
+// [[proxies]] 的 frpc 探针:
+//   - 只验证「登录 frps」这一步,不注册任何代理,不占远程端口;user 前缀是
+//     "probe",与正在运行的 browserctl 隧道互不干扰;
+//   - 读 frpc 日志做结论分类;KCP 不通时再用 TCP 探一次,区分「frps 没开
+//     kcpBindPort」和「整个端口不可达」——这是自建用户最常见的两种坑;
+//   - 无论结果如何,测试完立即杀进程并清理临时文件。
+// frpc 日志标记(0.61~0.72 源码逐字核对过,client/service.go):
+//   成功: login to server success, get run id [xxx]
+//   失败: connect to server error: <原因>(服务器拒绝时原因=服务端错误文本,
+//         如 token authentication failed;网络不通时=dial tcp/udp 系统错误)
+const PROBE_KCP_TIMEOUT = 7000 // KCP(UDP)探针最长等待:UDP 丢包不会报错,只能等超时
+const PROBE_TCP_TIMEOUT = 6000 // TCP 回退探针最长等待
+
+function frpcBinaryPath() {
+  const env = String(process.env.BROWSERCTL_FRPC || '').trim()
+  if (env && existsSync(env)) return env
+  const exe = process.platform === 'win32' ? 'frpc.exe' : 'frpc'
+  const inKit = path.join(CORE_DIR, exe)
+  return existsSync(inKit) ? inKit : null
+}
+
+let _frpcVerCache = null
+function frpcVersion() {
+  if (_frpcVerCache !== null) return _frpcVerCache
+  _frpcVerCache = ''
+  const bin = frpcBinaryPath()
+  if (!bin) return ''
+  const outPath = path.join(os.tmpdir(), `browserctl_frpcver_${process.pid}_${Date.now()}.log`)
+  let fd = null
+  try {
+    fd = openSync(outPath, 'w')
+    // 输出落临时文件而非管道:DSH 运行环境里管道 stdio 可能 EPERM(见 build.mjs 头注)
+    spawnSync(bin, ['-v'], { stdio: ['ignore', fd, fd], timeout: 8000, windowsHide: true })
+  } catch { /* 二进制无法执行:版本留空 */ }
+  finally { try { if (fd !== null) closeSync(fd) } catch {} }
+  try {
+    _frpcVerCache = decodeLogBuffer(readFileSync(outPath)).trim().split(/\r?\n/)[0].trim()
+  } catch { /* 读取失败:留空 */ }
+  try { rmSync(outPath, { force: true }) } catch {}
+  return _frpcVerCache
+}
+
+/** 把一份 frpc 探针日志分类成结论;日志里还没有结论标记时返回 null(继续等)。 */
+function classifyProbeLog(text) {
+  const t = String(text || '')
+  if (t.includes('login to server success')) return { stage: 'ok', detail: '' }
+  const errLine = t.split(/\r?\n/).filter(l => l.includes('connect to server error')).pop()
+  if (errLine) {
+    const marker = 'connect to server error:'
+    const idx = errLine.indexOf(marker)
+    const reason = idx >= 0 ? errLine.slice(idx + marker.length).trim() : errLine.trim()
+    const low = reason.toLowerCase()
+    if (low.includes('no such host') || low.includes('lookup')) return { stage: 'dns', detail: reason }
+    if (low.includes('token') || low.includes('auth') || low.includes('invalid')) return { stage: 'auth', detail: reason }
+    if (low.includes('eof') || low.includes('unexpected frame') || low.includes('invalid message') ||
+        low.includes('tls') || low.includes('handshake')) return { stage: 'protocol', detail: reason }
+    if (low.includes('refused')) return { stage: 'refused', detail: reason }
+    return { stage: 'network', detail: reason }
+  }
+  return null
+}
+
+/** 读探针日志全文(小文件,直接读);读不到返回 ''。 */
+function readProbeLog(file) {
+  try { return decodeLogBuffer(readFileSync(file)) } catch { return '' }
+}
+
+/**
+ * 跑一次 frpc 登录探针:写临时 toml → 拉起 frpc → 轮询日志出结论 → 杀进程清理。
+ * 返回 { stage: 'ok'|'auth'|'dns'|'protocol'|'refused'|'network'|'timeout'|'tool', detail, logTail }。
+ */
+function probeFrpsLogin({ host, port, token, protocol, timeoutMs }) {
+  return new Promise((resolve) => {
+    const stamp = `${process.pid}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+    const cfgPath = path.join(os.tmpdir(), `browserctl_probe_${stamp}.toml`)
+    const logPath = path.join(os.tmpdir(), `browserctl_probe_${stamp}.log`)
+    const bin = frpcBinaryPath()
+    if (!bin) {
+      resolve({ stage: 'tool', detail: '未找到 frpc 可执行文件', logTail: '' })
+      return
+    }
+    // TOML 基本字符串只要求转义反斜杠与引号(与 browserctl.py 生成正式 toml 同款规则)
+    const esc = (s) => String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+    const toml =
+      'serverAddr = "' + esc(host) + '"\n' +
+      'serverPort = ' + (parseInt(port, 10) || 17000) + '\n' +
+      'auth.method = "token"\n' +
+      'auth.token = "' + esc(token) + '"\n' +
+      'user = "probe"\n' +
+      // loginFailExit=false:失败持续重试,每轮都会把失败原因写进日志;探针反正会按时杀掉
+      'loginFailExit = false\n' +
+      'transport.protocol = "' + (protocol === 'tcp' ? 'tcp' : 'kcp') + '"\n' +
+      'transport.tls.enable = true\n' +
+      'transport.heartbeatInterval = 10\n' +
+      'transport.heartbeatTimeout = 30\n' +
+      'log.to = "console"\n' +
+      'log.level = "info"\n' +
+      'log.disablePrintColor = true\n'
+    let child = null
+    let fd = null
+    let timer = null
+    let poll = null
+    let settled = false
+    const finish = (result) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      clearInterval(poll)
+      // 杀探针进程(Windows 下再补一发 taskkill /T /F,确保不残留)
+      if (child && child.pid && child.exitCode === null) {
+        try { child.kill() } catch { /* 已退出 */ }
+        if (process.platform === 'win32') {
+          try {
+            spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'],
+              { stdio: 'ignore', windowsHide: true, detached: true }).unref()
+          } catch { /* kill() 已尽力 */ }
+        }
+      }
+      try { if (fd !== null) closeSync(fd) } catch {}
+      // 延迟删临时文件,给进程退出/句柄释放留时间;仍被占用时 rmSync 抛错就留给系统临时目录
+      setTimeout(() => {
+        try { rmSync(cfgPath, { force: true }) } catch {}
+        try { rmSync(logPath, { force: true }) } catch {}
+      }, 500)
+      const text = readProbeLog(logPath)
+      resolve({
+        ...result,
+        logTail: text ? text.split(/\r?\n/).filter(l => l.trim()).slice(-6).join('\n') : '',
+      })
+    }
+    // 超时 = 日志里始终没有结论标记:UDP 静默丢包/端口未开放/服务器无响应的典型表现
+    timer = setTimeout(() => finish({ stage: 'timeout', detail: '', logTail: '' }), timeoutMs)
+    try {
+      writeFileSync(cfgPath, toml, 'utf8')
+      fd = openSync(logPath, 'w')
+      // 输出落临时文件(不用管道,原因见 frpcVersion 注释);windowsHide 防止闪黑窗
+      child = spawn(bin, ['-c', cfgPath], { stdio: ['ignore', fd, fd], windowsHide: true })
+      child.on('error', (e) => {
+        // spawn 失败(如 frpc.exe 被安全软件拒绝执行):立即给出 tool 结论
+        finish({ stage: 'tool', detail: String((e && e.message) || e), logTail: '' })
+      })
+      poll = setInterval(() => {
+        const verdict = classifyProbeLog(readProbeLog(logPath))
+        if (verdict) finish(verdict)
+      }, 300)
+    } catch (e) {
+      finish({ stage: 'tool', detail: String((e && e.message) || e), logTail: '' })
+    }
+  })
+}
+
 // ---- 插件 API 鉴权(C-02/C-03) ----
 // 之前 /browserctl/api/* 完全绕过 DSH 鉴权:本机/同网段直连即可读 TOTP 明文密钥、
 // 踢设备、建配对码。现在按"谁在调用"分级放行:
@@ -1179,6 +1334,7 @@ const CSRF_PROTECTED = new Set([
   '/browserctl/api/server/oauth/open',
   '/browserctl/api/server/oauth/poll',
   '/browserctl/api/config',
+  '/browserctl/api/config/test',
 ])
 
 // 闸机反代里的「写端点」后缀(POST/DELETE 全拦 + GET 型写操作;events/push-poll/
@@ -1807,6 +1963,68 @@ export function apply(ctx, config = {}) {
               canElevate: process.platform === 'win32',
             })
           }
+          return
+        }
+        if (route === '/browserctl/api/config/test') {
+          // 「测试连接」(自建 frps):用探针 frpc 实际登录一次 frps,给用户一个
+          // 明确的「哪边的问题」结论,而不是让隧道起不来后自己翻日志。
+          // POST body { host, port, token }:token 留空 = 用已保存的(与保存语义一致);
+          // token 走 body 不走 query,避免进闸机 reqlog(kb/24 同款考量)。
+          if ((req.method || 'GET') !== 'POST') { sendJson(res, 405, { ok: false, error: 'POST only' }); return }
+          let body = {}
+          try { body = JSON.parse((await readRawBody(req)).toString('utf-8') || '{}') } catch { body = {} }
+          const sec = readSecrets()
+          const host = String(body.host || '').trim().replace(/^https?:\/\//, '').replace(/\/+$/, '')
+          const port = parseInt(body.port, 10) || 17000
+          const token = String(body.token || '').trim() || String(sec.frp_token || '')
+          if (!host) { sendJson(res, 400, { ok: false, error: '缺少服务器地址(host)' }); return }
+          if (!token) { sendJson(res, 400, { ok: false, error: '缺少 FRP token:请先填写,或先「保存」过一次配置' }); return }
+          if (!frpcBinaryPath()) {
+            sendJson(res, 200, { ok: false, stage: 'tool', host, port, frpcVersion: '', error: '未找到 frpc.exe:请检查插件目录(可能被安全软件隔离,先运行 fix-antivirus.bat)' })
+            return
+          }
+          const ver = frpcVersion()
+          // 第一轮:KCP(UDP),与插件真实隧道完全一致的连接方式
+          const kcp = await probeFrpsLogin({ host, port, token, protocol: 'kcp', timeoutMs: PROBE_KCP_TIMEOUT })
+          const respond = (over) => sendJson(res, 200, { ok: false, host, port, frpcVersion: ver, kcpOk: false, tcpOk: null, ...over })
+          if (kcp.stage === 'ok') {
+            respond({ ok: true, stage: 'ok', transport: 'kcp', kcpOk: true })
+            return
+          }
+          if (kcp.stage === 'tool') {
+            respond({ stage: 'tool', error: 'frpc 无法执行:' + kcp.detail + '(常见原因:安全软件拦截,先运行插件目录里的 fix-antivirus.bat)', detail: kcp.detail, logTail: kcp.logTail })
+            return
+          }
+          if (kcp.stage === 'auth') {
+            // KCP 已通、只是 token 被拒:问题明确在凭据,不需要 TCP 回退
+            respond({ stage: 'auth', transport: 'kcp', kcpOk: true, detail: kcp.detail, logTail: kcp.logTail })
+            return
+          }
+          // KCP 没通 → TCP 再探一次,定位「frps 没开 KCP」还是「整个端口不可达」
+          const tcp = await probeFrpsLogin({ host, port, token, protocol: 'tcp', timeoutMs: PROBE_TCP_TIMEOUT })
+          const bothTail = [kcp.logTail, tcp.logTail].filter(Boolean).join('\n---\n')
+          if (tcp.stage === 'ok') {
+            // TCP 能登录 = 服务器活着、token 对,唯独插件要用的 KCP(UDP)不通
+            respond({ stage: 'kcp-missing', transport: 'tcp', tcpOk: true, detail: kcp.detail || tcp.detail, logTail: bothTail })
+            return
+          }
+          if (tcp.stage === 'auth') {
+            respond({ stage: 'auth', transport: 'tcp', tcpOk: true, detail: tcp.detail, logTail: bothTail, alsoKcpMissing: kcp.stage !== 'dns' && kcp.stage !== 'refused' })
+            return
+          }
+          if (tcp.stage === 'tool') {
+            respond({ stage: 'tool', error: 'frpc 无法执行:' + tcp.detail + '(常见原因:安全软件拦截,先运行插件目录里的 fix-antivirus.bat)', detail: tcp.detail, logTail: tcp.logTail })
+            return
+          }
+          if (kcp.stage === 'protocol' && tcp.stage === 'protocol') {
+            // 两种协议都握手失败:多为 frps 版本过老 / TLS 配置与探针不一致
+            respond({ stage: 'protocol', detail: kcp.detail || tcp.detail, logTail: bothTail })
+            return
+          }
+          const stage = (kcp.stage === 'dns' || tcp.stage === 'dns') ? 'dns'
+            : (kcp.stage === 'refused' || tcp.stage === 'refused') ? 'refused'
+            : 'unreachable'
+          respond({ stage, detail: kcp.detail || tcp.detail, logTail: bothTail })
           return
         }
         if (route === '/browserctl/api/update-check') {

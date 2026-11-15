@@ -4627,7 +4627,7 @@ function adminHeaders() {
   }
   return {};
 }
-var VERSION = true ? "1.0.56" : "dev";
+var VERSION = true ? "1.0.58" : "dev";
 var sessionTunnel = false;
 var ensureRunning = null;
 var lastEnsureError = "";
@@ -5410,6 +5410,142 @@ function readRawBody(req) {
     req.on("error", reject);
   });
 }
+var PROBE_KCP_TIMEOUT = 7e3;
+var PROBE_TCP_TIMEOUT = 6e3;
+function frpcBinaryPath() {
+  const env = String(process.env.BROWSERCTL_FRPC || "").trim();
+  if (env && existsSync(env)) return env;
+  const exe = process.platform === "win32" ? "frpc.exe" : "frpc";
+  const inKit = path.join(CORE_DIR, exe);
+  return existsSync(inKit) ? inKit : null;
+}
+var _frpcVerCache = null;
+function frpcVersion() {
+  if (_frpcVerCache !== null) return _frpcVerCache;
+  _frpcVerCache = "";
+  const bin = frpcBinaryPath();
+  if (!bin) return "";
+  const outPath = path.join(os.tmpdir(), `browserctl_frpcver_${process.pid}_${Date.now()}.log`);
+  let fd = null;
+  try {
+    fd = openSync(outPath, "w");
+    spawnSync(bin, ["-v"], { stdio: ["ignore", fd, fd], timeout: 8e3, windowsHide: true });
+  } catch {
+  } finally {
+    try {
+      if (fd !== null) closeSync(fd);
+    } catch {
+    }
+  }
+  try {
+    _frpcVerCache = decodeLogBuffer(readFileSync(outPath)).trim().split(/\r?\n/)[0].trim();
+  } catch {
+  }
+  try {
+    rmSync(outPath, { force: true });
+  } catch {
+  }
+  return _frpcVerCache;
+}
+function classifyProbeLog(text) {
+  const t = String(text || "");
+  if (t.includes("login to server success")) return { stage: "ok", detail: "" };
+  const errLine = t.split(/\r?\n/).filter((l) => l.includes("connect to server error")).pop();
+  if (errLine) {
+    const marker = "connect to server error:";
+    const idx = errLine.indexOf(marker);
+    const reason = idx >= 0 ? errLine.slice(idx + marker.length).trim() : errLine.trim();
+    const low = reason.toLowerCase();
+    if (low.includes("no such host") || low.includes("lookup")) return { stage: "dns", detail: reason };
+    if (low.includes("token") || low.includes("auth") || low.includes("invalid")) return { stage: "auth", detail: reason };
+    if (low.includes("eof") || low.includes("unexpected frame") || low.includes("invalid message") || low.includes("tls") || low.includes("handshake")) return { stage: "protocol", detail: reason };
+    if (low.includes("refused")) return { stage: "refused", detail: reason };
+    return { stage: "network", detail: reason };
+  }
+  return null;
+}
+function readProbeLog(file) {
+  try {
+    return decodeLogBuffer(readFileSync(file));
+  } catch {
+    return "";
+  }
+}
+function probeFrpsLogin({ host, port, token, protocol, timeoutMs }) {
+  return new Promise((resolve) => {
+    const stamp = `${process.pid}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const cfgPath = path.join(os.tmpdir(), `browserctl_probe_${stamp}.toml`);
+    const logPath = path.join(os.tmpdir(), `browserctl_probe_${stamp}.log`);
+    const bin = frpcBinaryPath();
+    if (!bin) {
+      resolve({ stage: "tool", detail: "\u672A\u627E\u5230 frpc \u53EF\u6267\u884C\u6587\u4EF6", logTail: "" });
+      return;
+    }
+    const esc = (s) => String(s).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+    const toml = 'serverAddr = "' + esc(host) + '"\nserverPort = ' + (parseInt(port, 10) || 17e3) + '\nauth.method = "token"\nauth.token = "' + esc(token) + '"\nuser = "probe"\nloginFailExit = false\ntransport.protocol = "' + (protocol === "tcp" ? "tcp" : "kcp") + '"\ntransport.tls.enable = true\ntransport.heartbeatInterval = 10\ntransport.heartbeatTimeout = 30\nlog.to = "console"\nlog.level = "info"\nlog.disablePrintColor = true\n';
+    let child = null;
+    let fd = null;
+    let timer = null;
+    let poll = null;
+    let settled = false;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      clearInterval(poll);
+      if (child && child.pid && child.exitCode === null) {
+        try {
+          child.kill();
+        } catch {
+        }
+        if (process.platform === "win32") {
+          try {
+            spawn(
+              "taskkill",
+              ["/PID", String(child.pid), "/T", "/F"],
+              { stdio: "ignore", windowsHide: true, detached: true }
+            ).unref();
+          } catch {
+          }
+        }
+      }
+      try {
+        if (fd !== null) closeSync(fd);
+      } catch {
+      }
+      setTimeout(() => {
+        try {
+          rmSync(cfgPath, { force: true });
+        } catch {
+        }
+        try {
+          rmSync(logPath, { force: true });
+        } catch {
+        }
+      }, 500);
+      const text = readProbeLog(logPath);
+      resolve({
+        ...result,
+        logTail: text ? text.split(/\r?\n/).filter((l) => l.trim()).slice(-6).join("\n") : ""
+      });
+    };
+    timer = setTimeout(() => finish({ stage: "timeout", detail: "", logTail: "" }), timeoutMs);
+    try {
+      writeFileSync(cfgPath, toml, "utf8");
+      fd = openSync(logPath, "w");
+      child = spawn(bin, ["-c", cfgPath], { stdio: ["ignore", fd, fd], windowsHide: true });
+      child.on("error", (e) => {
+        finish({ stage: "tool", detail: String(e && e.message || e), logTail: "" });
+      });
+      poll = setInterval(() => {
+        const verdict = classifyProbeLog(readProbeLog(logPath));
+        if (verdict) finish(verdict);
+      }, 300);
+    } catch (e) {
+      finish({ stage: "tool", detail: String(e && e.message || e), logTail: "" });
+    }
+  });
+}
 var LOOPBACK_HOSTS = /* @__PURE__ */ new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
 function isLoopbackHost(value) {
   let host = String(value || "").trim().toLowerCase();
@@ -5513,7 +5649,8 @@ var CSRF_PROTECTED = /* @__PURE__ */ new Set([
   "/browserctl/api/server/oauth/begin",
   "/browserctl/api/server/oauth/open",
   "/browserctl/api/server/oauth/poll",
-  "/browserctl/api/config"
+  "/browserctl/api/config",
+  "/browserctl/api/config/test"
 ]);
 var GATE_PFX = "/browserctl-gate";
 var GATE_WRITE_PATHS = [
@@ -6163,6 +6300,70 @@ function apply(ctx, config = {}) {
             canElevate: process.platform === "win32"
           });
         }
+        return;
+      }
+      if (route === "/browserctl/api/config/test") {
+        if ((req.method || "GET") !== "POST") {
+          sendJson(res, 405, { ok: false, error: "POST only" });
+          return;
+        }
+        let body = {};
+        try {
+          body = JSON.parse((await readRawBody(req)).toString("utf-8") || "{}");
+        } catch {
+          body = {};
+        }
+        const sec = readSecrets();
+        const host = String(body.host || "").trim().replace(/^https?:\/\//, "").replace(/\/+$/, "");
+        const port = parseInt(body.port, 10) || 17e3;
+        const token = String(body.token || "").trim() || String(sec.frp_token || "");
+        if (!host) {
+          sendJson(res, 400, { ok: false, error: "\u7F3A\u5C11\u670D\u52A1\u5668\u5730\u5740(host)" });
+          return;
+        }
+        if (!token) {
+          sendJson(res, 400, { ok: false, error: "\u7F3A\u5C11 FRP token:\u8BF7\u5148\u586B\u5199,\u6216\u5148\u300C\u4FDD\u5B58\u300D\u8FC7\u4E00\u6B21\u914D\u7F6E" });
+          return;
+        }
+        if (!frpcBinaryPath()) {
+          sendJson(res, 200, { ok: false, stage: "tool", host, port, frpcVersion: "", error: "\u672A\u627E\u5230 frpc.exe:\u8BF7\u68C0\u67E5\u63D2\u4EF6\u76EE\u5F55(\u53EF\u80FD\u88AB\u5B89\u5168\u8F6F\u4EF6\u9694\u79BB,\u5148\u8FD0\u884C fix-antivirus.bat)" });
+          return;
+        }
+        const ver = frpcVersion();
+        const kcp = await probeFrpsLogin({ host, port, token, protocol: "kcp", timeoutMs: PROBE_KCP_TIMEOUT });
+        const respond = (over) => sendJson(res, 200, { ok: false, host, port, frpcVersion: ver, kcpOk: false, tcpOk: null, ...over });
+        if (kcp.stage === "ok") {
+          respond({ ok: true, stage: "ok", transport: "kcp", kcpOk: true });
+          return;
+        }
+        if (kcp.stage === "tool") {
+          respond({ stage: "tool", error: "frpc \u65E0\u6CD5\u6267\u884C:" + kcp.detail + "(\u5E38\u89C1\u539F\u56E0:\u5B89\u5168\u8F6F\u4EF6\u62E6\u622A,\u5148\u8FD0\u884C\u63D2\u4EF6\u76EE\u5F55\u91CC\u7684 fix-antivirus.bat)", detail: kcp.detail, logTail: kcp.logTail });
+          return;
+        }
+        if (kcp.stage === "auth") {
+          respond({ stage: "auth", transport: "kcp", kcpOk: true, detail: kcp.detail, logTail: kcp.logTail });
+          return;
+        }
+        const tcp = await probeFrpsLogin({ host, port, token, protocol: "tcp", timeoutMs: PROBE_TCP_TIMEOUT });
+        const bothTail = [kcp.logTail, tcp.logTail].filter(Boolean).join("\n---\n");
+        if (tcp.stage === "ok") {
+          respond({ stage: "kcp-missing", transport: "tcp", tcpOk: true, detail: kcp.detail || tcp.detail, logTail: bothTail });
+          return;
+        }
+        if (tcp.stage === "auth") {
+          respond({ stage: "auth", transport: "tcp", tcpOk: true, detail: tcp.detail, logTail: bothTail, alsoKcpMissing: kcp.stage !== "dns" && kcp.stage !== "refused" });
+          return;
+        }
+        if (tcp.stage === "tool") {
+          respond({ stage: "tool", error: "frpc \u65E0\u6CD5\u6267\u884C:" + tcp.detail + "(\u5E38\u89C1\u539F\u56E0:\u5B89\u5168\u8F6F\u4EF6\u62E6\u622A,\u5148\u8FD0\u884C\u63D2\u4EF6\u76EE\u5F55\u91CC\u7684 fix-antivirus.bat)", detail: tcp.detail, logTail: tcp.logTail });
+          return;
+        }
+        if (kcp.stage === "protocol" && tcp.stage === "protocol") {
+          respond({ stage: "protocol", detail: kcp.detail || tcp.detail, logTail: bothTail });
+          return;
+        }
+        const stage = kcp.stage === "dns" || tcp.stage === "dns" ? "dns" : kcp.stage === "refused" || tcp.stage === "refused" ? "refused" : "unreachable";
+        respond({ stage, detail: kcp.detail || tcp.detail, logTail: bothTail });
         return;
       }
       if (route === "/browserctl/api/update-check") {

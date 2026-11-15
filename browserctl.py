@@ -6011,18 +6011,22 @@ def _tunnel_failure_text(log_text, server_host, server_port, remote_port):
             "处理:关掉其它机器/副本的「开始控制」,然后在本机重新点一次「开始控制」;",
             "      仍不行就重启 DSH(插件会重新向服务器申请端口)。",
         ]
+    elif "login to server failed" in t or "token" in t.lower() or "authentication" in t.lower():
+        # 注意顺序:认证失败在 frpc 0.6x 的日志里同样表现为
+        # "connect to server error: token in login doesn't match token from configuration",
+        # 必须先于下面 network 分支判定,否则会被误报成「连不上服务器/UDP 被拦」,
+        # 把用户往防火墙排查上带(实际是凭据失效,官方模式重新登录即可)。
+        lines += [
+            "frpc 登录 frps 被拒绝(token 不正确或服务端不接受)。",
+            "官方模式:在面板退出账号后重新登录,刷新连接凭据;",
+            "自建模式:检查 browserctl_secrets.json 里的 FRP token 与 frps.toml 是否一致。",
+        ]
     elif "connection write timeout" in t or "connect to server error" in t:
         lines += [
             "frpc 连不上 frps 服务器 %s:%d(走 KCP = UDP,不是 TCP)。" % (server_host, int(server_port)),
             "处理:① 确认本机能访问 %s:%d 的 UDP 出站(公司网/防火墙常拦 UDP);" % (server_host, int(server_port)),
             "      ② 官方模式服务器地址应为 remote.ymzcc.com:17000,自建模式核对 frp_server_host;",
             "      ③ 换手机热点试一次,排除本机网络限制。",
-        ]
-    elif "login to server failed" in t or "token" in t.lower():
-        lines += [
-            "frpc 登录 frps 被拒绝(token 不正确或服务端不接受)。",
-            "官方模式:在面板退出账号后重新登录,刷新连接凭据;",
-            "自建模式:检查 browserctl_secrets.json 里的 FRP token 与 frps.toml 是否一致。",
         ]
     elif "start error" in t:
         lines += [
