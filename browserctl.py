@@ -2203,6 +2203,111 @@ _sig_nonce_lock = threading.Lock()
 _sig_nonces = {}  # dev -> {nonce: 过期时刻}
 _sig_missing_last = [0.0]  # 宽容期缺签名事件节流(60s 一条,防刷屏)
 
+# ---------------- L2:ECDSA P-256 纯标准库验签(设备持私钥,闸机只存公钥) ----------------
+# 沦陷模型下的根治:私钥在设备端 WebCrypto 生成且(优先)不可导出,闸机档案只有公钥
+# ——TLS 被截/服务器沦陷都拿不到可伪造签名的对称材料。存量 HMAC 双轨兼容见 _dev_sig_verify。
+_P256_P = 0xFFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFF
+_P256_N = 0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551
+_P256_A = _P256_P - 3
+_P256_B = 0x5AC635D8AA3A93E7B3EBBD55769886BC651D06B0CC53B0F63BCE3C3E27D2604B
+_P256_GX = 0x6B17D1F2E12C4247F8BCE6E563A440F277037D812DEB33A0F4A13945D898C296
+_P256_GY = 0x4FE342E2FE1A7F9B8EE7EB4A7C0F9E162BCE33576B315ECECBB6406837BF51F5
+_P256_INF = (0, 0, 0)  # 雅可比无穷远点(Z=0)
+
+
+def _p256_jdouble(pt):
+    """雅可比倍点(P-256 专用 a=-3 快速公式)。"""
+    X, Y, Z = pt
+    if not Y or not Z:
+        return _P256_INF
+    A = X * X % _P256_P
+    B = Y * Y % _P256_P
+    C = B * B % _P256_P
+    t = (X + B) * (X + B) % _P256_P
+    D = (2 * (t - A - C)) % _P256_P
+    # M = 3*X^2 + a*Z^4(a=-3);Z≠1 的中间步骤必须带 Z^4 项
+    Z2 = Z * Z % _P256_P
+    E = (3 * (A - Z2 * Z2)) % _P256_P
+    F = E * E % _P256_P
+    X3 = (F - 2 * D) % _P256_P
+    Y3 = (E * (D - X3) - 8 * C) % _P256_P
+    Z3 = (2 * Y * Z) % _P256_P
+    return (X3, Y3, Z3)
+
+
+def _p256_jadd(p1, p2):
+    """雅可比点加(通用公式)。"""
+    X1, Y1, Z1 = p1
+    X2, Y2, Z2 = p2
+    if not Z1:
+        return p2
+    if not Z2:
+        return p1
+    Z1Z1 = Z1 * Z1 % _P256_P
+    Z2Z2 = Z2 * Z2 % _P256_P
+    U1 = X1 * Z2Z2 % _P256_P
+    U2 = X2 * Z1Z1 % _P256_P
+    S1 = Y1 * Z2 % _P256_P * Z2Z2 % _P256_P
+    S2 = Y2 * Z1 % _P256_P * Z1Z1 % _P256_P
+    H = (U2 - U1) % _P256_P
+    r = (S2 - S1) % _P256_P
+    if not H:
+        # H=0 且 r=0 → 同一个点(P+P=2P);H=0 但 r≠0 → 互为逆点(和为无穷远)
+        return _p256_jdouble(p1) if not r else _P256_INF
+    HH = H * H % _P256_P
+    HHH = H * HH % _P256_P
+    V = U1 * HH % _P256_P
+    X3 = (r * r - HHH - 2 * V) % _P256_P
+    Y3 = (r * (V - X3) - S1 * HHH) % _P256_P
+    Z3 = Z1 * Z2 % _P256_P * H % _P256_P
+    return (X3, Y3, Z3)
+
+
+def _p256_jmul(pt, k):
+    """雅可比标量乘(double-and-add,从最高位)。"""
+    r = _P256_INF
+    while k:
+        if k & 1:
+            r = _p256_jadd(r, pt)
+        pt = _p256_jdouble(pt)
+        k >>= 1
+    return r
+
+
+def _p256_pubkey_valid(pub):
+    """65 字节非压缩公钥(0x04||X||Y)是否为 P-256 曲线上的有效点。"""
+    if len(pub) != 65 or pub[0] != 4:
+        return False
+    x = int.from_bytes(pub[1:33], "big")
+    y = int.from_bytes(pub[33:65], "big")
+    if not (0 < x < _P256_P and 0 < y < _P256_P):
+        return False
+    return (y * y - (x * x * x + _P256_A * x + _P256_B)) % _P256_P == 0
+
+
+def _p256_verify(pub, msg, sig):
+    """ECDSA P-256 验签。pub=65B 非压缩点;sig=64B raw(r||s);返回 bool。
+    签名侧在设备 WebCrypto(crypto.subtle.sign,raw 64 字节),此处纯标准库零依赖。"""
+    if len(sig) != 64 or not _p256_pubkey_valid(pub):
+        return False
+    r = int.from_bytes(sig[:32], "big")
+    s = int.from_bytes(sig[32:], "big")
+    if not (0 < r < _P256_N and 0 < s < _P256_N):
+        return False
+    e = int.from_bytes(hashlib.sha256(msg).digest(), "big")
+    w = pow(s, _P256_N - 2, _P256_N)
+    u1 = e * w % _P256_N
+    u2 = r * w % _P256_N
+    qx = int.from_bytes(pub[1:33], "big")
+    qy = int.from_bytes(pub[33:65], "big")
+    R = _p256_jadd(_p256_jmul((_P256_GX, _P256_GY, 1), u1),
+                   _p256_jmul((qx, qy, 1), u2))
+    if not R[2]:
+        return False
+    zinv = pow(R[2], _P256_P - 2, _P256_P)
+    rx = R[0] * zinv % _P256_P * zinv % _P256_P
+    return rx % _P256_N == r
+
 
 def _sig_enforced():
     return bool((read_state().get("settings") or {}).get("enforce_dev_sig"))
@@ -2231,16 +2336,28 @@ def _device_devkey(dev):
     return k
 
 
+def _device_pubkey(dev):
+    """取设备 ECDSA 公钥(hex,65B 非压缩点);L2 设备持私钥,闸机只存公钥。"""
+    if not dev:
+        return None
+    with _devices_lock:
+        d = _devices.get(dev)
+        return (d or {}).get("dev_pubkey")
+
+
 def _device_revoke_key(dev):
-    """踢出设备时撤销其 dev_key(契约:踢出=密钥作废,须重新配对)。
+    """踢出设备时撤销其 dev_key / dev_pubkey(契约:踢出=密钥作废,须重新配对)。
     落盘放锁外(同 _device_devkey,_dump_devices 自持锁不可重入)。"""
     if not dev:
         return
     removed = False
     with _devices_lock:
         d = _devices.get(dev)
-        if d is not None and d.pop("dev_key", None):
-            removed = True
+        if d is not None:
+            if d.pop("dev_key", None):
+                removed = True
+            if d.pop("dev_pubkey", None):
+                removed = True
     if removed:
         try:
             _dump_devices()
@@ -2314,7 +2431,8 @@ def _dev_sig_verify(handler, path):
             return None
         return (401, _sig_boot_html())
     key = _device_devkey(dev)
-    if not key:
+    pk_hex = _device_pubkey(dev)
+    if not key and not pk_hex:
         if not _sig_enforced():
             return None
         return (401, {"ok": False, "error": "未知设备,请重新配对"})
@@ -2328,6 +2446,16 @@ def _dev_sig_verify(handler, path):
     if not _sig_nonce_take(dev, nonce, now):
         return (401, {"ok": False, "error": "签名重放被拒绝"})
     msg = ("%s\n%s\n%d\n%s" % ((handler.command or "GET").upper(), p, ts_i, nonce)).encode()
+    if pk_hex:
+        # L2 ECDSA:设备用私钥签名(raw 64B r||s hex),闸机用档案公钥验证。
+        try:
+            ok_sig = _p256_verify(bytes.fromhex(pk_hex), msg, bytes.fromhex(sig))
+        except Exception:
+            ok_sig = False
+        if not ok_sig:
+            return (401, {"ok": False, "error": "设备签名校验失败"})
+        return None
+    # 存量双轨:SW 1.1.0 的对称 HMAC(dev_key 只在两端,兼容至 SW 1.2.0 铺开)
     good = hmac.new(bytes.fromhex(key), msg, hashlib.sha256).hexdigest()
     if not hmac.compare_digest(good, sig.lower()):
         return (401, {"ok": False, "error": "设备签名校验失败"})
@@ -3030,7 +3158,29 @@ navigator.serviceWorker.register(root+'sw.js',{scope:root}).then(function(reg){
   return fetch('dev-bind',{cache:'no-store'}).then(function(r){return r.json()});
 }).then(function(j){
   if(!j||!j.ok)throw new Error((j&&j.error)||'设备凭证获取失败');
-  return idbPut('dev',j.dev).then(function(){return idbPut('key',j.key)});
+  window.__dev=j.dev;
+  // L2:优先走 ECDSA——让 SW 生成密钥对(私钥不出设备)并回传公钥,再登记到闸机。
+  return new Promise(function(res,rej){
+    var ch=new MessageChannel();
+    var to=setTimeout(function(){rej(new Error('genkeys-timeout'))},8000);
+    ch.port1.onmessage=function(m){
+      clearTimeout(to);
+      var d=m.data||{};
+      if(d.ok)res(d.pub);else rej(new Error(d.error||'genkeys-failed'));
+    };
+    navigator.serviceWorker.controller.postMessage({type:'genkeys'},[ch.port2]);
+  }).then(function(pub){
+    return fetch('dev-bind?pubkey='+pub,{method:'POST',cache:'no-store'})
+      .then(function(r){return r.json()})
+      .then(function(j2){
+        if(!j2||!j2.ok)throw new Error((j2&&j2.error)||'公钥登记失败');
+        return idbPut('dev',window.__dev);
+      });
+  }).catch(function(e2){
+    // 回退:SW 1.1.0 存量(不认识 genkeys)或生成失败 → 老协议收对称密钥
+    if(!j.key)throw e2;
+    return idbPut('dev',j.dev).then(function(){return idbPut('key',j.key)});
+  });
 }).then(function(){
   st.textContent='凭证已安装,正在进入…';
   sessionStorage.setItem('bc-devkey-ok','1');
@@ -3438,10 +3588,16 @@ class GateHandler(BaseHTTPRequestHandler):
         return "DshRemote/" in ua
 
     def _deny_unauthorized(self):
-        """未通过验证时的统一拒绝响应。"""
+        """未通过验证时的统一拒绝响应。
+        「清除 bc-gate cookie」只对确实携带了无效 cookie 的请求执行(旧凭据卡死
+        时清掉让它重新配对);裸请求(无任何 cookie——新装机/引导期/宽容期)不发
+        删除头,否则 claim 刚种上的新 cookie 会被并发的 401 响应误删,装机死循环
+        (kb/09 §9.8:claim→dev-boot→dev-bind 401→删 cookie→永远装不上)。"""
         app_ua = self._is_app_ua()
-        headers = None if app_ua else [("Set-Cookie",
-                             "%s=deleted; Max-Age=0; Path=/" % GATE_COOKIE)]
+        headers = None
+        if not app_ua and self._gate_cookie_raw():
+            headers = [("Set-Cookie",
+                        "%s=deleted; Max-Age=0; Path=/" % GATE_COOKIE)]
         self._send(403 if app_ua else 200, DENIED_HTML, headers=headers)
 
     def _gate_cookie_values(self):
@@ -4550,12 +4706,12 @@ color:#fff;text-decoration:none;font-size:14px}
         杜绝"临时链接被 App 长期占用"。"""
         if session_only:
             name, value, _ = mint_cookie(days=TEMP_APP_COOKIE_HOURS / 24.0)
-            cookie = "%s=%s; path=/; Secure; SameSite=Lax; max-age=%d" % (
-                name, value, TEMP_APP_COOKIE_HOURS * 3600)
+            cookie = "%s=%s; path=/;%s SameSite=Lax; max-age=%d" % (
+                name, value, self._cookie_secure(), TEMP_APP_COOKIE_HOURS * 3600)
         else:
             name, value, _ = mint_cookie(days=_session_days())
-            cookie = "%s=%s; path=/; Secure; SameSite=Lax; max-age=%d" % (
-                name, value, _session_days() * 86400)
+            cookie = "%s=%s; path=/;%s SameSite=Lax; max-age=%d" % (
+                name, value, self._cookie_secure(), _session_days() * 86400)
         # 整体持锁读改写:裸 read_state+write_state 会覆盖看门狗同时写入的
         # gate_kick_seq(踢人丢失);update_state 在 state_lock 内完成整个事务。
         st = update_state(lambda s: s.update({"cookie_name": name, "cookie_value": value}))
@@ -4568,6 +4724,16 @@ color:#fff;text-decoration:none;font-size:14px}
             return
         self._send(200, GATE_HTML, "text/html; charset=utf-8",
                    headers=headers)
+
+    def _cookie_secure(self):
+        """Set-Cookie 的 Secure 属性条件化:公网链路(经反代/隧道,_client_ip 为
+        真实 IP,生产必为 https 入口)带 Secure;真实本机直连(127.0.0.1,http)
+        不带——否则现代 Chrome 拒绝在 http://127.0.0.1 上落地 Secure cookie,
+        本机浏览器闭环(claim→dev-boot)永远种不上会话(kb/09 §9.8)。"""
+        try:
+            return "" if self._client_ip() == "127.0.0.1" else "; Secure"
+        except Exception:
+            return "; Secure"
 
     def _gate_pair_claim(self):
         if not claim_allowed(self._client_ip()):
@@ -4656,8 +4822,8 @@ color:#fff;text-decoration:none;font-size:14px}
             update_state(lambda s: {**s, "link_secret": secret})
             st["link_secret"] = secret
         cookie = gate_mint_cookie(secret, dev, ip, ua)
-        headers = [("Set-Cookie", "%s=%s; Max-Age=%d; Path=/; HttpOnly; SameSite=Lax; Secure"
-                    % (GATE_COOKIE, cookie, _gate_max_age())),
+        headers = [("Set-Cookie", "%s=%s; Max-Age=%d; Path=/; HttpOnly; SameSite=Lax%s"
+                    % (GATE_COOKIE, cookie, _gate_max_age(), self._cookie_secure())),
                    ("Referrer-Policy", "no-referrer"),
                    ("Location", "../..")]
         # 登记会话 / 落盘 / 服务端注册 / 记事件:全部属于"锦上添花",
@@ -5030,8 +5196,11 @@ color:#fff;text-decoration:none;font-size:14px}
         self._send_json(200, {"ok": True, "session_days": _session_days()})
 
     def _gate_dev_bind(self):
-        """L1 密钥分发:已验证会话(bc-gate cookie)换本设备 dev_key。
-        攻击者没有会话拿不到密钥;拿到密钥的设备此后靠签名说话。"""
+        """L1/L2 密钥分发:已验证会话(bc-gate cookie)换本设备签名凭证。
+        - GET(存量 SW 1.1.0 兼容):下发对称 dev_key;
+          已登记 ECDSA 公钥的设备不再下发(防降级——公钥在档=该设备已升级)。
+        - POST(L2):设备上送 ECDSA P-256 公钥(私钥在设备端生成且不出设备),
+          服务器/TLS 沦陷也截不到可伪造签名的材料。反代会排空请求体 → 兼容 ?pubkey=。"""
         if not self._gate_ok():
             self._send_json(401, {"ok": False, "error": "未通过验证,请先完成动态码校验"})
             return
@@ -5039,6 +5208,43 @@ color:#fff;text-decoration:none;font-size:14px}
         if not dev:
             self._send_json(400, {"ok": False,
                                   "error": "无法识别设备身份,请用配对链接重新打开"})
+            return
+        if self.command == "POST":
+            pk_hex = ""
+            try:
+                from urllib.parse import urlsplit, parse_qs
+                q = parse_qs(urlsplit(self.path).query)
+                pk_hex = (q.get("pubkey") or [""])[0].strip().lower()
+            except Exception:
+                pk_hex = ""
+            if not pk_hex:
+                try:
+                    ln = int(self.headers.get("Content-Length") or 0)
+                    body = json.loads((self.rfile.read(ln) if 0 < ln <= 8192 else b"{}").decode("utf-8", "replace") or "{}")
+                    pk_hex = str(body.get("pubkey") or "").strip().lower()
+                except Exception:
+                    pk_hex = ""
+            if not re.fullmatch(r"[0-9a-f]{130}", pk_hex or "") or not pk_hex.startswith("04"):
+                self._send_json(400, {"ok": False,
+                                      "error": "公钥格式无效(需 65 字节非压缩 P-256 点的 hex)"})
+                return
+            if not _p256_pubkey_valid(bytes.fromhex(pk_hex)):
+                self._send_json(400, {"ok": False, "error": "公钥不在 P-256 曲线上"})
+                return
+            with _devices_lock:
+                d = _devices.get(dev)
+                if d is None:
+                    self._send_json(400, {"ok": False, "error": "设备档案不存在,请重新配对"})
+                    return
+                d["dev_pubkey"] = pk_hex
+                d.pop("dev_key", None)  # 升级 ECDSA 后对称密钥立即作废(防降级)
+            _dump_devices()
+            _append_event("devbind", "登记设备公钥 dev=%s…(ECDSA,私钥不出设备)" % dev[:8])
+            self._send_json(200, {"ok": True, "dev": dev, "mode": "ecdsa"})
+            return
+        pk = _device_pubkey(dev)
+        if pk:
+            self._send_json(200, {"ok": True, "dev": dev, "mode": "ecdsa"})
             return
         key = _device_devkey(dev)
         if not key:
@@ -5070,8 +5276,10 @@ color:#fff;text-decoration:none;font-size:14px}
             return
         with _devices_lock:
             n = sum(1 for d in _devices.values() if d.get("dev_key"))
+            npk = sum(1 for d in _devices.values() if d.get("dev_pubkey"))
         self._send_json(200, {"ok": True, "enforce": _sig_enforced(),
-                              "devices": len(_devices), "devices_with_key": n})
+                              "devices": len(_devices), "devices_with_key": n,
+                              "devices_with_pubkey": npk})
 
     # ---- App 发布管理 ----
 
@@ -5350,8 +5558,8 @@ color:#fff;text-decoration:none;font-size:14px}
             pass
         cookie = gate_mint_cookie(st["link_secret"], dev, ip, ua)
         self._send_json(200, {"ok": True}, headers=[
-            ("Set-Cookie", "%s=%s; Max-Age=%d; Path=/; HttpOnly; SameSite=Lax; Secure"
-             % (GATE_COOKIE, cookie, _gate_max_age()))])
+            ("Set-Cookie", "%s=%s; Max-Age=%d; Path=/; HttpOnly; SameSite=Lax%s"
+             % (GATE_COOKIE, cookie, _gate_max_age(), self._cookie_secure()))])
 
     def _gate_kick(self):
         """定向踢出:立即从 sessions 中删除设备,不需要等 housekeeping 2 秒巡检。

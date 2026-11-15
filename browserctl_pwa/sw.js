@@ -2,16 +2,19 @@
  * v1.0.0:纯透传(只为 PWA 可安装性存在,不做任何缓存)。
  * v1.1.0(2026-11-15, L1.5):合并设备密钥签名——同源请求自动带
  *   X-BC-Dev / X-BC-Ts / X-BC-Nonce / X-BC-Dev-Sig 头(HMAC-SHA256)。
- *  - 密钥存 IndexedDB('bc-devkey'),由引导页(/dev-boot)写入,从不过服务器;
- *  - 无密钥时纯透传(宽容期/引导期);闸机对无签名请求返回引导页完成装机闭环;
+ * v1.2.0(2026-11-15, L2 非对称化):签名升级为 ECDSA P-256——
+ *   - 设备端 crypto.subtle.generateKey 生成密钥对,私钥(优先)不可导出,存 IndexedDB;
+ *   - 公钥经引导页 POST /dev-bind?pubkey= 登记到闸机,私钥永不出设备;
+ *   - 闸机只存公钥验签:TLS 被截/服务器沦陷都拿不到可伪造签名的对称材料;
+ *   - 双轨兼容:存量 SW 1.1.0 的 HMAC key(idb 'key')继续有效(闸机双轨验签),
+ *     重装/新装机一律走 ECDSA;已登记公钥的设备闸机不再下发对称 key(防降级)。
  *  - 豁免:/dev-bind /dev-boot(引导通道本身,其防护是 bc-gate 会话 cookie);
  *  - WebSocket 握手不经过 fetch handler,闸机侧对 Upgrade 请求豁免(靠 cookie 防护);
- *  - 仍不做任何 HTTP 缓存:面板 HTML/插件 API/闸机端点一律走网络,避免旧版本或
- *    鉴权过期被缓存卡住;iOS 主屏形态由 manifest + apple-touch-icon 提供。
+ *  - 仍不做任何 HTTP 缓存:面板 HTML/插件 API/闸机端点一律走网络。
  * 更新方式:修改本文件任意内容,浏览器下次访问会自动比对并激活新 SW。
  */
-const SW_VERSION = '1.1.0'
-var KV = { dev: '', key: '' }
+const SW_VERSION = '1.2.1'
+var KV = { dev: '', key: '', priv: null, privjwk: '', pub: '' }
 
 function idb() {
   return new Promise(function (res, rej) {
@@ -31,10 +34,67 @@ function idbGet(k) {
     })
   })
 }
+function idbPut(k, v) {
+  return idb().then(function (db) {
+    return new Promise(function (res, rej) {
+      var tx = db.transaction('kv', 'readwrite')
+      tx.objectStore('kv').put(v, k)
+      tx.oncomplete = function () { res() }
+      tx.onerror = function () { rej(tx.error) }
+    })
+  })
+}
 function hex(buf) {
   var a = new Uint8Array(buf), s = ''
   for (var i = 0; i < a.length; i++) s += ('0' + a[i].toString(16)).slice(-2)
   return s
+}
+/* L2:生成 ECDSA P-256 密钥对。优先「非导出私钥」直存 IndexedDB(CryptoKey 可
+ * structured-clone,拿不出原始字节,安全上限最高);个别环境存不了 CryptoKey 时
+ * 降级为导出 JWK 字符串存(与存量 HMAC key 同级保护,不倒退)。 */
+function genPair() {
+  return crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign'])
+    .then(function (kp) {
+      return crypto.subtle.exportKey('raw', kp.publicKey).then(function (raw) {
+        return idbPut('priv', kp.privateKey).then(function () { return idbPut('pub', hex(raw)) })
+          .then(function () { KV.priv = kp.privateKey; KV.pub = hex(raw); return KV })
+      })
+    })
+    .catch(function () {
+      return crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign'])
+        .then(function (kp) {
+          return crypto.subtle.exportKey('jwk', kp.privateKey).then(function (jwk) {
+            return idbPut('privjwk', JSON.stringify(jwk)).then(function () {
+              return crypto.subtle.exportKey('raw', kp.publicKey)
+            }).then(function (raw) {
+              return idbPut('pub', hex(raw))
+            }).then(function () {
+              KV.privjwk = JSON.stringify(jwk); KV.pub = hex(raw); return KV
+            })
+          })
+        })
+    })
+}
+/* 装机状态就绪:优先 ECDSA(priv/privjwk+pub),退回存量 HMAC(key)。 */
+function ensureCred() {
+  if ((KV.priv || KV.privjwk) && KV.pub) return Promise.resolve(KV)
+  if (KV.key) return Promise.resolve(KV)
+  return idbGet('pub').then(function (pub) {
+    if (!pub) throw new Error('no-cred')
+    KV.pub = pub
+    return idbGet('priv').then(function (k) {
+      if (k) { KV.priv = k; return KV }
+      return idbGet('privjwk').then(function (j) {
+        if (j) { KV.privjwk = j; return KV }
+        throw new Error('no-cred')
+      })
+    })
+  }).catch(function () {
+    return idbGet('key').then(function (key) {
+      if (!key) throw new Error('no-cred')
+      return idbGet('dev').then(function (dev) { KV.dev = dev; KV.key = key; return KV })
+    })
+  })
 }
 function sign(method, path) {
   var ts = Math.floor(Date.now() / 1000).toString()
@@ -43,6 +103,14 @@ function sign(method, path) {
   crypto.getRandomValues(b)
   for (var i = 0; i < b.length; i++) n += ('0' + b[i].toString(16)).slice(-2)
   var msg = new TextEncoder().encode(method + '\n' + path + '\n' + ts + '\n' + n)
+  if (KV.priv || KV.privjwk) {
+    var kp = KV.priv
+      ? Promise.resolve(KV.priv)
+      : crypto.subtle.importKey('jwk', JSON.parse(KV.privjwk), { name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign'])
+    return kp.then(function (k) {
+      return crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, k, msg)
+    }).then(function (sig) { return { ts: ts, nonce: n, sig: hex(sig) } })
+  }
   var raw = new Uint8Array(KV.key.match(/.{2}/g).map(function (h) { return parseInt(h, 16) }))
   return crypto.subtle.importKey('raw', raw, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
     .then(function (k) { return crypto.subtle.sign('HMAC', k, msg) })
@@ -54,16 +122,19 @@ function normPath(url) {
   return p.replace(/^\/p\/[0-9]+(?=\/)/, '')
 }
 var EXEMPT = ['/dev-bind', '/dev-boot']
+/* 豁免口径与闸机 _SIG_EXEMPT 一致(endswith):引导通道原生放行(不 respondWith,
+ * 浏览器默认网络栈自动带 SameSite cookie)。实测 respondWith(fetch(req)) 透传
+ * 在部分内核会丢 SameSite=Lax cookie → dev-bind 401 装机死循环,必须原生放行。 */
 function isExempt(p) {
   for (var i = 0; i < EXEMPT.length; i++) {
-    if (p === EXEMPT[i]) return true
+    if (p === EXEMPT[i] || p.endsWith(EXEMPT[i])) return true
   }
   return false
 }
-function withSig(req, method, p, dev, key) {
+function withSig(req, method, p) {
   return sign(method, p).then(function (s) {
     var h = new Headers(req.headers)
-    h.set('X-BC-Dev', dev)
+    h.set('X-BC-Dev', KV.dev)
     h.set('X-BC-Ts', s.ts)
     h.set('X-BC-Nonce', s.nonce)
     h.set('X-BC-Dev-Sig', s.sig)
@@ -86,7 +157,23 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('message', function (e) {
   var d = e.data || {}
+  if (d.type === 'ping' && e.ports && e.ports[0]) {
+    e.ports[0].postMessage({ ok: true, version: SW_VERSION, exempt: EXEMPT.slice() })
+    return
+  }
   if (d.type === 'setKey') { KV.dev = d.dev; KV.key = d.key }
+  // L2:引导页通过 MessageChannel 请求生成密钥对并回传公钥 hex(65B 非压缩点)
+  if (d.type === 'genkeys') {
+    var port = e.ports && e.ports[0]
+    if (!port) return
+    genPair().then(function (kv) {
+      return idbGet('dev').then(function (dev) { if (dev) KV.dev = dev }).then(function () {
+        port.postMessage({ ok: true, pub: kv.pub, version: SW_VERSION })
+      })
+    }).catch(function (err) {
+      port.postMessage({ ok: false, error: String(err && err.message || err) })
+    })
+  }
 })
 
 self.addEventListener('fetch', function (e) {
@@ -95,16 +182,10 @@ self.addEventListener('fetch', function (e) {
   if (req.url.indexOf(location.origin) !== 0) return // 跨域不签
   var p = normPath(req.url)
   if (isExempt(p)) return // 引导通道透传
-  if (KV.key) {
-    e.respondWith(withSig(req, method, p, KV.dev, KV.key))
-  } else {
-    // 密钥未进内存:试读一次 IndexedDB;读不到就透传(宽容期/引导期由闸机放行)
-    e.respondWith(idbGet('key').then(function (key) {
-      if (!key) return fetch(req)
-      return idbGet('dev').then(function (dev) {
-        KV.dev = dev; KV.key = key
-        return withSig(req, method, p, dev, key)
-      })
-    }))
-  }
+  e.respondWith(ensureCred().then(function (kv) {
+    return withSig(req, method, p)
+  }, function () {
+    // 无凭证(宽容期/引导期):透传,由闸机引导页完成装机闭环
+    return fetch(req)
+  }))
 })
