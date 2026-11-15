@@ -1681,6 +1681,41 @@ export function apply(ctx, config = {}) {
         // ---- 官方多用户账号(设备授权流:登录/注册走浏览器官网授权页,轮询换 token)----
         // 流程:client → /server/oauth/begin 拿 device_code → /server/oauth/open 打开
         // 浏览器授权页 → 用户在网页登录/注册并确认 → client 轮询 /server/oauth/poll
+        // ---- 会话有效期(批次1-C2)+ 主机遥测(批次1-A5):代理本机闸机端点 ----
+        // GET 读当前值(闸机放行会话或管理令牌;host 服务端调用带管理令牌),
+        // POST 改(闸机侧仅本机管理员,?days=N,1-365)。
+        if (route === '/browserctl/api/session-days') {
+          const isPost = req.method === 'POST'
+          try {
+            const target = 'http://127.0.0.1:' + gatePort()
+              + '/browserctl-gate/session-days'
+              + (isPost ? '?days=' + encodeURIComponent(url.searchParams.get('days') || '') : '')
+            const r = await fetch(target, {
+              method: isPost ? 'POST' : 'GET',
+              headers: adminHeaders(),
+              signal: AbortSignal.timeout(6000),
+            })
+            const j = await r.json().catch(() => ({}))
+            sendJson(res, r.status, j && j.ok ? j : { ok: false, error: (j && j.error) || ('闸机返回 ' + r.status) })
+          } catch (e) {
+            sendJson(res, 503, { ok: false, error: '闸机未运行或不可达: ' + String(e) })
+          }
+          return
+        }
+        if (route === '/browserctl/api/sysinfo') {
+          // 遥测:闸机要求会话验证,host 代理带管理令牌;闸机侧自带 10s 缓存
+          try {
+            const r = await fetch('http://127.0.0.1:' + gatePort() + '/browserctl-gate/sysinfo', {
+              headers: adminHeaders(),
+              signal: AbortSignal.timeout(20000),
+            })
+            const j = await r.json().catch(() => ({}))
+            sendJson(res, r.status, j && j.ok ? j : { ok: false, error: (j && j.error) || ('闸机返回 ' + r.status) })
+          } catch (e) {
+            sendJson(res, 503, { ok: false, error: '闸机未运行或不可达: ' + String(e) })
+          }
+          return
+        }
         // 拿 access token → applyOfficialSession 落 per-user 密钥与分配端口。
         if (route === '/browserctl/api/server/oauth/begin') {
           if (req.method !== 'POST') { sendJson(res, 405, { ok: false, error: 'POST only' }); return }

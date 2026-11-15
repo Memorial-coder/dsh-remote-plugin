@@ -4627,7 +4627,7 @@ function adminHeaders() {
   }
   return {};
 }
-var VERSION = true ? "1.0.58" : "dev";
+var VERSION = true ? "1.0.59" : "dev";
 var sessionTunnel = false;
 var ensureRunning = null;
 var lastEnsureError = "";
@@ -6005,6 +6005,35 @@ function apply(ctx, config = {}) {
           return;
         }
         sendJson(res, 200, { ok: true, blacklist: readBlacklist() });
+        return;
+      }
+      if (route === "/browserctl/api/session-days") {
+        const isPost = req.method === "POST";
+        try {
+          const target = "http://127.0.0.1:" + gatePort() + "/browserctl-gate/session-days" + (isPost ? "?days=" + encodeURIComponent(url.searchParams.get("days") || "") : "");
+          const r = await fetch(target, {
+            method: isPost ? "POST" : "GET",
+            headers: adminHeaders(),
+            signal: AbortSignal.timeout(6e3)
+          });
+          const j = await r.json().catch(() => ({}));
+          sendJson(res, r.status, j && j.ok ? j : { ok: false, error: j && j.error || "\u95F8\u673A\u8FD4\u56DE " + r.status });
+        } catch (e) {
+          sendJson(res, 503, { ok: false, error: "\u95F8\u673A\u672A\u8FD0\u884C\u6216\u4E0D\u53EF\u8FBE: " + String(e) });
+        }
+        return;
+      }
+      if (route === "/browserctl/api/sysinfo") {
+        try {
+          const r = await fetch("http://127.0.0.1:" + gatePort() + "/browserctl-gate/sysinfo", {
+            headers: adminHeaders(),
+            signal: AbortSignal.timeout(2e4)
+          });
+          const j = await r.json().catch(() => ({}));
+          sendJson(res, r.status, j && j.ok ? j : { ok: false, error: j && j.error || "\u95F8\u673A\u8FD4\u56DE " + r.status });
+        } catch (e) {
+          sendJson(res, 503, { ok: false, error: "\u95F8\u673A\u672A\u8FD0\u884C\u6216\u4E0D\u53EF\u8FBE: " + String(e) });
+        }
         return;
       }
       if (route === "/browserctl/api/server/oauth/begin") {
