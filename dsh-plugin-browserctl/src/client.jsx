@@ -2897,6 +2897,150 @@ function TotpCard({ t, reloadToken, onRefresh, disabled }) {
   )
 }
 
+/* ---------- 批次1-C2:会话有效期(1-365 天,默认 30;闸机 /session-days) ---------- */
+function SessionDaysCard({ t, disabled }) {
+  const [days, setDays] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  useEffect(() => {
+    let alive = true
+    fetch(API_P + '/browserctl/api/session-days', { cache: 'no-store' })
+      .then(r => r.json().catch(() => ({})))
+      .then(j => {
+        if (!alive) return
+        if (j && j.ok) setDays(j.session_days)
+        else setErr((j && j.error) || t('sdLoadFail'))
+      })
+      .catch(() => { if (alive) setErr(t('sdLoadFail')) })
+    return () => { alive = false }
+  }, [])
+  async function pick(n) {
+    if (disabled || busy || n === days) return
+    setBusy(true); setErr('')
+    try {
+      const r = await fetch(API_P + '/browserctl/api/session-days?days=' + n, { method: 'POST', cache: 'no-store' })
+      const j = await r.json().catch(() => ({}))
+      if (j && j.ok) setDays(j.session_days)
+      else setErr((j && j.error) || t('sdSaveFail'))
+    } catch (e) {
+      setErr(t('sdSaveFail'))
+    } finally {
+      setBusy(false)
+    }
+  }
+  const opts = [1, 7, 30]
+  return (
+    <div className="dshBrowserCtlCard">
+      <div className="dshBrowserCtlCardHead" data-open="true" style={{ cursor: 'default' }}>
+        {Svg.lock}
+        <span>{t('sdTitle')}</span>
+        <span style={{
+          fontWeight: 500, fontSize: 12,
+          color: 'var(--dsw-alias-label-tertiary,#8b8f98)',
+        }}>{days ? t('sdCurrent').replace('{n}', days) : t('sdLoading')}</span>
+      </div>
+      <div className="dshBrowserCtlCardBody" data-open="true">
+        <div className="dshBrowserCtlActions">
+          {opts.map(n => (
+            <Button key={n} variant={days === n ? 'primary' : 'secondary'} size="sm"
+              disabled={disabled || busy} onClick={() => pick(n)}>
+              {n === 1 ? t('sdDay1') : n === 7 ? t('sdDay7') : t('sdDay30')}
+            </Button>
+          ))}
+        </div>
+        {err && (
+          <p style={{ margin: 0, fontSize: 12, lineHeight: '17px', color: 'var(--dsw-alias-state-error-primary,#e5655c)' }}>{err}</p>
+        )}
+        <p style={{ margin: 0, fontSize: 12, lineHeight: '17px', color: 'var(--dsw-alias-label-tertiary,#8b8f98)' }}>
+          {t('sdHint')}
+        </p>
+      </div>
+    </div>
+  )
+}
+
+/* ---------- 批次1-A5:主机遥测(CPU/内存/磁盘;闸机 10s 缓存) ---------- */
+function SysinfoCard({ t }) {
+  const [d, setD] = useState(null)
+  const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    let alive = true
+    fetch(API_P + '/browserctl/api/sysinfo', { cache: 'no-store' })
+      .then(r => r.json().catch(() => ({})))
+      .then(j => {
+        if (!alive) return
+        setD(j && j.sysinfo ? j.sysinfo : { ok: false, error: j && j.error })
+      })
+      .catch(() => { if (alive) setD({ ok: false }) })
+    return () => { alive = false }
+  }, [])
+  function load() {
+    setBusy(true)
+    fetch(API_P + '/browserctl/api/sysinfo', { cache: 'no-store' })
+      .then(r => r.json().catch(() => ({})))
+      .then(j => { setD(j && j.sysinfo ? j.sysinfo : { ok: false, error: j && j.error }); setBusy(false) })
+      .catch(() => { setD({ ok: false }); setBusy(false) })
+  }
+  function fmtGB(bytes) {
+    const g = (Number(bytes) || 0) / 1073741824
+    return g >= 10 ? g.toFixed(0) + ' GB' : g.toFixed(1) + ' GB'
+  }
+  function bar(label, pct, txt) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ flex: '0 0 40px', fontSize: 12, fontWeight: 600, color: 'var(--dsw-alias-label-secondary,#6b7078)' }}>{label}</span>
+        <span style={{ flex: '1 1 auto', minWidth: 40, height: 6, borderRadius: 3, background: 'var(--dsw-alias-fill-tertiary,rgba(127,127,127,.2))', overflow: 'hidden', display: 'block' }}>
+          <span style={{ display: 'block', height: '100%', width: pct + '%', borderRadius: 3, background: 'var(--dsw-alias-brand-primary,#5b8cff)' }} />
+        </span>
+        <span style={{ flex: '0 0 auto', fontSize: 11.5, color: 'var(--dsw-alias-label-tertiary,#8b8f98)', whiteSpace: 'nowrap' }}>{txt}</span>
+      </div>
+    )
+  }
+  const ok = !!(d && d.ok)
+  const memPct = ok && Number(d.memTotal) > 0
+    ? Math.max(0, Math.min(100, Math.round((1 - Number(d.memFree) / Number(d.memTotal)) * 100)))
+    : 0
+  const disks = ok && Array.isArray(d.disks) ? d.disks : []
+  return (
+    <div className="dshBrowserCtlCard">
+      <div className="dshBrowserCtlCardHead" data-open="true" style={{ cursor: 'default' }}>
+        {Svg.desk}
+        <span>{t('sysTitle')}</span>
+        <span style={{ fontWeight: 500, fontSize: 12, color: 'var(--dsw-alias-label-tertiary,#8b8f98)' }}>
+          {ok ? (Number(d.cpu) || 0) + '% CPU' : t('sysFail')}
+        </span>
+      </div>
+      <div className="dshBrowserCtlCardBody" data-open="true">
+        {!ok ? (
+          <p style={{ margin: 0, fontSize: 12, lineHeight: '17px', color: 'var(--dsw-alias-state-error-primary,#e5655c)' }}>
+            {(d && d.error) || t('sysFail')}
+          </p>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+            {bar('CPU', Math.max(0, Math.min(100, Number(d.cpu) || 0)), (Number(d.cpu) || 0) + '%')}
+            {bar(t('sysMem'), memPct, memPct + '% · ' + t('sysFree') + ' ' + fmtGB(Number(d.memFree) * 1024))}
+            {disks.slice(0, 4).map(dk => {
+              const total = Number(dk && dk.size) || 0
+              const free = Number(dk && dk.free) || 0
+              if (total <= 0) return null
+              const p = Math.max(0, Math.min(100, Math.round((1 - free / total) * 100)))
+              return <div key={dk.drive}>{bar(String(dk.drive || '?'), p, t('sysFree') + ' ' + fmtGB(free))}</div>
+            })}
+          </div>
+        )}
+        <div className="dshBrowserCtlActions">
+          <Button variant="secondary" size="sm" disabled={busy} onClick={load}>
+            {busy ? t('pushRefreshing') : t('pushRefresh')}
+          </Button>
+        </div>
+        <p style={{ margin: 0, fontSize: 12, lineHeight: '17px', color: 'var(--dsw-alias-label-tertiary,#8b8f98)' }}>
+          {t('sysHint')}
+        </p>
+      </div>
+    </div>
+  )
+}
+
 /* ---------- 「推送」页签:接收手机推送 + 系统安全事件 + 测试推送 + 最近推送 ---------- */
 const PUSH_KIND = { test: 'Test', verify: 'Verify', kick: 'Kick', ban: 'Ban', totp: 'Totp', pair: 'Pair', join: 'Join', dev: 'Dev', msg: 'Msg', announce: 'Announce' }
 
@@ -4668,7 +4812,11 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
             <DevicesSection t={t} reloadToken={reloadToken} onRefresh={() => setReloadToken(x => x + 1)} disabled={gating} />
           )}
           {tab === 'totp' && (
-            <TotpCard t={t} reloadToken={reloadToken} onRefresh={() => setReloadToken(x => x + 1)} disabled={gating} />
+            <>
+              <TotpCard t={t} reloadToken={reloadToken} onRefresh={() => setReloadToken(x => x + 1)} disabled={gating} />
+              <SessionDaysCard t={t} disabled={gating} />
+              <SysinfoCard t={t} />
+            </>
           )}
           {tab === 'app' && (
             <AppPairCard t={t} reloadToken={reloadToken} />
@@ -5023,6 +5171,23 @@ export function apply(ctx) {
       ticketNoContent: '日志还没生成，请先「生成并导出诊断日志」。',
       ticketExportNote: '日志只在本机生成、不会自动上传；何时上传、上传哪一版完全由你在网页端决定。',
       ticketExportHostOld: '插件宿主还是旧版本（新功能要完全重启 DSH 才生效）。请彻底退出 DSH 再重新打开，然后重试。',
+      // ---- 批次1-C2:会话有效期 / 批次1-A5:主机遥测 ----
+      sdTitle: '会话有效期',
+      sdCurrent: '当前 {n} 天',
+      sdLoading: '…',
+      sdDay1: '1 天',
+      sdDay7: '7 天',
+      sdDay30: '30 天',
+      sdHint: '新设备验证通过后,免重复验证的有效期。只影响之后新签发的会话;要立即让全部设备重新验证,用 2FA 页的「全部踢下线」。',
+      sdSaveFail: '保存失败',
+      sdLoadFail: '读取失败(闸机未运行?)',
+      sysTitle: '主机状态',
+      sysLoading: '读取中…',
+      sysFail: '读取失败(闸机未运行?)',
+      sysMem: '内存',
+      sysFree: '余',
+      sysCached: '缓存',
+      sysHint: '数据来自本机闸机,约 10 秒缓存。',
       pushKindAnnounce: '公告',
     },
     en: {
@@ -5290,6 +5455,22 @@ export function apply(ctx) {
       ticketNoContent: 'Log not generated yet — click "Export diagnostic logs" first.',
       ticketExportNote: 'Logs are generated locally and never uploaded automatically; you decide what to upload on the web.',
       ticketExportHostOld: 'The plugin host is still the old version (this feature needs a full DSH restart). Quit DSH completely, reopen it, then try again.',
+      sdTitle: 'Session lifetime',
+      sdCurrent: 'Currently {n} days',
+      sdLoading: '…',
+      sdDay1: '1 day',
+      sdDay7: '7 days',
+      sdDay30: '30 days',
+      sdHint: 'How long a verified device stays trusted. Only affects sessions issued afterwards; to force all devices to re-verify now, use "Kick all devices" on the 2FA tab.',
+      sdSaveFail: 'Save failed',
+      sdLoadFail: 'Load failed (gate not running?)',
+      sysTitle: 'Host status',
+      sysLoading: 'Loading…',
+      sysFail: 'Load failed (gate not running?)',
+      sysMem: 'Memory',
+      sysFree: 'free',
+      sysCached: 'cached',
+      sysHint: 'Sampled by the local gate, ~10s cache.',
       pushKindAnnounce: 'Announcement',
     },
   }), 'browserctl: dictionaries')

@@ -2833,6 +2833,128 @@ function TotpCard({ t, reloadToken, onRefresh, disabled }) {
     ] })
   ] });
 }
+function SessionDaysCard({ t, disabled }) {
+  const [days, setDays] = (0, import_react.useState)(null);
+  const [busy, setBusy] = (0, import_react.useState)(false);
+  const [err, setErr] = (0, import_react.useState)("");
+  (0, import_react.useEffect)(() => {
+    let alive = true;
+    fetch(API_P + "/browserctl/api/session-days", { cache: "no-store" }).then((r) => r.json().catch(() => ({}))).then((j) => {
+      if (!alive) return;
+      if (j && j.ok) setDays(j.session_days);
+      else setErr(j && j.error || t("sdLoadFail"));
+    }).catch(() => {
+      if (alive) setErr(t("sdLoadFail"));
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+  async function pick(n) {
+    if (disabled || busy || n === days) return;
+    setBusy(true);
+    setErr("");
+    try {
+      const r = await fetch(API_P + "/browserctl/api/session-days?days=" + n, { method: "POST", cache: "no-store" });
+      const j = await r.json().catch(() => ({}));
+      if (j && j.ok) setDays(j.session_days);
+      else setErr(j && j.error || t("sdSaveFail"));
+    } catch (e) {
+      setErr(t("sdSaveFail"));
+    } finally {
+      setBusy(false);
+    }
+  }
+  const opts = [1, 7, 30];
+  return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlCard", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlCardHead", "data-open": "true", style: { cursor: "default" }, children: [
+      Svg.lock,
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: t("sdTitle") }),
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: {
+        fontWeight: 500,
+        fontSize: 12,
+        color: "var(--dsw-alias-label-tertiary,#8b8f98)"
+      }, children: days ? t("sdCurrent").replace("{n}", days) : t("sdLoading") })
+    ] }),
+    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlCardBody", "data-open": "true", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlActions", children: opts.map((n) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+        import_dsh_client_ui_primitives.Button,
+        {
+          variant: days === n ? "primary" : "secondary",
+          size: "sm",
+          disabled: disabled || busy,
+          onClick: () => pick(n),
+          children: n === 1 ? t("sdDay1") : n === 7 ? t("sdDay7") : t("sdDay30")
+        },
+        n
+      )) }),
+      err && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { style: { margin: 0, fontSize: 12, lineHeight: "17px", color: "var(--dsw-alias-state-error-primary,#e5655c)" }, children: err }),
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { style: { margin: 0, fontSize: 12, lineHeight: "17px", color: "var(--dsw-alias-label-tertiary,#8b8f98)" }, children: t("sdHint") })
+    ] })
+  ] });
+}
+function SysinfoCard({ t }) {
+  const [d, setD] = (0, import_react.useState)(null);
+  const [busy, setBusy] = (0, import_react.useState)(false);
+  (0, import_react.useEffect)(() => {
+    let alive = true;
+    fetch(API_P + "/browserctl/api/sysinfo", { cache: "no-store" }).then((r) => r.json().catch(() => ({}))).then((j) => {
+      if (!alive) return;
+      setD(j && j.sysinfo ? j.sysinfo : { ok: false, error: j && j.error });
+    }).catch(() => {
+      if (alive) setD({ ok: false });
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+  function load() {
+    setBusy(true);
+    fetch(API_P + "/browserctl/api/sysinfo", { cache: "no-store" }).then((r) => r.json().catch(() => ({}))).then((j) => {
+      setD(j && j.sysinfo ? j.sysinfo : { ok: false, error: j && j.error });
+      setBusy(false);
+    }).catch(() => {
+      setD({ ok: false });
+      setBusy(false);
+    });
+  }
+  function fmtGB(bytes) {
+    const g = (Number(bytes) || 0) / 1073741824;
+    return g >= 10 ? g.toFixed(0) + " GB" : g.toFixed(1) + " GB";
+  }
+  function bar(label, pct, txt) {
+    return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { style: { display: "flex", alignItems: "center", gap: 8 }, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: { flex: "0 0 40px", fontSize: 12, fontWeight: 600, color: "var(--dsw-alias-label-secondary,#6b7078)" }, children: label }),
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: { flex: "1 1 auto", minWidth: 40, height: 6, borderRadius: 3, background: "var(--dsw-alias-fill-tertiary,rgba(127,127,127,.2))", overflow: "hidden", display: "block" }, children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: { display: "block", height: "100%", width: pct + "%", borderRadius: 3, background: "var(--dsw-alias-brand-primary,#5b8cff)" } }) }),
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: { flex: "0 0 auto", fontSize: 11.5, color: "var(--dsw-alias-label-tertiary,#8b8f98)", whiteSpace: "nowrap" }, children: txt })
+    ] });
+  }
+  const ok = !!(d && d.ok);
+  const memPct = ok && Number(d.memTotal) > 0 ? Math.max(0, Math.min(100, Math.round((1 - Number(d.memFree) / Number(d.memTotal)) * 100))) : 0;
+  const disks = ok && Array.isArray(d.disks) ? d.disks : [];
+  return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlCard", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlCardHead", "data-open": "true", style: { cursor: "default" }, children: [
+      Svg.desk,
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: t("sysTitle") }),
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: { fontWeight: 500, fontSize: 12, color: "var(--dsw-alias-label-tertiary,#8b8f98)" }, children: ok ? (Number(d.cpu) || 0) + "% CPU" : t("sysFail") })
+    ] }),
+    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlCardBody", "data-open": "true", children: [
+      !ok ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { style: { margin: 0, fontSize: 12, lineHeight: "17px", color: "var(--dsw-alias-state-error-primary,#e5655c)" }, children: d && d.error || t("sysFail") }) : /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { style: { display: "flex", flexDirection: "column", gap: 7 }, children: [
+        bar("CPU", Math.max(0, Math.min(100, Number(d.cpu) || 0)), (Number(d.cpu) || 0) + "%"),
+        bar(t("sysMem"), memPct, memPct + "% \xB7 " + t("sysFree") + " " + fmtGB(Number(d.memFree) * 1024)),
+        disks.slice(0, 4).map((dk) => {
+          const total = Number(dk && dk.size) || 0;
+          const free = Number(dk && dk.free) || 0;
+          if (total <= 0) return null;
+          const p = Math.max(0, Math.min(100, Math.round((1 - free / total) * 100)));
+          return /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { children: bar(String(dk.drive || "?"), p, t("sysFree") + " " + fmtGB(free)) }, dk.drive);
+        })
+      ] }),
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlActions", children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "secondary", size: "sm", disabled: busy, onClick: load, children: busy ? t("pushRefreshing") : t("pushRefresh") }) }),
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { style: { margin: 0, fontSize: 12, lineHeight: "17px", color: "var(--dsw-alias-label-tertiary,#8b8f98)" }, children: t("sysHint") })
+    ] })
+  ] });
+}
 var PUSH_KIND = { test: "Test", verify: "Verify", kick: "Kick", ban: "Ban", totp: "Totp", pair: "Pair", join: "Join", dev: "Dev", msg: "Msg", announce: "Announce" };
 function pushKindLabel(t, kind) {
   const key = PUSH_KIND[kind];
@@ -4477,7 +4599,11 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
           ] })
         ] }),
         tab === "devices" && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(DevicesSection, { t, reloadToken, onRefresh: () => setReloadToken((x) => x + 1), disabled: gating }),
-        tab === "totp" && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(TotpCard, { t, reloadToken, onRefresh: () => setReloadToken((x) => x + 1), disabled: gating }),
+        tab === "totp" && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)(TotpCard, { t, reloadToken, onRefresh: () => setReloadToken((x) => x + 1), disabled: gating }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)(SessionDaysCard, { t, disabled: gating }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)(SysinfoCard, { t })
+        ] }),
         tab === "app" && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(AppPairCard, { t, reloadToken }),
         tab === "push" && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(PushCard, { t, reloadToken }),
         tab === "ban" && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(BlacklistCard, { t, reloadToken, disabled: gating }),
@@ -4809,6 +4935,23 @@ function apply(ctx) {
       ticketNoContent: "\u65E5\u5FD7\u8FD8\u6CA1\u751F\u6210\uFF0C\u8BF7\u5148\u300C\u751F\u6210\u5E76\u5BFC\u51FA\u8BCA\u65AD\u65E5\u5FD7\u300D\u3002",
       ticketExportNote: "\u65E5\u5FD7\u53EA\u5728\u672C\u673A\u751F\u6210\u3001\u4E0D\u4F1A\u81EA\u52A8\u4E0A\u4F20\uFF1B\u4F55\u65F6\u4E0A\u4F20\u3001\u4E0A\u4F20\u54EA\u4E00\u7248\u5B8C\u5168\u7531\u4F60\u5728\u7F51\u9875\u7AEF\u51B3\u5B9A\u3002",
       ticketExportHostOld: "\u63D2\u4EF6\u5BBF\u4E3B\u8FD8\u662F\u65E7\u7248\u672C\uFF08\u65B0\u529F\u80FD\u8981\u5B8C\u5168\u91CD\u542F DSH \u624D\u751F\u6548\uFF09\u3002\u8BF7\u5F7B\u5E95\u9000\u51FA DSH \u518D\u91CD\u65B0\u6253\u5F00\uFF0C\u7136\u540E\u91CD\u8BD5\u3002",
+      // ---- 批次1-C2:会话有效期 / 批次1-A5:主机遥测 ----
+      sdTitle: "\u4F1A\u8BDD\u6709\u6548\u671F",
+      sdCurrent: "\u5F53\u524D {n} \u5929",
+      sdLoading: "\u2026",
+      sdDay1: "1 \u5929",
+      sdDay7: "7 \u5929",
+      sdDay30: "30 \u5929",
+      sdHint: "\u65B0\u8BBE\u5907\u9A8C\u8BC1\u901A\u8FC7\u540E,\u514D\u91CD\u590D\u9A8C\u8BC1\u7684\u6709\u6548\u671F\u3002\u53EA\u5F71\u54CD\u4E4B\u540E\u65B0\u7B7E\u53D1\u7684\u4F1A\u8BDD;\u8981\u7ACB\u5373\u8BA9\u5168\u90E8\u8BBE\u5907\u91CD\u65B0\u9A8C\u8BC1,\u7528 2FA \u9875\u7684\u300C\u5168\u90E8\u8E22\u4E0B\u7EBF\u300D\u3002",
+      sdSaveFail: "\u4FDD\u5B58\u5931\u8D25",
+      sdLoadFail: "\u8BFB\u53D6\u5931\u8D25(\u95F8\u673A\u672A\u8FD0\u884C?)",
+      sysTitle: "\u4E3B\u673A\u72B6\u6001",
+      sysLoading: "\u8BFB\u53D6\u4E2D\u2026",
+      sysFail: "\u8BFB\u53D6\u5931\u8D25(\u95F8\u673A\u672A\u8FD0\u884C?)",
+      sysMem: "\u5185\u5B58",
+      sysFree: "\u4F59",
+      sysCached: "\u7F13\u5B58",
+      sysHint: "\u6570\u636E\u6765\u81EA\u672C\u673A\u95F8\u673A,\u7EA6 10 \u79D2\u7F13\u5B58\u3002",
       pushKindAnnounce: "\u516C\u544A"
     },
     en: {
@@ -5076,6 +5219,22 @@ function apply(ctx) {
       ticketNoContent: 'Log not generated yet \u2014 click "Export diagnostic logs" first.',
       ticketExportNote: "Logs are generated locally and never uploaded automatically; you decide what to upload on the web.",
       ticketExportHostOld: "The plugin host is still the old version (this feature needs a full DSH restart). Quit DSH completely, reopen it, then try again.",
+      sdTitle: "Session lifetime",
+      sdCurrent: "Currently {n} days",
+      sdLoading: "\u2026",
+      sdDay1: "1 day",
+      sdDay7: "7 days",
+      sdDay30: "30 days",
+      sdHint: 'How long a verified device stays trusted. Only affects sessions issued afterwards; to force all devices to re-verify now, use "Kick all devices" on the 2FA tab.',
+      sdSaveFail: "Save failed",
+      sdLoadFail: "Load failed (gate not running?)",
+      sysTitle: "Host status",
+      sysLoading: "Loading\u2026",
+      sysFail: "Load failed (gate not running?)",
+      sysMem: "Memory",
+      sysFree: "free",
+      sysCached: "cached",
+      sysHint: "Sampled by the local gate, ~10s cache.",
       pushKindAnnounce: "Announcement"
     }
   }), "browserctl: dictionaries");

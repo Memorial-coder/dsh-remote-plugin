@@ -396,6 +396,9 @@ DSH_WEB_URL = os.environ.get("DSH_WEB_URL", "")
 # 表现为「未探测到 DSH Web 端口」(2026-11-08 实测)。
 DSH_PROCESS_NAMES = ("dsh next.exe", "deepseek harness.exe")
 
+# 探测异常节流:同一波失败 60s 只记一次日志(探测在反代热路径上会反复跑,不节流会刷屏)
+_dsh_probe_last_err = [0.0]
+
 
 # ---------------- DSH 端口探测 ----------------
 
@@ -437,8 +440,14 @@ def dsh_candidates():
                     pid = int(f[4])
                     if pid in pids:
                         ports.append(int(f[1].rsplit(":", 1)[1]))
-    except Exception:
-        pass
+    except Exception as e:
+        # 不能裸吞:旧版编码问题炸在这里时,日志只剩「未探测到 DSH Web 端口」,
+        # 根因(解码失败/超时/被 AV 拦 tasklist)一条都看不到,只能靠猜。
+        # 节流 60s 记一次,热路径反复探测不刷屏,但日志里能拿到原因(kb/04 第 12 条)。
+        now = time.time()
+        if now - _dsh_probe_last_err[0] > 60:
+            _dsh_probe_last_err[0] = now
+            print("[port] DSH 端口探测异常(60s 内不重复记录): %r" % (e,), flush=True)
     seen, uniq = set(), []
     for p in ports:
         if p not in seen:
@@ -650,6 +659,15 @@ var css='#dsh-mb-bar{position:fixed;right:calc(12px + env(safe-area-inset-right,
  +'#dsh-mb-bar .vp .vpin::-webkit-outer-spin-button,#dsh-mb-bar .vp .vpin::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}'
  +'#dsh-mb-bar .vp .vpin{-moz-appearance:textfield}'
  +'#dsh-mb-bar .vp .fit{margin-top:4px}'
+ +'#dsh-mb-bar .sys{display:none;flex-direction:column;gap:6px;padding:2px 4px 6px}'
+ +'#dsh-mb-bar .sys.open{display:flex}'
+ +'#dsh-mb-bar .sys > *{flex:0 0 auto}'
+ +'#dsh-mb-bar .sys .bar{height:6px;border-radius:3px;background:rgba(255,255,255,.14);overflow:hidden}'
+ +'#dsh-mb-bar .sys .bar i{display:block;height:100%;border-radius:3px;background:#7aa2ff;'
+ +'transition:width .3s;width:0}'
+ +'#dsh-mb-bar .sys .dsk{display:flex;align-items:center;gap:8px;padding:0 8px;height:26px;'
+ +'color:rgba(255,255,255,.78);font-size:12px;font-weight:600}'
+ +'#dsh-mb-bar .sys .dsk .bar{flex:1 1 auto;min-width:40px}'
  +'#dsh-mb-bar .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(146px + env(safe-area-inset-bottom,0px));'
  +'max-width:78vw;background:rgba(24,26,30,.94);color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:10px;'
  +'padding:9px 14px;font-size:12.5px;line-height:1.5;box-shadow:0 6px 22px rgba(0,0,0,.4);opacity:0;'
@@ -663,6 +681,7 @@ var I_BACK='<svg viewBox="0 0 24 24"><path d="M19 12H5"/><path d="M11 6l-6 6 6 6
 var I_FS='<svg viewBox="0 0 24 24"><path d="M4 9V5h4"/><path d="M15 4h5v5"/><path d="M20 15v5h-5"/><path d="M9 20H4v-5"/></svg>';
 var I_VP='<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="12" rx="2"/><path d="M9 21h6"/></svg>';
 var I_ROT='<svg viewBox="0 0 24 24"><path d="M20.5 12a8.5 8.5 0 1 1-2.6-6.1"/><path d="M20.5 3.5v4.5H16"/></svg>';
+var I_SYS='<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></svg>';
 
 var root=document.createElement('div'); root.id='dsh-mb-bar';
 var card=document.createElement('div'); card.className='card';
@@ -788,6 +807,72 @@ try{
 }catch(e){}
 minus.addEventListener('click',function(ev){ ev.stopPropagation(); setW(curW()-VP_STEP) });
 plus.addEventListener('click',function(ev){ ev.stopPropagation(); setW(curW()+VP_STEP) });
+// ---- 主机状态(CPU/内存/磁盘):闸机 /sysinfo 端点,10s 缓存,展开即刷新 ----
+// 端点路径必须按页面目录相对解析(kb/06 第 31 条⑧:绝对根在 uid 形态会打到
+// 已无监听者的固定端口),与 goBack 同一套 /p/<port>/ 前缀解析。
+function gateUrl(ep){
+  var seg=location.pathname.split('/');
+  if (seg[1]==='p' && seg[2]) return '/p/'+seg[2]+'/browserctl-gate/'+ep;
+  return '/browserctl-gate/'+ep;
+}
+var sysWrap=document.createElement('div'); sysWrap.className='sys';
+function sysStat(txt){
+  var d=document.createElement('div'); d.className='stat';
+  d.innerHTML=I_SYS+'<span>'+txt+'</span>';
+  return d;
+}
+var sysCpu=sysStat('主机状态 · 读取中…');
+var sysMemRow=document.createElement('div'); sysMemRow.className='dsk';
+sysMemRow.innerHTML='<span style="flex:0 0 34px">内存</span>';
+var sysMemBar=document.createElement('div'); sysMemBar.className='bar';
+var sysMemFill=document.createElement('i'); sysMemBar.appendChild(sysMemFill);
+var sysMemTxt=document.createElement('span'); sysMemTxt.style.cssText='flex:0 0 auto;color:rgba(255,255,255,.55);font-size:11px';
+sysMemRow.appendChild(sysMemBar); sysMemRow.appendChild(sysMemTxt);
+var sysDisks=document.createElement('div');
+function fmtKB(n){
+  n=Number(n)||0;
+  var g=n/1048576;
+  if (g>=1) return g.toFixed(1)+' GB';
+  return (n/1024).toFixed(0)+' MB';
+}
+function renderSys(d){
+  if (!d || !d.ok){
+    sysCpu.querySelector('span').textContent='主机状态 · 读取失败';
+    sysMemTxt.textContent='';
+    sysMemFill.style.width='0';
+    sysDisks.innerHTML='';
+    return;
+  }
+  var memPct=0;
+  if (Number(d.memTotal)>0) memPct=Math.max(0,Math.min(100,Math.round((1-Number(d.memFree)/Number(d.memTotal))*100)));
+  sysCpu.querySelector('span').textContent='CPU · '+(Number(d.cpu)||0)+'%';
+  sysMemFill.style.width=memPct+'%';
+  sysMemTxt.textContent=memPct+'% · 余 '+fmtKB(Number(d.memFree)*1024);
+  var html='';
+  var disks=(d.disks&&d.disks.length)?d.disks:[];
+  for (var i=0;i<disks.length && i<4;i++){
+    var dk=disks[i]||{};
+    var total=Number(dk.size)||0, free=Number(dk.free)||0;
+    if (total<=0) continue;
+    var p=Math.max(0,Math.min(100,Math.round((1-free/total)*100)));
+    html+='<div class="dsk"><span style="flex:0 0 34px">'+String(dk.drive||'?')+'</span>'
+         +'<div class="bar"><i style="width:'+p+'%"></i></div>'
+         +'<span style="flex:0 0 auto;color:rgba(255,255,255,.55);font-size:11px">余 '+(free/1073741824).toFixed(0)+' G</span></div>';
+  }
+  sysDisks.innerHTML=html;
+}
+function loadSys(){
+  sysCpu.querySelector('span').textContent='主机状态 · 读取中…';
+  try{
+    fetch(gateUrl('sysinfo'),{cache:'no-store'})
+      .then(function(r){ return r.json() })
+      .then(function(j){ renderSys(j && (j.sysinfo||j)) })
+      .catch(function(){ renderSys(null) });
+  }catch(e){ renderSys(null) }
+}
+sysWrap.appendChild(sysCpu);
+sysWrap.appendChild(sysMemRow);
+sysWrap.appendChild(sysDisks);
 // 点中间数值：就地换成数字输入框(回车/失焦确认)；长按：恢复自适应
 var lpT=0, resetAt=0;
 function lpStart(){
@@ -826,6 +911,11 @@ card.appendChild(row(I_BACK,'返回',goBack));
 card.appendChild(fsRow);
 card.appendChild(row(I_VP,'视口大小',function(){ vpWrap.classList.toggle('open') }));
 card.appendChild(vpWrap);
+card.appendChild(row(I_SYS,'主机状态',function(){
+  var open=sysWrap.classList.toggle('open');
+  if (open) loadSys();   // 每次展开都拉一次(闸机 10s 缓存兜底,不叠加请求)
+}));
+card.appendChild(sysWrap);
 root.appendChild(card); root.appendChild(fab); root.appendChild(toastEl);
 
 fab.addEventListener('click',function(ev){ ev.stopPropagation(); root.classList.toggle('open') });
@@ -978,7 +1068,24 @@ else start();
 })();"""
 _FILE_DL_TAG = b'<script>' + _FILE_DL_JS.encode('utf-8') + b'</script>'
 
+# 会话有效期(C2):默认 30 天;运行时以 _gate_max_age() 为准(插件面板可配 1-365 天)。
+# 保留常量作为兜底默认值,勿在请求路径里直接引用。
 GATE_MAX_AGE = COOKIE_LIFETIME_DAYS * 86400
+
+
+def _session_days():
+    """bc-gate 会话有效期(天):state.settings.session_days,C2 可配(1-365,默认 30)。"""
+    try:
+        v = int((read_state().get("settings") or {}).get("session_days")
+                or COOKIE_LIFETIME_DAYS)
+    except Exception:
+        v = COOKIE_LIFETIME_DAYS
+    return max(1, min(365, v))
+
+
+def _gate_max_age():
+    """bc-gate 会话 cookie 有效期(秒):跟随 session_days(C2)。"""
+    return _session_days() * 86400
 TOTP_STEP = 30
 REPLAY_WINDOW = 90          # 同码 90 秒内只认一次(防重放)
 FAIL_LIMIT = 5              # 连错 N 次
@@ -1225,7 +1332,7 @@ def _b64u(b):
 
 def gate_mint_cookie(link_secret, dev_id, ip, ua):
     now_ms = int(time.time() * 1000)
-    payload = {"v": 1, "dev": dev_id, "iat": now_ms, "exp": now_ms + GATE_MAX_AGE * 1000}
+    payload = {"v": 1, "dev": dev_id, "iat": now_ms, "exp": now_ms + _gate_max_age() * 1000}
     body = _b64u(json.dumps(payload, separators=(",", ":")).encode())
     sig = _b64u(hmac.new(link_secret.encode(), body.encode(), hashlib.sha256).digest())
     return "v1.%s.%s" % (body, sig)
@@ -2041,6 +2148,8 @@ def _device_ensure(key, info, online=True, last_seen=None):
                 "first_seen": seen, "last_seen": seen,
                 "online": bool(online), "online_since": now if online else 0,
                 "total_online": 0, "times": 1,
+                # L1 设备密钥:256-bit,只存闸机档案 + 设备本地,从不经过服务器
+                "dev_key": _secrets.token_hex(32),
             }
         else:
             d["name"] = info.get("name") or d.get("name", "")
@@ -2074,6 +2183,156 @@ def _device_close(key, at=None):
             d["online"] = False
             d["online_since"] = 0
             d["last_seen"] = when
+
+# ---- L1 设备密钥签名(批次3):服务器全沦陷也到不了闸机的最后防线 ----
+# 每台设备配对/验证时发一把 256-bit dev_key(只存本机闸机 + 设备两端,
+# 从不经过服务器);请求带 X-BC-Dev/Ts/Nonce/Sig 四头,闸机 HMAC-SHA256 验签。
+# 签名串 = "METHOD\n<path>\n<ts>\n<nonce>"(path 为剥掉 /p/<port>/ 前缀后的
+# 规范路径,SW 与闸机同口径);时间窗 ±90s + nonce 去重防重放。
+# 宽容期(enforce_dev_sig=false):缺签名只记节流事件不拒绝,全端升级后再切强制。
+_SIG_WINDOW = 90
+_SIG_NONCE_TTL = 180
+# 豁免端点:密钥/身份的分发与配对入口——它们本身的防护是「一次性本地凭据」:
+# dev-bind 要求 30 天会话 cookie;/pair/claim 要求一次性 grant;/bootstrap 要求
+# HMAC token(带过期+次数)。grant/token 只在本机闸机签发(二维码/引导链接下发),
+# 服务器沦陷也伪造不出来 → 无签名可达它们不破坏 L1 目标;不豁免则 enforce ON
+# 后新设备永远无法配对(没有密钥=永远过不了验签=死锁,e2e 实测抓到)。
+# 签名 SW 本体在 PWA sw.js(经 /sw.js 服务,浏览器不经过 fetch handler 取它)。
+_SIG_EXEMPT = ("/dev-bind", "/dev-boot", "/pair/claim", "/bootstrap")
+_sig_nonce_lock = threading.Lock()
+_sig_nonces = {}  # dev -> {nonce: 过期时刻}
+_sig_missing_last = [0.0]  # 宽容期缺签名事件节流(60s 一条,防刷屏)
+
+
+def _sig_enforced():
+    return bool((read_state().get("settings") or {}).get("enforce_dev_sig"))
+
+
+def _device_devkey(dev):
+    """取设备 dev_key;老设备档案缺 key 时兜底生成并落盘。
+    落盘必须在锁外:_dump_devices 自持 _devices_lock,锁内调 = 自死锁
+    (threading.Lock 不可重入,kb/06 第 35 条;与 ip_location 锁序反转同款)。"""
+    if not dev:
+        return None
+    created = False
+    with _devices_lock:
+        d = _devices.get(dev)
+        if d is None:
+            return None
+        k = d.get("dev_key")
+        if not k:
+            k = d["dev_key"] = _secrets.token_hex(32)
+            created = True
+    if created:
+        try:
+            _dump_devices()
+        except Exception:
+            pass
+    return k
+
+
+def _device_revoke_key(dev):
+    """踢出设备时撤销其 dev_key(契约:踢出=密钥作废,须重新配对)。
+    落盘放锁外(同 _device_devkey,_dump_devices 自持锁不可重入)。"""
+    if not dev:
+        return
+    removed = False
+    with _devices_lock:
+        d = _devices.get(dev)
+        if d is not None and d.pop("dev_key", None):
+            removed = True
+    if removed:
+        try:
+            _dump_devices()
+        except Exception:
+            pass
+
+
+def _sig_nonce_take(dev, nonce, now):
+    """nonce 去重:同设备同 nonce 只放行一次;过期项顺手清理。"""
+    with _sig_nonce_lock:
+        bucket = _sig_nonces.get(dev)
+        if bucket is None:
+            bucket = _sig_nonces[dev] = {}
+        for n in [n for n, exp in bucket.items() if exp <= now]:
+            bucket.pop(n, None)
+        if nonce in bucket:
+            return False
+        bucket[nonce] = now + _SIG_NONCE_TTL
+        if len(bucket) > 500:  # 防异常客户端把内存撑大:保最新 200 条
+            _sig_nonces[dev] = dict(sorted(bucket.items(), key=lambda kv: kv[1])[-200:])
+        return True
+
+
+def _sig_boot_html():
+    """无签名请求的引导页(L1.5):注册 SW → 拉取设备密钥 → 自动刷新进入。
+    攻击者拿遍服务器秘密也只能看到这一页:没有 bc-gate 会话拿不到密钥。"""
+    return _SIG_BOOT_HTML
+
+
+def _dev_sig_verify(handler, path):
+    """L1 验签中间件。返回 None=放行;返回 (code, body)=拒绝(body 为 str 时
+    按引导页 HTML 发送,dict 时按 JSON)。宽容期只对「完全无签名」放行并节流记事;
+    带了签名但错的一律拒绝(错签名说明在试探,宽容期也不放过)。"""
+    p = (path or "").rstrip("/")
+    # 本机管理员通道豁免(loopback + 0600 令牌):enforce ON 时若把 CLI/面板/
+    # 应急手段也拦死,开关就只能靠已配签名设备关闭——本机管理能力必须常通。
+    # admin 令牌是本机凭据(不在服务器上),沦陷假设下攻击者拿不到,豁免安全。
+    if handler._is_admin_call():
+        return None
+    if p.endswith(_SIG_EXEMPT):
+        return None
+    # WebSocket 握手无法加自定义头(fetch 不覆盖 ws://),签名层暂豁免,
+    # 防护仍由 bc-gate cookie 承担(握手自动带 cookie);记录待改进项。
+    if (handler.headers.get("Upgrade") or "").lower() == "websocket":
+        return None
+
+    def _h(name):
+        v = (handler.headers.get(name) or "").strip()
+        if v:
+            return v
+        try:
+            from urllib.parse import urlsplit, parse_qs
+            q = parse_qs(urlsplit(handler.path).query)
+        except Exception:
+            q = {}
+        cand = {"X-BC-Dev": "dev", "X-BC-Ts": "ts",
+                "X-BC-Nonce": "nonce", "X-BC-Dev-Sig": "sig"}.get(name, name)
+        return (q.get(cand) or [""])[0].strip()
+
+    dev = _h("X-BC-Dev")
+    ts = _h("X-BC-Ts")
+    nonce = _h("X-BC-Nonce")
+    sig = _h("X-BC-Dev-Sig")
+    if not (dev and ts and nonce and sig):
+        if not _sig_enforced():
+            now = time.time()
+            if now - _sig_missing_last[0] >= 60:
+                _sig_missing_last[0] = now
+                _append_event("devsig", "宽容期:无签名请求 path=…%s ip=%s(强制开关未开)"
+                              % (p[-50:], handler._client_ip()))
+            return None
+        return (401, _sig_boot_html())
+    key = _device_devkey(dev)
+    if not key:
+        if not _sig_enforced():
+            return None
+        return (401, {"ok": False, "error": "未知设备,请重新配对"})
+    try:
+        ts_i = int(float(ts))
+    except Exception:
+        ts_i = 0
+    now = time.time()
+    if abs(now - ts_i) > _SIG_WINDOW:
+        return (401, {"ok": False, "error": "签名时间窗失效,请刷新页面重试"})
+    if not _sig_nonce_take(dev, nonce, now):
+        return (401, {"ok": False, "error": "签名重放被拒绝"})
+    msg = ("%s\n%s\n%d\n%s" % ((handler.command or "GET").upper(), p, ts_i, nonce)).encode()
+    good = hmac.new(bytes.fromhex(key), msg, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(good, sig.lower()):
+        return (401, {"ok": False, "error": "设备签名校验失败"})
+    return None
+
 
 def _load_devices():
     """启动时恢复设备档案:一律先置为离线,并结算上次运行残留的在线时长。
@@ -2326,7 +2585,9 @@ def _load_sessions():
             if not dev:
                 continue
             since = float(r.get("since") or r.get("ts") or now)
-            if now - since > GATE_MAX_AGE:  # Cookie 同样过期,不必保留
+            # 按「当前设置的会话时长」清理(C2:调短后老会话也随之过期;
+            # 调长只影响新签发,这里用当前值兜底,偏差可接受)
+            if now - since > _gate_max_age():
                 continue
             _sessions[dev] = {
                 "ip": r.get("ip", ""),
@@ -2724,6 +2985,62 @@ body{background:#0d1117;color:#e8e4d9;font-family:-apple-system,BlinkMacSystemFo
 </body>
 </html>"""
 
+# L1.5 引导页:无签名请求(enforce 开启时)的落点——装凭证、自动刷新。
+_SIG_BOOT_HTML = r"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>正在验证设备…</title><style>
+html,body{background:#101216;color:#e8eaf0;font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;height:100%;margin:0}
+.c{max-width:340px;margin:18vh auto 0;padding:0 20px;text-align:center}
+.t{font-size:17px;font-weight:700;margin-bottom:10px}
+.s{font-size:13px;color:#9aa0ab;line-height:1.7}
+.e{font-size:13px;color:#e5655c;line-height:1.7;margin-top:12px;display:none}
+</style></head><body><div class="c">
+<div class="t">正在验证此设备…</div>
+<div class="s" id="st">首次使用需要安装设备凭证,几秒后自动继续。</div>
+<div class="e" id="err"></div>
+</div><script>
+(function(){
+'use strict';
+var st=document.getElementById('st'),err=document.getElementById('err');
+function fail(m){err.style.display='block';err.textContent=m;st.style.display='none';}
+function idb(){return new Promise(function(res,rej){
+  var r=indexedDB.open('bc-devkey',1);
+  r.onupgradeneeded=function(){r.result.createObjectStore('kv')};
+  r.onsuccess=function(){res(r.result)};r.onerror=function(){rej(r.error)};
+});}
+function idbPut(k,v){return idb().then(function(db){return new Promise(function(res,rej){
+  var tx=db.transaction('kv','readwrite');tx.objectStore('kv').put(v,k);
+  tx.oncomplete=function(){res()};tx.onerror=function(){rej(tx.error)};});});}
+var segs=location.pathname.split('/');
+var root='/';
+if(segs[1]==='p'&&segs[2])root='/'+segs[1]+'/'+segs[2]+'/';
+if(!navigator.serviceWorker){fail('此浏览器不支持 Service Worker,请用系统浏览器打开或更新 App。');return;}
+if(sessionStorage.getItem('bc-devkey-ok')==='1'){
+  st.textContent='凭证已安装过;若反复跳回本页,请截图反馈(签名链路未生效)。';
+  return;
+}
+navigator.serviceWorker.register(root+'sw.js',{scope:root}).then(function(reg){
+  if(navigator.serviceWorker.controller)return reg;
+  return new Promise(function(res){
+    var w=navigator.serviceWorker;
+    function chk(){if(w.controller)return res(reg);setTimeout(chk,200);}
+    chk();
+  });
+}).then(function(){
+  return fetch('dev-bind',{cache:'no-store'}).then(function(r){return r.json()});
+}).then(function(j){
+  if(!j||!j.ok)throw new Error((j&&j.error)||'设备凭证获取失败');
+  return idbPut('dev',j.dev).then(function(){return idbPut('key',j.key)});
+}).then(function(){
+  st.textContent='凭证已安装,正在进入…';
+  sessionStorage.setItem('bc-devkey-ok','1');
+  setTimeout(function(){location.href=root},400);
+}).catch(function(e){fail('设置失败:'+(e&&e.message?e.message:e)+' 关闭本页后重新打开通常即可恢复。')});
+})();
+</script></body></html>"""
+
+# L1.5 Service Worker:给同源 /browserctl-gate/|/browserctl-test-gate/ 的
+# fetch 加 X-BC-Dev/Ts/Nonce/Sig 头(WebSocket 不经过 fetch,由闸机侧豁免)。
 GATE_HTML = r"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#121212">
@@ -3104,7 +3421,9 @@ class GateHandler(BaseHTTPRequestHandler):
         self.end_headers()
         try:
             self.wfile.write(data)
-        except (BrokenPipeError, ConnectionResetError):
+        except ConnectionError:
+            # 良性断连一族(含 ConnectionAbortedError):此前只列 BrokenPipe/Reset,
+            # Windows 上还会抛 Aborted,会掉进 _handle 的 BaseException 分支刷整段堆栈
             pass
 
     def _send_json(self, code, obj, headers=None):
@@ -3227,7 +3546,7 @@ class GateHandler(BaseHTTPRequestHandler):
         _dump_sessions()
         cookie = gate_mint_cookie(secret, dev, ip, ua)
         header = "%s=%s; Max-Age=%d; Path=/; HttpOnly; SameSite=Lax; Secure" % (
-            GATE_COOKIE, cookie, GATE_MAX_AGE)
+            GATE_COOKIE, cookie, _gate_max_age())
         return dev, header
 
     def _read_json_body(self, max_bytes=MAX_JSON_BODY_BYTES):
@@ -4116,7 +4435,8 @@ color:#fff;text-decoration:none;font-size:14px}
 
     # 有副作用的端点:集中在这里做 CSRF 判定(路由入口一处,避免每个端点各写一遍)
     _CSRF_GUARDED = ("/notify", "/push-config", "/blacklist", "/blacklist/remove",
-                     "/kick", "/kick-all", "/verify",
+                     "/kick", "/kick-all", "/verify", "/session-days",
+                     "/sig-toggle",
                      "/app/release-config", "/app/apk/upload", "/app/apk/delete")
 
     def _csrf_ok(self):
@@ -4233,9 +4553,9 @@ color:#fff;text-decoration:none;font-size:14px}
             cookie = "%s=%s; path=/; Secure; SameSite=Lax; max-age=%d" % (
                 name, value, TEMP_APP_COOKIE_HOURS * 3600)
         else:
-            name, value, _ = mint_cookie()
+            name, value, _ = mint_cookie(days=_session_days())
             cookie = "%s=%s; path=/; Secure; SameSite=Lax; max-age=%d" % (
-                name, value, COOKIE_LIFETIME_DAYS * 86400)
+                name, value, _session_days() * 86400)
         # 整体持锁读改写:裸 read_state+write_state 会覆盖看门狗同时写入的
         # gate_kick_seq(踢人丢失);update_state 在 state_lock 内完成整个事务。
         st = update_state(lambda s: s.update({"cookie_name": name, "cookie_value": value}))
@@ -4315,6 +4635,18 @@ color:#fff;text-decoration:none;font-size:14px}
                               "name": name, "kind": "app",
                               "devid": devid_q,
                               "since": now, "ts": now}
+        # 2026-11-15(第 35 条):显式重扫配对 = 管理员当面重新授权,把该设备移出
+        # "已踢名单"。否则确定性 dev 映射(同一 devid 永远映射同一个 dev)会让被踢
+        # 设备重扫码后依然被 _gate_ok 的已踢名单兜底拒绝 →「踢了下线就再也连不上」
+        # 死循环(重试/自愈/删记录重扫全部无效,唯一出路是清 App 数据换 devid)。
+        # 语义边界:踢下线/解除配对仍阻止旧 Cookie 自动重登记(_gate_ensure_device
+        # 的名单拦截保留,防「踢完一两秒又跳回来」),只有拿新二维码主动重扫才解除。
+        try:
+            update_state(lambda s: {**s, "gate_kicked_devs":
+                                    [d for d in (s.get("gate_kicked_devs") or []) if d != dev]})
+            _append_event("pair", "设备 %s 重新配对,移出已踢名单" % dev)
+        except Exception:
+            pass
         # 先铸 Cookie:这是手机能不能进面板的唯一凭据,必须最先算出来
         st = gate_state()
         secret = st.get("link_secret")
@@ -4325,7 +4657,7 @@ color:#fff;text-decoration:none;font-size:14px}
             st["link_secret"] = secret
         cookie = gate_mint_cookie(secret, dev, ip, ua)
         headers = [("Set-Cookie", "%s=%s; Max-Age=%d; Path=/; HttpOnly; SameSite=Lax; Secure"
-                    % (GATE_COOKIE, cookie, GATE_MAX_AGE)),
+                    % (GATE_COOKIE, cookie, _gate_max_age())),
                    ("Referrer-Policy", "no-referrer"),
                    ("Location", "../..")]
         # 登记会话 / 落盘 / 服务端注册 / 记事件:全部属于"锦上添花",
@@ -4425,6 +4757,16 @@ color:#fff;text-decoration:none;font-size:14px}
         if path.endswith(self._CSRF_GUARDED) and not self._csrf_ok():
             self._send_json(403, {"ok": False, "error": "跨站请求被拒绝(CSRF 防护)"})
             return
+        # L1 设备密钥签名(批次3):验签失败返回 (code, body);
+        # body 为 str 时按引导页 HTML 发送(enforce 开启时无签名导航的落点)
+        sig_fail = _dev_sig_verify(self, path)
+        if sig_fail is not None:
+            code, body = sig_fail
+            if isinstance(body, str):
+                self._send(code, body, "text/html; charset=utf-8")
+            else:
+                self._send_json(code, body)
+            return
         if path.endswith("/pair/status"):
             self._gate_pair_status()
             return
@@ -4463,6 +4805,26 @@ color:#fff;text-decoration:none;font-size:14px}
                 self._send_json(401, {"ok": False, "error": "未通过验证"})
                 return
             self._send_json(200, {"ok": True, "events": _read_events()})
+            return
+        if path.endswith("/sysinfo"):
+            # 主机遥测:CPU/内存/磁盘。需已通过 2FA(硬件信息不公开)。
+            self._gate_sysinfo()
+            return
+        if path.endswith("/dev-bind"):
+            # L1 密钥分发:已验证会话换取本设备 dev_key(豁免签名,见 _SIG_EXEMPT)
+            self._gate_dev_bind()
+            return
+        if path.endswith("/dev-boot"):
+            # L1.5 引导页(手动访问入口;enforce 开启时 401 也返回同款页面)
+            self._send(200, _sig_boot_html(), "text/html; charset=utf-8")
+            return
+        if path.endswith("/sig-toggle"):
+            # L1 强制开关:GET 读状态(会话或管理员),POST 切换(仅本机管理员)
+            self._gate_sig_toggle()
+            return
+        if path.endswith("/session-days"):
+            # 会话有效期:GET 读(需会话),POST 改(仅本机管理员,CSRF 名单内)。
+            self._gate_session_days()
             return
         # ---- 消息推送 ----
         if path.endswith("/push-config"):
@@ -4627,6 +4989,90 @@ color:#fff;text-decoration:none;font-size:14px}
         nid = _push_notify(kind, title, body)
         self._send_json(200, {"ok": True, "id": nid, "pushed": nid is not None})
 
+    def _gate_sysinfo(self):
+        """主机遥测:CPU/内存/磁盘(需会话验证或管理令牌;闸机侧 10s 缓存)。"""
+        if not (self._gate_ok() or self._is_admin_call()):
+            self._send_json(401, {"ok": False, "error": "未通过验证"})
+            return
+        self._send_json(200, {"ok": True, "sysinfo": _gate_sysinfo_data()})
+
+    def _gate_session_days(self):
+        """会话有效期(C2):GET 读(需会话验证),POST 改(仅本机管理员,query ?days=N,1-365)。
+        只影响之后新签发的会话;已在线设备要立即收紧用 kick-all。"""
+        if self.command == "POST":
+            if not self._is_admin_call():
+                self._send_json(403, {"ok": False, "error": "仅限本机管理员调用"})
+                return
+            from urllib.parse import urlsplit, parse_qs
+            try:
+                q = parse_qs(urlsplit(self.path).query)
+                days = int((q.get("days") or ["0"])[0])
+            except Exception:
+                days = 0
+            if days < 1 or days > 365:
+                self._send_json(400, {"ok": False, "error": "days 须为 1-365 的整数"})
+                return
+
+            def _set(s):
+                cfg = dict(s.get("settings") or {})
+                cfg["session_days"] = days
+                s["settings"] = cfg
+                return s
+
+            update_state(_set)
+            _append_event("settings", "会话有效期改为 %d 天" % days)
+            self._send_json(200, {"ok": True, "session_days": days})
+            return
+        if not (self._gate_ok() or self._is_admin_call()):
+            # 插件 host 服务端代理调用没有 bc-gate cookie,走管理令牌通道
+            self._send_json(401, {"ok": False, "error": "未通过验证"})
+            return
+        self._send_json(200, {"ok": True, "session_days": _session_days()})
+
+    def _gate_dev_bind(self):
+        """L1 密钥分发:已验证会话(bc-gate cookie)换本设备 dev_key。
+        攻击者没有会话拿不到密钥;拿到密钥的设备此后靠签名说话。"""
+        if not self._gate_ok():
+            self._send_json(401, {"ok": False, "error": "未通过验证,请先完成动态码校验"})
+            return
+        dev = self._gate_cookie_dev()
+        if not dev:
+            self._send_json(400, {"ok": False,
+                                  "error": "无法识别设备身份,请用配对链接重新打开"})
+            return
+        key = _device_devkey(dev)
+        if not key:
+            self._send_json(400, {"ok": False, "error": "设备档案不存在,请重新配对"})
+            return
+        _append_event("devbind", "下发设备密钥 dev=%s…" % dev[:8])
+        self._send_json(200, {"ok": True, "dev": dev, "key": key})
+
+    def _gate_sig_toggle(self):
+        """L1 强制开关:GET 读(会话或管理员);POST ?enforce=0/1 仅本机管理员。
+        开启后无签名请求一律 401+引导页;切之前确认各端已拿到密钥(宽容期事件归零)。"""
+        if self.command == "POST":
+            if not self._is_admin_call():
+                self._send_json(403, {"ok": False, "error": "仅限本机管理员"})
+                return
+            try:
+                from urllib.parse import urlsplit, parse_qs
+                q = parse_qs(urlsplit(self.path).query)
+            except Exception:
+                q = {}
+            want = (q.get("enforce") or [""])[0].strip() in ("1", "true", "on")
+            update_state(lambda s: {**s, "settings": {**(s.get("settings") or {}),
+                                                      "enforce_dev_sig": want}})
+            _append_event("settings", "L1 设备签名强制已%s" % ("开启" if want else "关闭"))
+            self._send_json(200, {"ok": True, "enforce": want})
+            return
+        if not (self._gate_ok() or self._is_admin_call()):
+            self._send_json(401, {"ok": False, "error": "未通过验证"})
+            return
+        with _devices_lock:
+            n = sum(1 for d in _devices.values() if d.get("dev_key"))
+        self._send_json(200, {"ok": True, "enforce": _sig_enforced(),
+                              "devices": len(_devices), "devices_with_key": n})
+
     # ---- App 发布管理 ----
 
     def _gate_app_version(self):
@@ -4766,8 +5212,8 @@ color:#fff;text-decoration:none;font-size:14px}
                     if not chunk:
                         break
                     self.wfile.write(chunk)
-        except (BrokenPipeError, ConnectionResetError):
-            pass  # 客户端中途取消下载属正常
+        except ConnectionError:
+            pass  # 客户端中途取消下载属正常(含 ConnectionAbortedError)
         except OSError:
             pass
 
@@ -4843,8 +5289,8 @@ color:#fff;text-decoration:none;font-size:14px}
                     if not chunk:
                         break
                     self.wfile.write(chunk)
-        except (BrokenPipeError, ConnectionResetError):
-            pass  # 客户端中途取消下载属正常
+        except ConnectionError:
+            pass  # 客户端中途取消下载属正常(含 ConnectionAbortedError)
         except OSError:
             pass
 
@@ -4905,7 +5351,7 @@ color:#fff;text-decoration:none;font-size:14px}
         cookie = gate_mint_cookie(st["link_secret"], dev, ip, ua)
         self._send_json(200, {"ok": True}, headers=[
             ("Set-Cookie", "%s=%s; Max-Age=%d; Path=/; HttpOnly; SameSite=Lax; Secure"
-             % (GATE_COOKIE, cookie, GATE_MAX_AGE))])
+             % (GATE_COOKIE, cookie, _gate_max_age()))])
 
     def _gate_kick(self):
         """定向踢出:立即从 sessions 中删除设备,不需要等 housekeeping 2 秒巡检。
@@ -4938,7 +5384,9 @@ color:#fff;text-decoration:none;font-size:14px}
             st = gate_state()
             st["gate_kicked_devs"] = _cap_kicked([*(st.get("gate_kicked_devs") or []), dev])
         if dev_info:
-            _device_close(_device_key({"dev": dev, **dev_info}))
+            k = _device_key({"dev": dev, **dev_info})
+            _device_close(k)
+            _device_revoke_key(k)  # L1:踢出=密钥作废,须重新配对才能拿到新密钥
             _append_event("kick", "踢出设备 %s (IP=%s)" % (dev, dev_info.get("ip", "?")))
         _dump_sessions()
         # 兜底:pop 与写盘之间若仍有已过闸的并发请求把设备挤回 _sessions,再清一次
@@ -5088,8 +5536,11 @@ color:#fff;text-decoration:none;font-size:14px}
             except OSError:
                 self._send(404, "service worker not found", "text/plain")
                 return True
+            # Service-Worker-Allowed 放行到根:L1.5 签名 SW 的 scope = /p/<port>/
+            # (面板根),脚本 URL 也在根下,默认 scope 即可,此头兜底页面目录差异。
             self._send(200, data, "application/javascript; charset=utf-8",
-                       headers=[("Cache-Control", "no-store")])
+                       headers=[("Cache-Control", "no-store"),
+                                ("Service-Worker-Allowed", "/")])
             return True
         return False
 
@@ -5166,8 +5617,8 @@ color:#fff;text-decoration:none;font-size:14px}
         self._responded = False
         try:
             self._dispatch()
-        except (BrokenPipeError, ConnectionResetError):
-            pass  # 客户端提前断开,正常现象
+        except ConnectionError:
+            pass  # 客户端提前断开属正常(BrokenPipe/Reset/Aborted 一族),不刷堆栈
         except BaseException as e:
             try:
                 # 2026-11-08 审计 P2:self.path 含 query,而配对/引导链路用 ?k=/&kind=、
@@ -5196,6 +5647,19 @@ color:#fff;text-decoration:none;font-size:14px}
         # 闸机自己的端点永不需要会话(官方前缀和测试副本前缀都认)
         if self.path.startswith(GATE_PREFIXES):
             self._serve_gate()
+            return
+        # L1.5 数据面验签(批次3):反代/WS 也在防线内——enforce ON 时无签名请求
+        # 只能看到引导页,拿不到面板内容(闸机代持的 DSH cookie 不会漏给攻击者)。
+        # PWA 静态资源与 App 下载页在上方已 return(不拦:SW/图标/下载页须可载)。
+        # WS 握手由 _dev_sig_verify 内部豁免(防护靠 bc-gate cookie)。
+        from urllib.parse import urlsplit as _us
+        sig_fail = _dev_sig_verify(self, _us(self.path).path)
+        if sig_fail is not None:
+            code, body = sig_fail
+            if isinstance(body, str):
+                self._send(code, body, "text/html; charset=utf-8")
+            else:
+                self._send_json(code, body)
             return
         st = gate_state()
         if not st.get("totp_enabled"):
@@ -5414,6 +5878,69 @@ def _port_open(port, timeout=1.0):
         return True
     except OSError:
         return False
+
+
+# ---- 主机遥测(sysinfo,批次 1;契约见 docs/notes/功能批次-链路加固与文件遥测-2026-11-14.md) ----
+
+_SYSINFO_TTL = 10.0         # 成功缓存秒数:防高频轮询反复起 powershell
+_SYSINFO_FAIL_TTL = 3.0     # 失败负缓存秒数:采集挂了也别每次请求都重试打爆 CPU
+_sysinfo_lock = threading.Lock()
+_sysinfo_cache = {"ts": 0.0, "data": None}
+
+# 单次 pwsh 采样 CPU/内存/磁盘。全部走 CIM(Win32_*),不用 Get-Counter/typeperf
+# ——计数器名在中文 Windows 上是本地化的(「处理器时间」),硬编码英文路径必炸。
+# 输出纯 ASCII 单行 JSON,无中文 → 解码无坑;LoadPercentage 可能上报 null,Where 过滤。
+_SYSINFO_PS = (
+    "$ErrorActionPreference='Stop';"
+    "$os=Get-CimInstance Win32_OperatingSystem;"
+    "$cpus=@(Get-CimInstance Win32_Processor | ForEach-Object { $_.LoadPercentage }"
+    " | Where-Object { $_ -ne $null });"
+    "$cpu=0; if($cpus.Count){ $cpu=[math]::Round((($cpus | Measure-Object -Average).Average),1) };"
+    "$disks=@(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' | ForEach-Object {"
+    " [ordered]@{ drive=$_.DeviceID; size=[int64]$_.Size; free=[int64]$_.FreeSpace } });"
+    "[ordered]@{ ok=$true; cpu=$cpu; memTotal=[int64]$os.TotalVisibleMemorySize;"
+    " memFree=[int64]$os.FreePhysicalMemory; boot=$os.LastBootUpTime.ToString('o');"
+    " disks=$disks } | ConvertTo-Json -Compress -Depth 3"
+)
+
+
+def _collect_sysinfo(timeout=15.0):
+    """跑一次 pwsh 采样。文本捕获 errors=replace(kb/04 第 12 条),失败返回 ok:false。"""
+    try:
+        r = subprocess.run(["powershell", "-NoProfile", "-Command", _SYSINFO_PS],
+                           capture_output=True, text=True, errors="replace",
+                           timeout=timeout, creationflags=CREATE_NO_WINDOW)
+        if r.returncode != 0:
+            return {"ok": False, "error": "采集失败(exit %d)" % r.returncode}
+        data = json.loads((r.stdout or "").strip())
+        if not isinstance(data, dict):
+            return {"ok": False, "error": "采集输出异常"}
+        return data
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "error": "采集超时"}
+    except Exception as e:
+        return {"ok": False, "error": "采集异常: %s" % e}
+
+
+def _gate_sysinfo_data():
+    """带 10s 缓存的遥测数据;持锁采样防并发重复起 powershell。"""
+    now = time.time()
+    with _sysinfo_lock:
+        if now - _sysinfo_cache["ts"] < _SYSINFO_TTL:
+            if _sysinfo_cache["data"]:
+                d = dict(_sysinfo_cache["data"])
+                d["cached"] = True
+                return d
+            return {"ok": False, "error": "上次采集失败,稍后重试"}
+        d = _collect_sysinfo()
+        if d.get("ok"):
+            _sysinfo_cache["ts"] = time.time()
+            _sysinfo_cache["data"] = d
+        else:
+            # 负缓存 3 秒(ts 往前拨到刚好只差 FAIL_TTL 过期),失败不重试打爆
+            _sysinfo_cache["ts"] = time.time() - (_SYSINFO_TTL - _SYSINFO_FAIL_TTL)
+            _sysinfo_cache["data"] = None
+        return dict(d)
 
 
 def _gate_is_ours(port, timeout=1.5):
@@ -6341,9 +6868,14 @@ def _ssh(auto_trust=False):
     if not sec["ssh_host"] or not sec["ssh_user"]:
         raise SystemExit("缺少 SSH 配置;先运行 python browserctl.py secrets init")
     s = paramiko.SSHClient()
-    s.load_system_host_keys()
+    # 工作区 .ssh_known_hosts 是本工具唯一信任源。paramiko 5.0 实测 HostKeys 合并
+    # 是「先加载者胜」(与 load() 文档宣称的 new replacing old 相反):若同时叠加
+    # ~/.ssh/known_hosts,系统里的旧键会永久遮蔽重新 ssh-trust 写入的新键,
+    # 服务器重装后就再也连不上(2026-11-13 重装实测)。因此二者只取其一。
     if KNOWN_HOSTS.exists():
-        s.load_host_keys(str(KNOWN_HOSTS))
+        s.load_system_host_keys(str(KNOWN_HOSTS))
+    else:
+        s.load_system_host_keys()
     if auto_trust:
         s.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     else:
