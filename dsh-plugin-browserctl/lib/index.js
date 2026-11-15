@@ -4627,7 +4627,7 @@ function adminHeaders() {
   }
   return {};
 }
-var VERSION = true ? "1.0.60" : "dev";
+var VERSION = true ? "1.0.61" : "dev";
 var sessionTunnel = false;
 var ensureRunning = null;
 var lastEnsureError = "";
@@ -6010,7 +6010,7 @@ function apply(ctx, config = {}) {
       if (route === "/browserctl/api/session-days") {
         const isPost = req.method === "POST";
         try {
-          const target = "http://127.0.0.1:" + gatePort() + "/browserctl-gate/session-days" + (isPost ? "?days=" + encodeURIComponent(url.searchParams.get("days") || "") : "");
+          const target = "http://127.0.0.1:3080/browserctl-gate/session-days" + (isPost ? "?days=" + encodeURIComponent(url.searchParams.get("days") || "") : "");
           const r = await fetch(target, {
             method: isPost ? "POST" : "GET",
             headers: adminHeaders(),
@@ -6025,7 +6025,7 @@ function apply(ctx, config = {}) {
       }
       if (route === "/browserctl/api/sysinfo") {
         try {
-          const r = await fetch("http://127.0.0.1:" + gatePort() + "/browserctl-gate/sysinfo", {
+          const r = await fetch("http://127.0.0.1:3080/browserctl-gate/sysinfo", {
             headers: adminHeaders(),
             signal: AbortSignal.timeout(2e4)
           });

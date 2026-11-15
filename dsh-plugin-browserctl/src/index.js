@@ -1687,7 +1687,7 @@ export function apply(ctx, config = {}) {
         if (route === '/browserctl/api/session-days') {
           const isPost = req.method === 'POST'
           try {
-            const target = 'http://127.0.0.1:' + gatePort()
+            const target = 'http://127.0.0.1:3080'
               + '/browserctl-gate/session-days'
               + (isPost ? '?days=' + encodeURIComponent(url.searchParams.get('days') || '') : '')
             const r = await fetch(target, {
@@ -1705,7 +1705,7 @@ export function apply(ctx, config = {}) {
         if (route === '/browserctl/api/sysinfo') {
           // 遥测:闸机要求会话验证,host 代理带管理令牌;闸机侧自带 10s 缓存
           try {
-            const r = await fetch('http://127.0.0.1:' + gatePort() + '/browserctl-gate/sysinfo', {
+            const r = await fetch('http://127.0.0.1:3080' + '/browserctl-gate/sysinfo', {
               headers: adminHeaders(),
               signal: AbortSignal.timeout(20000),
             })
