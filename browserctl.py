@@ -659,15 +659,6 @@ var css='#dsh-mb-bar{position:fixed;right:calc(12px + env(safe-area-inset-right,
  +'#dsh-mb-bar .vp .vpin::-webkit-outer-spin-button,#dsh-mb-bar .vp .vpin::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}'
  +'#dsh-mb-bar .vp .vpin{-moz-appearance:textfield}'
  +'#dsh-mb-bar .vp .fit{margin-top:4px}'
- +'#dsh-mb-bar .sys{display:none;flex-direction:column;gap:6px;padding:2px 4px 6px}'
- +'#dsh-mb-bar .sys.open{display:flex}'
- +'#dsh-mb-bar .sys > *{flex:0 0 auto}'
- +'#dsh-mb-bar .sys .bar{height:6px;border-radius:3px;background:rgba(255,255,255,.14);overflow:hidden}'
- +'#dsh-mb-bar .sys .bar i{display:block;height:100%;border-radius:3px;background:#7aa2ff;'
- +'transition:width .3s;width:0}'
- +'#dsh-mb-bar .sys .dsk{display:flex;align-items:center;gap:8px;padding:0 8px;height:26px;'
- +'color:rgba(255,255,255,.78);font-size:12px;font-weight:600}'
- +'#dsh-mb-bar .sys .dsk .bar{flex:1 1 auto;min-width:40px}'
  +'#dsh-mb-bar .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(146px + env(safe-area-inset-bottom,0px));'
  +'max-width:78vw;background:rgba(24,26,30,.94);color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:10px;'
  +'padding:9px 14px;font-size:12.5px;line-height:1.5;box-shadow:0 6px 22px rgba(0,0,0,.4);opacity:0;'
@@ -681,7 +672,6 @@ var I_BACK='<svg viewBox="0 0 24 24"><path d="M19 12H5"/><path d="M11 6l-6 6 6 6
 var I_FS='<svg viewBox="0 0 24 24"><path d="M4 9V5h4"/><path d="M15 4h5v5"/><path d="M20 15v5h-5"/><path d="M9 20H4v-5"/></svg>';
 var I_VP='<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="12" rx="2"/><path d="M9 21h6"/></svg>';
 var I_ROT='<svg viewBox="0 0 24 24"><path d="M20.5 12a8.5 8.5 0 1 1-2.6-6.1"/><path d="M20.5 3.5v4.5H16"/></svg>';
-var I_SYS='<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></svg>';
 
 var root=document.createElement('div'); root.id='dsh-mb-bar';
 var card=document.createElement('div'); card.className='card';
@@ -807,72 +797,6 @@ try{
 }catch(e){}
 minus.addEventListener('click',function(ev){ ev.stopPropagation(); setW(curW()-VP_STEP) });
 plus.addEventListener('click',function(ev){ ev.stopPropagation(); setW(curW()+VP_STEP) });
-// ---- 主机状态(CPU/内存/磁盘):闸机 /sysinfo 端点,10s 缓存,展开即刷新 ----
-// 端点路径必须按页面目录相对解析(kb/06 第 31 条⑧:绝对根在 uid 形态会打到
-// 已无监听者的固定端口),与 goBack 同一套 /p/<port>/ 前缀解析。
-function gateUrl(ep){
-  var seg=location.pathname.split('/');
-  if (seg[1]==='p' && seg[2]) return '/p/'+seg[2]+'/browserctl-gate/'+ep;
-  return '/browserctl-gate/'+ep;
-}
-var sysWrap=document.createElement('div'); sysWrap.className='sys';
-function sysStat(txt){
-  var d=document.createElement('div'); d.className='stat';
-  d.innerHTML=I_SYS+'<span>'+txt+'</span>';
-  return d;
-}
-var sysCpu=sysStat('主机状态 · 读取中…');
-var sysMemRow=document.createElement('div'); sysMemRow.className='dsk';
-sysMemRow.innerHTML='<span style="flex:0 0 34px">内存</span>';
-var sysMemBar=document.createElement('div'); sysMemBar.className='bar';
-var sysMemFill=document.createElement('i'); sysMemBar.appendChild(sysMemFill);
-var sysMemTxt=document.createElement('span'); sysMemTxt.style.cssText='flex:0 0 auto;color:rgba(255,255,255,.55);font-size:11px';
-sysMemRow.appendChild(sysMemBar); sysMemRow.appendChild(sysMemTxt);
-var sysDisks=document.createElement('div');
-function fmtKB(n){
-  n=Number(n)||0;
-  var g=n/1048576;
-  if (g>=1) return g.toFixed(1)+' GB';
-  return (n/1024).toFixed(0)+' MB';
-}
-function renderSys(d){
-  if (!d || !d.ok){
-    sysCpu.querySelector('span').textContent='主机状态 · 读取失败';
-    sysMemTxt.textContent='';
-    sysMemFill.style.width='0';
-    sysDisks.innerHTML='';
-    return;
-  }
-  var memPct=0;
-  if (Number(d.memTotal)>0) memPct=Math.max(0,Math.min(100,Math.round((1-Number(d.memFree)/Number(d.memTotal))*100)));
-  sysCpu.querySelector('span').textContent='CPU · '+(Number(d.cpu)||0)+'%';
-  sysMemFill.style.width=memPct+'%';
-  sysMemTxt.textContent=memPct+'% · 余 '+fmtKB(Number(d.memFree)*1024);
-  var html='';
-  var disks=(d.disks&&d.disks.length)?d.disks:[];
-  for (var i=0;i<disks.length && i<4;i++){
-    var dk=disks[i]||{};
-    var total=Number(dk.size)||0, free=Number(dk.free)||0;
-    if (total<=0) continue;
-    var p=Math.max(0,Math.min(100,Math.round((1-free/total)*100)));
-    html+='<div class="dsk"><span style="flex:0 0 34px">'+String(dk.drive||'?')+'</span>'
-         +'<div class="bar"><i style="width:'+p+'%"></i></div>'
-         +'<span style="flex:0 0 auto;color:rgba(255,255,255,.55);font-size:11px">余 '+(free/1073741824).toFixed(0)+' G</span></div>';
-  }
-  sysDisks.innerHTML=html;
-}
-function loadSys(){
-  sysCpu.querySelector('span').textContent='主机状态 · 读取中…';
-  try{
-    fetch(gateUrl('sysinfo'),{cache:'no-store'})
-      .then(function(r){ return r.json() })
-      .then(function(j){ renderSys(j && (j.sysinfo||j)) })
-      .catch(function(){ renderSys(null) });
-  }catch(e){ renderSys(null) }
-}
-sysWrap.appendChild(sysCpu);
-sysWrap.appendChild(sysMemRow);
-sysWrap.appendChild(sysDisks);
 // 点中间数值：就地换成数字输入框(回车/失焦确认)；长按：恢复自适应
 var lpT=0, resetAt=0;
 function lpStart(){
@@ -911,11 +835,6 @@ card.appendChild(row(I_BACK,'返回',goBack));
 card.appendChild(fsRow);
 card.appendChild(row(I_VP,'视口大小',function(){ vpWrap.classList.toggle('open') }));
 card.appendChild(vpWrap);
-card.appendChild(row(I_SYS,'主机状态',function(){
-  var open=sysWrap.classList.toggle('open');
-  if (open) loadSys();   // 每次展开都拉一次(闸机 10s 缓存兜底,不叠加请求)
-}));
-card.appendChild(sysWrap);
 root.appendChild(card); root.appendChild(fab); root.appendChild(toastEl);
 
 fab.addEventListener('click',function(ev){ ev.stopPropagation(); root.classList.toggle('open') });
@@ -1741,7 +1660,10 @@ EVENTS_FILE = HERE / "browserctl_events.json"
 BLACKLIST_FILE = HERE / "browserctl_blacklist.json"
 DEVICES_FILE = HERE / "browserctl_devices.json"
 GRANTS_FILE = HERE / "browserctl_grants.json"
-_EVENTS_MAX = 60
+# 2026-11-16 日志扩容:60→300。历史 60 条在「宽容期无签名」这类高频事件下几分钟就被
+# 冲光(面板上一整屏都是同一条),300 条 ≈ 一天低频使用量,文件 ~50KB 仍在原子写舒适区。
+# devsig 已另行 60s 降噪+分类(见 _dev_sig_verify),配 cat 字段后日志页签按类分屏。
+_EVENTS_MAX = 300
 
 # ---- App 发布管理（APK 上传/版本配置/更新公告）----
 APP_DIR = HERE / "browserctl_app"
@@ -2077,6 +1999,24 @@ SYSTEM_EVENT_TITLES = {
     "totp": "2FA 设置变更",
     "pair": "手机配对成功",
 }
+# 2026-11-16 事件分类(cat):日志页签按类分屏,通知按 cat 分组。
+# 全部事件都应带 cat;旧事件/异常路径缺 cat 时落 other(「其他」页签)。
+EVENT_CATS = {
+    "verify": "login",     # 设备验证通过/会话登记(新设备、新 IP、重新配对)
+    "pair": "pair",        # 配对成功(手机长期配对/浏览器临时配对/移出已踢名单)
+    "kick": "kick",        # 踢下线(定向/全部/自愈清理)
+    "ban": "ban",          # 黑名单(拦截/添加/移除)
+    "totp": "totp",        # 2FA 设置变更
+    "devbind": "totp",     # 设备密钥绑定(与 2FA 同属「信任变更」)
+    "settings": "settings",  # 设置变更(会话有效期/L1 强制开关)
+    "devsig": "devsig",    # 无签名请求(宽容期提示,高频,60s 降噪)
+    "file_dl": "sys",      # 文件下载(运维操作)
+    "error": "sys",        # 上游/请求异常
+}
+# 通知分类:official=官方消息(公告/客服);security=本机安全动态(设备连入/配对/踢出/黑名单)。
+# App/PC/win_push 按 cat 选通知渠道;缺省 system 归 security(安全事件是闸机本机产生的)。
+NOTIF_CAT_OFFICIAL = "official"
+NOTIF_CAT_SECURITY = "security"
 # 通知内存态(环形 + 单调递增 id),_notifs_lock 独立于 _gate_lock
 _notifs = []
 _notifs_seq = 0
@@ -2127,6 +2067,14 @@ DEVICE_IDLE_SECONDS = 600
 def _device_key(info):
     """稳定设备标识:App 用客户端持久 devid,浏览器用 dev(cookie 复用后稳定)."""
     return info.get("devid") or info.get("dev") or ""
+
+
+def _device_known(key):
+    """设备是否已在历史注册表里(区别于当前会话)。用于「新设备登录」判定:
+    闸机重启后 _sessions 会被 sessions.json 恢复,但 _devices 是全量历史档案,
+    以它为准才不会把老设备误报成新设备。"""
+    with _devices_lock:
+        return key in _devices
 
 def _device_ensure(key, info, online=True, last_seen=None):
     """登记/更新设备档案。info: session dict(ip/ua/name/kind/devid/dev).
@@ -2551,9 +2499,11 @@ def _notifs_persist():
         pass
 
 
-def _push_notify(kind, title, body):
+def _push_notify(kind, title, body, cat=NOTIF_CAT_SECURITY):
     """入队一条推送通知,返回新 id;推送总开关(push_enabled)关闭时丢弃并返回 None。
-    kind: system / task_done / need_input / test / error 等。"""
+    kind: system / task_done / need_input / test / error 等。
+    cat: official=官方消息(公告/客服) / security=本机安全动态(设备连入/配对/踢出/黑名单)。
+    App/PC 通知中心按 cat 分渠道展示;缺省 security(闸机通知绝大多数是本机安全事件)。"""
     global _notifs_seq
     try:
         st = gate_state()
@@ -2567,6 +2517,7 @@ def _push_notify(kind, title, body):
             _notifs_seq += 1
             row = {"id": _notifs_seq, "t": int(time.time()),
                    "kind": str(kind or "system")[:20],
+                   "cat": cat if cat in (NOTIF_CAT_OFFICIAL, NOTIF_CAT_SECURITY) else NOTIF_CAT_SECURITY,
                    "title": title, "body": body}
             _notifs.append(row)
             del _notifs[:-PUSH_NOTIFS_MAX]
@@ -2576,11 +2527,40 @@ def _push_notify(kind, title, body):
         return None
 
 
-def _append_event(typ, msg):
+# ---- 事件日志分类 + 降噪 ----
+# 高频事件分钟级限速(devsig:宽容期无签名请求,浏览器/爬虫/反代探活都可能刷):
+# 同 typ 在窗口内只记首条 + 一条汇总结,日志不再被单一种类冲屏。key=(typ, ip)。
+_EVENT_THROTTLE = {}
+_EVENT_THROTTLE_LOCK = threading.Lock()
+EVENT_THROTTLE = {"devsig": 60.0}
+EVENT_THROTTLE_SUMMARY = 10  # 窗口内汇总条数阈值(达到才补一条「另有 N 条」)
+
+
+def _append_event(typ, msg, cat=None):
     """事件日志(环形,最多 _EVENTS_MAX 条):验证/踢出/开关等,插件读走展示。
-    开启 push_system 时,同步把可读系统事件推送到已配对的手机 App。
+    2026-11-16:行内新增 cat 分类(EVENT_CATS 映射,缺省 other),日志页签按类分屏;
+    devsig 类高频事件按 EVENT_THROTTLE[typ] 秒限速,窗口内多余条数记入汇总行。
+    开启 push_system 时,同步把可读系统事件推送到已配对的手机 App + 本机 win_push
+    (两者都轮询 push-poll,一条通知双端弹出);安全事件 cat=security。
     读文件→追加→写文件用 _events_lock 串行化:并发调用(请求线程+housekeeping)
     会互相吞事件;写盘用原子替换,读方(_read_events/插件)见不到半截文件。"""
+    now = time.time()
+    # 限速判定在锁外(独立锁,不与文件锁嵌套);只影响落日志,不影响推送标题映射
+    thr = EVENT_THROTTLE.get(typ)
+    if thr:
+        key = (typ,)  # 预留:当前只有 devsig 用 typ 级限速;若需按 IP 细分再扩 key
+        with _EVENT_THROTTLE_LOCK:
+            last = _EVENT_THROTTLE.get(key)
+            if last is not None and now - last[0] < thr:
+                last[1] += 1
+                n = last[1]
+                if n == EVENT_THROTTLE_SUMMARY:
+                    _EVENT_THROTTLE[key] = [last[0], 0]
+                    summary = "%s(另有 %d 条同类,已合并)" % (msg[:150], n)
+                    _append_event(typ + "_sum", summary,
+                                  cat=cat or EVENT_CATS.get(typ, "other"))
+                return
+            _EVENT_THROTTLE[key] = [now, 0]
     try:
         with _events_lock:
             rows = []
@@ -2590,28 +2570,108 @@ def _append_event(typ, msg):
                 rows = []
             if not isinstance(rows, list):
                 rows = []
-            rows.append({"t": int(time.time()), "typ": typ, "msg": msg[:200]})
+            if cat is None:
+                cat = EVENT_CATS.get(typ, "other")
+            rows.append({"t": int(now), "typ": typ, "cat": str(cat)[:20], "msg": msg[:200]})
             del rows[:-_EVENTS_MAX]
             _atomic_json_write(EVENTS_FILE, rows)
     except Exception:
         pass
-    # 系统安全事件 → 手机推送(push_enabled + push_system 双重控制;_push_notify 再查一次总开关)
+    # 系统安全事件 → 手机推送 + 本机通知(push_enabled + push_system 双重控制;_push_notify 再查一次总开关)
     try:
         st = gate_state()
         if st.get("push_system"):
             title = SYSTEM_EVENT_TITLES.get(typ)
             if title:
-                _push_notify("system", title, msg)
+                _push_notify("system", title, msg, cat=NOTIF_CAT_SECURITY)
     except Exception:
         pass
 
 
-def _read_events():
+def _read_events(cat=None):
+    """读事件日志。cat=None 返回全部;否则只返回该分类(unknown/other 归并到 other)。"""
     try:
         rows = json.loads(EVENTS_FILE.read_text(encoding="utf-8")) or []
-        return rows if isinstance(rows, list) else []
+        rows = rows if isinstance(rows, list) else []
     except Exception:
         return []
+    if not cat:
+        return rows
+    want = str(cat)[:20]
+    if want == "other":
+        return [r for r in rows if EVENT_CATS.get(str(r.get("typ", "")), "other") == "other"]
+    return [r for r in rows if str(r.get("cat") or EVENT_CATS.get(str(r.get("typ", "")), "other")) == want]
+
+
+# ---- 新设备 / 新 IP / 配对成功 通知(2026-11-16) ----
+# 需求:「有其他设备或新 IP 登录网页端时,App 和电脑都发通知提醒;配对成功同理;
+# 不是本人的话可以从日志/通知里直接踢掉」。实现 = 会话登记处(_gate_ensure_device /
+# _gate_verify / _gate_long_pair_claim)调 _notify_session()。
+# - _notify_session:一条通知同时进 App 与 Windows 通知中心(两端口径:App 15s 轮询
+#   push-poll、win_push 驻留进程同端点轮询,kind=system 走同一队列)。
+# - 记录键 _notify_seen:进程内存 set,防重启风暴;去重窗口 _NOTIFY_DEDUP_SEC
+#   (同类事件 10 分钟不重复打扰);上限 4096 防膨胀。
+# - 解除配对/被踢设备重新配对属管理员当面操作,豁免通知(kb/06 第 35 条语义)。
+_NOTIFY_SEEN_ITEMS = {}  # fp -> [ts];_notifs_lock 保护,10 分钟窗口去重
+_NOTIFY_DEDUP_SEC = 600.0
+
+
+def _notify_fingerprint(text):
+    return hashlib.sha1(text.encode("utf-8")).hexdigest()
+
+
+def _notify_once(kind, title, body, cat=NOTIF_CAT_SECURITY, seen_key=None):
+    """去重通知:同一 seen_key 在 _NOTIFY_DEDUP_SEC 内只发一次(进程内)。"""
+    if seen_key:
+        fp = _notify_fingerprint(seen_key)
+        now = time.time()
+        stale = []
+        with _notifs_lock:
+            for k, ts in list(_NOTIFY_SEEN_ITEMS.items()):
+                if now - ts[0] > _NOTIFY_DEDUP_SEC:
+                    stale.append(k)
+            for k in stale:
+                _NOTIFY_SEEN_ITEMS.pop(k, None)
+            if fp in _NOTIFY_SEEN_ITEMS and now - _NOTIFY_SEEN_ITEMS[fp][0] < _NOTIFY_DEDUP_SEC:
+                return False
+            _NOTIFY_SEEN_ITEMS[fp] = [now]
+            if len(_NOTIFY_SEEN_ITEMS) > 4096:
+                _NOTIFY_SEEN_ITEMS.clear()
+                _NOTIFY_SEEN_ITEMS[fp] = [now]
+    _push_notify(kind, title, body, cat=cat)
+    return True
+
+
+def _notify_session(dev, name, kind, ip, ua, trigger, via):
+    """设备会话登记 → 安全通知(新设备/新 IP/重新上线)。
+    trigger: new_device(首次出现) / new_ip(IP 变化) / again(已知设备重新上线,静默)。
+    via: '2fa'(网页验证) / 'pair'(配对链接/长期配对) / 'auto'(2FA 关闭自动登记)。
+    通知正文含设备名/IP/归属地/来源,App 与 Windows 通知中心双端弹出;
+    同 (dev,trigger,ip) 10 分钟内不重复打扰。"""
+    try:
+        label = {"new_device": "新设备登录", "new_ip": "已知设备更换 IP"}.get(trigger)
+        if not label:
+            return
+        loc = _ip_loc_display(ip)
+        kind_label = {"web": "网页", "app": "App"}.get(kind, kind or "?")
+        via_label = {"2fa": "2FA 验证", "pair": "配对授权", "auto": "自动登记"}.get(via, via or "?")
+        body = "%s · %s · IP %s%s · %s" % (
+            name or "未知设备", kind_label, ip,
+            ("(" + loc + ")" if loc and loc != "内网" else ""),
+            via_label)
+        _notify_once("system", "%s: %s" % (label, name or kind_label), body,
+                     cat=NOTIF_CAT_SECURITY, seen_key="%s|%s|%s|%s" % (dev, trigger, ip, kind))
+        _append_event("verify", "%s: %s IP=%s UA=%s via=%s" % (label, name or "?", ip, (ua or "")[:40], via))
+    except Exception:
+        pass
+
+
+def _ip_loc_display(ip):
+    """IP 归属地(给通知/日志用)。内网或查询失败返回「内网」/空,不抛异常。"""
+    try:
+        return ip_location(ip)
+    except Exception:
+        return ""
 
 
 # ---- IP 归属地(设备列表显示) ----
@@ -3680,9 +3740,12 @@ class GateHandler(BaseHTTPRequestHandler):
         # 来源标记:App(WebView UA 带 DshRemote/) vs 网页(浏览器登录,含官网扫码)。
         # 面板用它区分「App 配对」和「网页登录」,渲染不同的来源徽标。
         kind = "app" if self._is_app_ua() else "web"
+        prev_ip = ""
+        known = False
         with _gate_lock:
             if dev and dev in _sessions:
                 # 有效会话在册,复用(更新 IP/timestamp);旧会话缺 kind 时补上
+                prev_ip = _sessions[dev].get("ip", "")
                 _sessions[dev]["ts"] = now
                 _sessions[dev]["ip"] = ip
                 if not _sessions[dev].get("kind"):
@@ -3697,9 +3760,24 @@ class GateHandler(BaseHTTPRequestHandler):
             # 复用 dev:设备重新扫码后仍是同一台设备(不在册时重新登记)
             _sessions[dev] = {"ip": ip, "ua": ua,
                               "name": name, "kind": kind,
-                              "since": now, "ts": now}
+                              "since": now, "ts": now,
+                              "loc": ip_location(ip)}
+        known = bool(_device_known(_device_key(dev)))
+        if not known:
+            with _devices_lock:
+                _d = _devices.get(_device_key(dev))
+                prev_ip = (_d or {}).get("ip", "")
         _device_ensure(dev, _sessions[dev])
         _dump_sessions()
+        # 2026-11-16 新设备/新 IP 通知:档案里没见过 → 新设备;见过但 IP 变了 → 新 IP。
+        # known 且同 IP 的重新登记属正常会话恢复,静默。通知失败绝不影响放行。
+        try:
+            if not known:
+                _notify_session(dev, name, kind, ip, ua, "new_device", "auto")
+            elif prev_ip and prev_ip != ip:
+                _notify_session(dev, name, kind, ip, ua, "new_ip", "auto")
+        except Exception:
+            pass
         cookie = gate_mint_cookie(secret, dev, ip, ua)
         header = "%s=%s; Max-Age=%d; Path=/; HttpOnly; SameSite=Lax; Secure" % (
             GATE_COOKIE, cookie, _gate_max_age())
@@ -4830,11 +4908,20 @@ color:#fff;text-decoration:none;font-size:14px}
         # 任何一步失败都不允许影响下发的 302+Cookie(否则手机端就是
         # "配对已失效或未授权",而本地日志一片空白,极难排查)。
         try:
+            known = bool(_device_known(_device_key({"dev": dev, "devid": devid_q})))
             _device_ensure(_device_key({"dev": dev, "devid": devid_q}), _sessions[dev])
             _dump_sessions()
             _server_register_device(
                 dev, name + (" devid=" + devid_q if devid_q else ""), ip, ua)
             _append_event("pair", "手机 App 长期配对成功 IP=%s UA=%s" % (ip, ua[:40]))
+            # 配对成功通知(2026-11-16):这是把「谁能控制这台电脑」握在手里的事件,
+            # 必须让机主第一时间知道;重新配对(管理员当面操作)不重复打扰。
+            if not known:
+                _notify_once("system", "配对成功: %s" % name,
+                             "设备 %s 已通过配对授权连接本机 · IP %s · 有异常请到「日志」页签踢出"
+                             % (name, ip),
+                             cat=NOTIF_CAT_SECURITY,
+                             seen_key="pair|%s|%s" % (dev, ip))
         except BaseException as e:
             print("[gate] 长期配对登记步骤异常(不影响下发 Cookie): %r" % (e,), flush=True)
             traceback.print_exc()
@@ -4966,11 +5053,17 @@ color:#fff;text-decoration:none;font-size:14px}
                 self._send_json(200, {"ok": False, "reason": "no_session"})
             return
         if path.endswith("/events"):
-            # 事件日志:必须已通过 2FA(否则会公开泄漏设备 IP)
+            # 事件日志:必须已通过 2FA(否则会公开泄漏设备 IP)。
+            # 2026-11-16 支持 ?cat= 分类过滤(日志页签分屏用);非法 cat 原样按 other 归并。
             if not self._gate_ok():
                 self._send_json(401, {"ok": False, "error": "未通过验证"})
                 return
-            self._send_json(200, {"ok": True, "events": _read_events()})
+            from urllib.parse import urlsplit, parse_qs
+            try:
+                cat = (parse_qs(urlsplit(self.path).query).get("cat") or [""])[0][:20]
+            except Exception:
+                cat = ""
+            self._send_json(200, {"ok": True, "events": _read_events(cat or None)})
             return
         if path.endswith("/sysinfo"):
             # 主机遥测:CPU/内存/磁盘。需已通过 2FA(硬件信息不公开)。
@@ -5544,6 +5637,8 @@ color:#fff;text-decoration:none;font-size:14px}
         ua = self.headers.get("User-Agent", "")[:120]
         name = _friendly_device_name(ua)
         kind = "app" if self._is_app_ua() else "web"
+        # 新设备/新 IP 通知(2026-11-16):known 判定要在 _device_ensure 之前取
+        known = bool(_device_known(_device_key(dev)))
         with _gate_lock:
             _sessions[dev] = {"ip": ip, "ua": ua,
                               "name": name, "kind": kind,
@@ -5551,6 +5646,18 @@ color:#fff;text-decoration:none;font-size:14px}
         _device_ensure(dev, _sessions[dev])
         _dump_sessions()
         _append_event("verify", "设备验证通过 IP=%s UA=%s" % (ip, ua[:40]))
+        if not known:
+            _notify_session(dev, name, kind, ip, ua, "new_device", "2fa")
+        else:
+            # 已知设备重验证:IP 变了才提醒(同一 IP 重验证属正常会话刷新,静默)。
+            # 注意 _device_ensure 已把档案 ip 刷成本次 ip,这里读到的是「上次」值;
+            # 同一 IP 重验证时 prev_ip == ip,不发通知。
+            prev_ip = ""
+            with _devices_lock:
+                _d = _devices.get(_device_key(dev))
+                prev_ip = (_d or {}).get("ip", "")
+            if prev_ip and prev_ip != ip:
+                _notify_session(dev, name, kind, ip, ua, "new_ip", "2fa")
         # 向服务端注册表登记设备(使 nginx 三端验证可通过;SSH 失败不阻塞)
         try:
             _server_register_device(dev, name, ip, ua)
@@ -6106,9 +6213,44 @@ _SYSINFO_PS = (
     "$cpu=0; if($cpus.Count){ $cpu=[math]::Round((($cpus | Measure-Object -Average).Average),1) };"
     "$disks=@(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' | ForEach-Object {"
     " [ordered]@{ drive=$_.DeviceID; size=[int64]$_.Size; free=[int64]$_.FreeSpace } });"
+    # 物理盘活动(2026-11-16):任务管理器「活动时间」口径=100-%IdleTime,不是容量;
+    # 首样本 PercentIdleTime 可能为 null → active 置 null,前端显示待采样
+    "$pdisks=@();"
+    "try{ $pdisks=@(Get-CimInstance Win32_PerfFormattedData_PerfDisk_PhysicalDisk |"
+    " Where-Object { $_.Name -ne '_Total' } | ForEach-Object {"
+    " [ordered]@{ name=$_.Name;"
+    " active=$(if ($null -ne $_.PercentIdleTime) { [math]::Max(0,[math]::Min(100,[math]::Round(100-[double]$_.PercentIdleTime,1))) } else { $null });"
+    " read=[int64]$_.DiskReadBytesPersec; write=[int64]$_.DiskWriteBytesPersec } }) }catch{};"
+    # 网卡(2026-11-16):Formatted 类出速率,Raw 类的 Persec 计数器原始值=开机以来累计字节;
+    # 过滤环回/隧道过渡口与断链网卡(CurrentBandwidth=0)
+    "$nics=@();"
+    "try{ $fmt=@{};"
+    "Get-CimInstance Win32_PerfFormattedData_Tcpip_NetworkInterface | ForEach-Object {"
+    " $fmt[$_.Name]=[pscustomobject]@{ rx=[double]$_.BytesReceivedPersec; tx=[double]$_.BytesSentPersec;"
+    " bw=[int64]$_.CurrentBandwidth } };"
+    "$nics=@(Get-CimInstance Win32_PerfRawData_Tcpip_NetworkInterface | Where-Object {"
+    " $_.Name -notmatch 'Loopback|isatap|Teredo' -and $fmt.ContainsKey($_.Name)"
+    " -and [int64]$fmt[$_.Name].bw -gt 0 } | ForEach-Object {"
+    " [ordered]@{ name=$_.Name; rx=[double]$fmt[$_.Name].rx; tx=[double]$fmt[$_.Name].tx;"
+    " totalRx=[uint64]$_.BytesReceivedPersec; totalTx=[uint64]$_.BytesSentPersec } }) }catch{};"
+    # GPU(2026-11-16):各引擎类型利用率求和取最大(≈任务管理器 GPU%);专用显存=LocalUsage 求和。
+    # 旧系统/服务器没有这两个 CIM 类 → 保持 null,前端显示「—」
+    "$gpu=$null; $gpumem=$null;"
+    "try{ $eng=@(Get-CimInstance Win32_PerfFormattedData_GPUPerformanceCounters_GPUEngine);"
+    "if($eng.Count){"
+    "$gpu=($eng | ForEach-Object { $t='';"
+    "if ($_.Name -match 'engtype_([A-Za-z0-9_]+)'){ $t=$Matches[1] }"
+    " [pscustomobject]@{ t=$t; u=[double]$_.UtilizationPercentage } } | Group-Object t |"
+    "ForEach-Object { ($_.Group | Measure-Object u -Sum).Sum } | Measure-Object -Maximum).Maximum;"
+    "if($gpu -ne $null -and $gpu -gt 100){ $gpu=100 } } }catch{};"
+    "try{ $gm=@(Get-CimInstance Win32_PerfFormattedData_GPUPerformanceCounters_GPUProcessMemory"
+    " | ForEach-Object { [int64]$_.LocalUsage });"
+    "if($gm.Count){ $gpumem=($gm | Measure-Object -Sum).Sum } }catch{};"
     "[ordered]@{ ok=$true; cpu=$cpu; memTotal=[int64]$os.TotalVisibleMemorySize;"
     " memFree=[int64]$os.FreePhysicalMemory; boot=$os.LastBootUpTime.ToString('o');"
-    " disks=$disks } | ConvertTo-Json -Compress -Depth 3"
+    " os=$os.Caption; procs=[uint32]$os.NumberOfProcesses;"
+    " disks=$disks; pdisks=$pdisks; nics=$nics; gpu=$gpu; gpuMem=$gpumem }"
+    " | ConvertTo-Json -Compress -Depth 4"
 )
 
 
@@ -6130,6 +6272,38 @@ def _collect_sysinfo(timeout=15.0):
         return {"ok": False, "error": "采集异常: %s" % e}
 
 
+# 闸机进程启动时刻(≈加载本模块的时间):link.gateUptime 用(fwd 子进程各自计时)
+_SYS_PROC_START = time.time()
+
+
+def _gate_link_info(now):
+    """闸机/链路自况,并入 /sysinfo 响应的 link 字段(2026-11-16,App 状态面板用)。
+    只读 state 与内存会话表,不发网络/子进程请求;任何失败静默返回空表,不拖垮遥测端点。"""
+    info = {}
+    try:
+        st = read_state()
+        info = {
+            "remotePort": int(st.get("remote_port") or 0),
+            "frpcAlive": bool(st.get("frpc_pid") and _pid_alive(int(st["frpc_pid"]))),
+            "tunnelOk": bool(st.get("tunnel_ok")),
+            "tunnelError": str(st.get("tunnel_error") or "")[:160],
+            "dshOk": bool(st.get("dsh_port")),
+            "gateUptime": max(0, int(now - _SYS_PROC_START)),
+        }
+        active = 0
+        with _gate_lock:
+            for dev in _sessions.values():
+                try:
+                    if now - float(dev.get("ts") or 0) <= 10:
+                        active += 1
+                except (TypeError, ValueError):
+                    continue
+        info["activeSessions"] = active
+    except Exception:
+        pass
+    return info
+
+
 def _gate_sysinfo_data():
     """带 10s 缓存的遥测数据;持锁采样防并发重复起 powershell。"""
     now = time.time()
@@ -6142,6 +6316,8 @@ def _gate_sysinfo_data():
             return {"ok": False, "error": "上次采集失败,稍后重试"}
         d = _collect_sysinfo()
         if d.get("ok"):
+            # 链路/闸机自况并入同一响应(失败静默,不影响硬件遥测部分)
+            d["link"] = _gate_link_info(now)
             _sysinfo_cache["ts"] = time.time()
             _sysinfo_cache["data"] = d
         else:
