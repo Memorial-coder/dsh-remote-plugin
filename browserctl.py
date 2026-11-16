@@ -2253,7 +2253,12 @@ _devices_lock = threading.Lock()
 DEVICE_IDLE_SECONDS = 600
 
 def _device_key(info):
-    """稳定设备标识:App 用客户端持久 devid,浏览器用 dev(cookie 复用后稳定)."""
+    """稳定设备标识:App 用客户端持久 devid,浏览器用 dev(cookie 复用后稳定);
+    兼容旧调用方传字符串/None——判空与登记路径曾因直传 str 炸 AttributeError 500。"""
+    if isinstance(info, str):
+        return info
+    if not isinstance(info, dict):
+        return ""
     return info.get("devid") or info.get("dev") or ""
 
 
@@ -2342,6 +2347,21 @@ _SIG_EXEMPT = ("/dev-bind", "/dev-boot", "/pair/claim", "/bootstrap")
 # (shouldInterceptRequest 的响应不进缓存,曾致 13MB 插件包每次启动重下)。
 _STATIC_HASHED_NAME = re.compile(
     r"-[A-Za-z0-9_-]{6,}\.(?:js|mjs|css|map|json|woff2?|ttf|otf|svg|png|webp|jpe?g|gif|avif)$")
+
+
+def _static_cacheable_path(path):
+    """GET 且 URL 即内容指纹的静态资源:① /assets/<n>-<hash>.<ext>;
+    ② /plugins 组合包(query 带 rev= 指纹)。动态 API/HTML 一律不匹配。"""
+    if not path:
+        return False
+    p = path.split("?", 1)[0]
+    if p.startswith("/assets/") and _STATIC_HASHED_NAME.search(p):
+        return True
+    if p.rstrip("/") == "/plugins" and "rev=" in path:
+        return True
+    return False
+
+
 _sig_nonce_lock = threading.Lock()
 _sig_nonces = {}  # dev -> {nonce: 过期时刻}
 _sig_missing_last = [0.0]  # 宽容期缺签名事件节流(60s 一条,防刷屏)
