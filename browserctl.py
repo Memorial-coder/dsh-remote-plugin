@@ -6261,7 +6261,13 @@ color:#fff;text-decoration:none;font-size:14px}
                 b'<script>try{navigator.serviceWorker&&navigator.serviceWorker.getRegistrations()'
                 b'.then(function(rs){rs.forEach(function(r){r.unregister()})}).catch(function(){})}catch(e){}</script>'
                 if is_app else
-                b'<script>try{navigator.serviceWorker&&navigator.serviceWorker.register("sw.js")}catch(e){}</script>'
+                # 浏览器 PWA:注册 SW + v1.2.2 绑定失效自愈——SW 广播 rebind(被踢撤销
+                # 密钥后连续 401)时,页面清引导页的 sessionStorage 标记并跳 dev-boot 重装,
+                # 网页版用户全程无感,无需重扫码(dev-boot 靠 bc-gate cookie 走通)。
+                b'<script>try{navigator.serviceWorker.addEventListener("message",function(e){'
+                b'if(e.data&&e.data.type==="rebind"){try{sessionStorage.removeItem("bc-devkey-ok")}catch(e2){}'
+                b'location.href="browserctl-gate/dev-boot"}}});'
+                b'navigator.serviceWorker.register("sw.js")}catch(e){}</script>'
             )
             tags = (
                 b'<meta name="apple-mobile-web-app-capable" content="yes">'

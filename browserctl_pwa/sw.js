@@ -11,9 +11,12 @@
  *  - 豁免:/dev-bind /dev-boot(引导通道本身,其防护是 bc-gate 会话 cookie);
  *  - WebSocket 握手不经过 fetch handler,闸机侧对 Upgrade 请求豁免(靠 cookie 防护);
  *  - 仍不做任何 HTTP 缓存:面板 HTML/插件 API/闸机端点一律走网络。
+ * v1.2.2(2026-11-17, 绑定失效自愈):闸机踢下线会撤销设备密钥,本地旧凭证
+ *   会让签名永远 401。fetch 拦到 401(JSON ok:false)连续 3 次 → 清 IndexedDB
+ *   凭证 + 向页面广播 rebind → 页面清 sessionStorage 引导标记并跳 dev-boot 重装。
  * 更新方式:修改本文件任意内容,浏览器下次访问会自动比对并激活新 SW。
  */
-const SW_VERSION = '1.2.1'
+const SW_VERSION = '1.2.2'
 var KV = { dev: '', key: '', priv: null, privjwk: '', pub: '' }
 
 function idb() {
@@ -142,6 +145,38 @@ function withSig(req, method, p) {
   })
 }
 
+/* ---- v1.2.2 绑定失效自愈 ----
+ * 被踢撤销后闸机对旧凭证一律 401;计数连续 3 次即判定凭证失效:
+ * 清 IndexedDB(priv/privjwk/pub/dev/key)→ KV 复位 → postMessage 通知页面重走引导。 */
+var FAIL_KEY = 'sig_fail_streak'
+var FAIL_LIMIT = 3
+function failBump() {
+  return idbGet(FAIL_KEY).then(function (n) {
+    n = (n || 0) + 1
+    return idbPut(FAIL_KEY, n).then(function () { return n })
+  })
+}
+function healRevoke() {
+  return idbGet(FAIL_KEY).then(function (n) {
+    if ((n || 0) < FAIL_LIMIT) return false
+    return Promise.all([
+      idbPut(FAIL_KEY, 0), idbPut('priv', ''), idbPut('privjwk', ''),
+      idbPut('pub', ''), idbPut('dev', ''), idbPut('key', '')
+    ]).then(function () {
+      KV = { dev: '', key: '', priv: null, privjwk: '', pub: '' }
+      self.clients.matchAll({ includeUncontrolled: true }).then(function (cs) {
+        cs.forEach(function (c) { c.postMessage({ type: 'rebind' }) })
+      })
+      return true
+    })
+  })
+}
+function looksGate401(resp) {
+  if (resp.status !== 401) return false
+  var ct = (resp.headers.get('content-type') || '')
+  return ct.indexOf('json') >= 0 || ct.indexOf('html') >= 0
+}
+
 self.addEventListener('install', (event) => {
   self.skipWaiting()
 })
@@ -183,7 +218,18 @@ self.addEventListener('fetch', function (e) {
   var p = normPath(req.url)
   if (isExempt(p)) return // 引导通道透传
   e.respondWith(ensureCred().then(function (kv) {
-    return withSig(req, method, p)
+    return withSig(req, method, p).then(function (resp) {
+      if (looksGate401(resp)) {
+        // 克隆一份数 401(响应体留给页面);连到阈值就清凭证广播 rebind
+        try {
+          resp.clone().text().catch(function () {})
+          failBump().then(function (n) { if (n >= FAIL_LIMIT) return healRevoke() })
+        } catch (e2) {}
+      } else if (resp.ok) {
+        idbGet(FAIL_KEY).then(function (n) { if (n) idbPut(FAIL_KEY, 0) })
+      }
+      return resp
+    })
   }, function () {
     // 无凭证(宽容期/引导期):透传,由闸机引导页完成装机闭环
     return fetch(req)
