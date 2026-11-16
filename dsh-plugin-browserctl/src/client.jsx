@@ -2634,56 +2634,21 @@ function fmtAgoLong(ts) {
   return days + ' 天' + (remH ? ' ' + remH + ' 小时' : '') + '前'
 }
 
-/* ---------- 「iOS / 无 App 设备」引导链接卡片 ---------- */
-function fmtLinkExpiry(exp) {
-  const d = new Date(Number(exp) * 1000)
-  if (!exp || Number.isNaN(d.getTime())) return ''
-  const p = n => String(n).padStart(2, '0')
-  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
-}
-
-function IosGuideCard({ t, reloadToken }) {
-  const [open, setOpen] = useState(false) // 默认收起，让「连接」页签初始不溢出；头部常驻并显示生成状态
-  const [ttl, setTtl] = useState(86400)
-  const [uses, setUses] = useState(1) // 1=一次性(默认)；0=不限次数
-  const [data, setData] = useState(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
+/* ---------- 「iOS / 无 App 设备」网页绑定引导卡片 ----------
+   2026-11-17 起不再生成 PWA 引导链接:无 App 设备走「官网 + App 配对长期码」绑定。
+   闸机长期配对 claim 对浏览器同样生效(_gate_long_pair_claim:登记设备 + 30 天
+   bc-gate Cookie + 302 面板根),host 半 toUidUrl() 已把配对链接转成 uid 稳定形态,
+   扫码落地就是 /dsh-remote/p/<uid>/ 固定地址,端口变化不影响;官网入口可
+   「添加到主屏幕」当 App 用。引导链接仅剩桌面「打开面板」按钮与 CLI 在用。 */
+function IosGuideCard({ t }) {
+  const [open, setOpen] = useState(false) // 默认收起,让「连接」页签初始不溢出
   const [copied, setCopied] = useState(false)
-  const [bump, setBump] = useState(0)
-
-  useEffect(() => {
-    let alive = true
-    setLoading(true)
-    setError('')
-    fetch(API_P + '/browserctl/api/link?ttl=' + ttl + '&uses=' + uses, { cache: 'no-store' })
-      .then(async r => {
-        const j = await r.json().catch(() => ({}))
-        if (!alive) return
-        if (!r.ok || !j.url) {
-          setData(null)
-          setError(j.error || ('HTTP ' + r.status))
-          return
-        }
-        setData(j)
-      })
-      .catch(e => {
-        if (!alive) return
-        setData(null)
-        setError(String((e && e.message) || e))
-      })
-      .finally(() => { if (alive) setLoading(false) })
-    return () => { alive = false }
-  }, [ttl, uses, bump, reloadToken])
-
   useEffect(() => {
     if (!copied) return
     const id = setTimeout(() => setCopied(false), 1600)
     return () => clearTimeout(id)
   }, [copied])
-
-  const ok = !!(data && data.url)
-  const expText = ok ? fmtLinkExpiry(data.exp) : ''
+  const site = ABOUT_LINKS.website
   return (
     <div className="dshBrowserCtlCard" style={{ marginTop: 10 }}>
       <button
@@ -2695,86 +2660,25 @@ function IosGuideCard({ t, reloadToken }) {
         {Svg.iphone}
         <span>{t('linkTitle')}</span>
         <span className="dshBrowserCtlCardStat" style={{
-          color: ok ? 'var(--dsw-alias-state-success-primary,#34b371)' : 'var(--dsw-alias-label-tertiary,#8b8f98)',
-        }}>{ok ? t('linkReady') : (loading ? '…' : '')}</span>
+          color: 'var(--dsw-alias-label-tertiary,#8b8f98)',
+        }}>{t('linkWebTag')}</span>
         <span className="dshBrowserCtlCardArrow" aria-hidden="true">
           <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
             <path d="M4 2.5 7.5 6 4 9.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </span>
       </button>
-      <div className="dshBrowserCtlCardBody dshBrowserCtlCardBodyTall" data-open={open}>
+      <div className="dshBrowserCtlCardBody" data-open={open}>
         <p className="dshBrowserCtlCardDesc">{t('linkSubtitle')}</p>
-        {ok && data.svg && (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, marginTop: 10 }}>
-            <div className="dshBrowserCtlQrBox">
-              <img
-                alt={t('linkQrAlt')}
-                style={{ width: 200, height: 200 }}
-                src={'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(data.svg)}
-              />
-            </div>
-            <p className="dshBrowserCtlCardDesc" style={{ margin: 0, textAlign: 'center' }}>{t('linkScanHint')}</p>
-          </div>
-        )}
-        <div className="dshBrowserCtlUrlRow" style={{ marginTop: 8, gap: 8, flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 12, color: 'var(--dsw-alias-label-tertiary,#8b8f98)', whiteSpace: 'nowrap' }}>{t('linkTtlLabel')}</span>
-          <select
-            value={ttl}
-            disabled={loading}
-            onChange={e => setTtl(parseInt(e.target.value, 10) || 86400)}
-            style={{
-              fontSize: 12, padding: '2px 4px', borderRadius: 6,
-              border: '1px solid rgba(128,128,128,.35)', background: 'transparent',
-              color: 'inherit', flex: 'none',
-            }}
-          >
-            <option value={3600}>{t('linkTtl1h')}</option>
-            <option value={86400}>{t('linkTtl24h')}</option>
-            <option value={604800}>{t('linkTtl7d')}</option>
-          </select>
-          <span style={{ fontSize: 12, color: 'var(--dsw-alias-label-tertiary,#8b8f98)', whiteSpace: 'nowrap' }}>{t('linkUsesLabel')}</span>
-          <select
-            value={uses}
-            disabled={loading}
-            onChange={e => setUses(parseInt(e.target.value, 10) || 0)}
-            style={{
-              fontSize: 12, padding: '2px 4px', borderRadius: 6,
-              border: '1px solid rgba(128,128,128,.35)', background: 'transparent',
-              color: 'inherit', flex: 'none',
-            }}
-          >
-            <option value={1}>{t('linkUses1')}</option>
-            <option value={3}>{t('linkUses3')}</option>
-            <option value={5}>{t('linkUses5')}</option>
-            <option value={0}>{t('linkUsesUnlimited')}</option>
-          </select>
-          <Button variant="secondary" size="sm" disabled={loading} onClick={() => setBump(x => x + 1)}>
-            {loading ? t('linkGenerating') : (ok ? t('linkRegenerate') : t('linkGenerate'))}
+        <div className="dshBrowserCtlUrlRow" style={{ marginTop: 8, gap: 8 }}>
+          <div className="dshBrowserCtlUrl" title={site}>{site}</div>
+          <Button variant="ghost" size="sm" onClick={() => {
+            navigator.clipboard?.writeText(site).then(() => setCopied(true)).catch(() => {})
+          }}>{copied ? t('linkCopied') : t('linkCopy')}</Button>
+          <Button variant="secondary" size="sm" onClick={() => window.open(site, '_blank', 'noopener')}>
+            {t('linkOpenSite')}
           </Button>
         </div>
-        {ok && (
-          <>
-            <div className="dshBrowserCtlUrlRow" style={{ marginTop: 6 }}>
-              <div className="dshBrowserCtlUrl" title={data.url}>{data.url}</div>
-              <Button variant="ghost" size="sm" onClick={() => {
-                navigator.clipboard?.writeText(data.url).then(() => setCopied(true)).catch(() => {})
-              }}>{copied ? t('linkCopied') : t('linkCopy')}</Button>
-            </div>
-            {expText && (
-              <p className="dshBrowserCtlCardDesc" style={{ marginTop: 4 }}>
-                {t('linkExpires').replace('{t}', expText)}
-                {' · '}
-                {data.uses ? t('linkUsesSuffix').replace('{n}', String(data.uses)) : t('linkUsesUnlimited')}
-              </p>
-            )}
-          </>
-        )}
-        {error && (
-          <p className="dshBrowserCtlCardDesc" style={{ marginTop: 4, color: 'var(--dsw-alias-state-error-primary,#e5655c)' }}>
-            {error}
-          </p>
-        )}
         <p className="dshBrowserCtlCardDesc" style={{ marginTop: 10, fontWeight: 500, color: 'var(--dsw-alias-label-secondary,#a6aab2)' }}>{t('linkStepsTitle')}</p>
         <ol style={{ margin: '4px 0 0', paddingLeft: 18, fontSize: 11.5, lineHeight: '18px', color: 'var(--dsw-alias-label-tertiary,#8b8f98)' }}>
           <li>{t('linkStep1')}</li>
@@ -4768,7 +4672,7 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
                   <Button variant="ghost" size="sm" disabled={gating} onClick={refresh}>{t('pairSwap')}</Button>
                 </div>
               )}
-              <IosGuideCard t={t} reloadToken={reloadToken} />
+              <IosGuideCard t={t} />
               {elevNeed && canElevate && (
                 <div style={{
                   display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
@@ -5051,32 +4955,17 @@ export function apply(ctx) {
       pairUsesTimes: '次',
       pairSwap: '换一个码',
       linkTitle: 'iOS / 无 App 设备',
-      linkSubtitle: '给没有 App 的设备(iPhone / iPad)生成一条长期引导链接:打开一次即免验证 30 天,再「添加到主屏幕」当 App 用。',
-      linkTtlLabel: '链接有效期',
-      linkTtl1h: '1 小时',
-      linkTtl24h: '24 小时',
-      linkTtl7d: '7 天',
-      linkGenerate: '生成引导链接',
-      linkGenerating: '正在生成…',
-      linkRegenerate: '重新生成',
+      linkWebTag: '网页绑定',
+      linkSubtitle: '没有 App 的设备(iPhone / iPad)用「长期配对码」绑定网页版:扫一次码登记设备,30 天免验证,再「添加到主屏幕」当 App 用,不再需要 PWA 引导链接。',
       linkCopy: '复制链接',
       linkCopied: '已复制',
-      linkReady: '链接已生成',
-      linkQrAlt: '引导链接二维码',
-      linkScanHint: '用 iPhone 相机直接扫这个码即可打开(也可复制下方链接)。',
-      linkExpires: '有效期至 {t}',
-      linkUsesLabel: '可用次数',
-      linkUses1: '1 次(一次性)',
-      linkUses3: '3 次',
-      linkUses5: '5 次',
-      linkUsesUnlimited: '不限次数',
-      linkUsesSuffix: '可用 {n} 次',
-      linkStepsTitle: 'iPhone 操作步骤',
-      linkStep1: '用 Safari 打开这条链接并完成一次验证,进入面板(地址栏应以 /p/<端口>/ 或 /dsh-remote/p/… 开头;不要用微信内置浏览器,不要开无痕模式)',
-      linkStep2: '在面板页面上点 Safari 底部「分享」→「添加到主屏幕」(不要在引导链接页上加:这条链接是一次性的,用完即失效)',
-      linkStep3: '从主屏幕图标打开:这是独立窗口,Cookie 与 Safari 互不相通,需要再完成一次动态码验证',
-      linkStep4: '之后点主屏图标 30 天内免验证;Safari 与主屏 App 各自独立,互不影响',
-      linkNote: '链接是明文,别发公开群;介意就把有效期调短,用完后可「重新生成」。',
+      linkOpenSite: '打开官网',
+      linkStepsTitle: '绑定步骤',
+      linkStep1: '手机浏览器打开上面的官网地址(可登录账号看设备与时长;这个入口长期不变,端口怎么变都不受影响)',
+      linkStep2: '电脑端切到本面板的「App 配对」页签,出示长期配对码(扫完会自动换新码)',
+      linkStep3: '用 iPhone 相机扫这个码(别用微信扫):浏览器打开即自动登记设备并绑定,30 天免验证直达面板',
+      linkStep4: '在面板页面点浏览器「分享 → 添加到主屏幕」,把入口永久保存;免验证期过后再扫一次码即可恢复',
+      linkNote: '扫码绑定的设备会出现在「App 配对」页签「已配对的手机」列表,可随时解除;配对码别截图发给别人。',
       statusLoading: '正在生成二维码…',
       statusReady: '隧道就绪,扫码即可打开面板',
       statusTunnelStarting: '隧道正在建立,请稍候几秒后刷新二维码',
@@ -5335,32 +5224,17 @@ export function apply(ctx) {
       pairUsesTimes: 'uses',
       pairSwap: 'New code',
       linkTitle: 'iOS / No-App devices',
-      linkSubtitle: 'Generate a long-lived bootstrap link for devices without the app (iPhone / iPad): open it once to skip verification for 30 days, then "Add to Home Screen" to use it like an app.',
-      linkTtlLabel: 'Link validity',
-      linkTtl1h: '1 hour',
-      linkTtl24h: '24 hours',
-      linkTtl7d: '7 days',
-      linkGenerate: 'Generate link',
-      linkGenerating: 'Generating…',
-      linkRegenerate: 'Regenerate',
+      linkWebTag: 'Web pairing',
+      linkSubtitle: 'For devices without the app (iPhone / iPad): open the official site, then scan the long-term pairing code from the "App pairing" tab — one scan registers the device for 30 days of verification-free access; then "Add to Home Screen" to use it like an app. No PWA invite link needed.',
       linkCopy: 'Copy link',
       linkCopied: 'Copied',
-      linkReady: 'Link ready',
-      linkQrAlt: 'Bootstrap link QR code',
-      linkScanHint: 'Scan this code with the iPhone camera to open it (or copy the link below).',
-      linkExpires: 'Valid until {t}',
-      linkUsesLabel: 'Max uses',
-      linkUses1: '1 (single use)',
-      linkUses3: '3 times',
-      linkUses5: '5 times',
-      linkUsesUnlimited: 'Unlimited',
-      linkUsesSuffix: '{n} use(s)',
-      linkStepsTitle: 'iPhone steps',
-      linkStep1: 'Open the link in Safari and verify once to enter the panel (the address bar should start with /p/<port>/ or /dsh-remote/p/…; not WeChat in-app browser, not private mode)',
-      linkStep2: 'On the panel page, tap Share → "Add to Home Screen" (never on the invite page itself: that link is one-time and dies after first use)',
-      linkStep3: 'Open the home-screen icon: it is a standalone window with storage separate from Safari, so verify once more there',
-      linkStep4: 'Launching from the icon stays verification-free for 30 days; Safari and the home-screen app are independent',
-      linkNote: 'The link is plain text — don\'t post it publicly; shorten the validity if concerned, and regenerate after use.',
+      linkOpenSite: 'Open site',
+      linkStepsTitle: 'Binding steps',
+      linkStep1: 'Open the official site above in the phone browser (sign-in optional; this entry never changes, no matter how ports rotate)',
+      linkStep2: 'On the computer, switch to the "App pairing" tab and show the long-term pairing code (it rotates automatically after each scan)',
+      linkStep3: 'Scan it with the iPhone camera (not WeChat): the browser registers and binds the device, then opens the panel verification-free for 30 days',
+      linkStep4: 'On the panel page, tap Share → "Add to Home Screen" to keep the entry permanently; after the 30-day window, scan a fresh code to renew',
+      linkNote: 'Paired devices appear in the "App pairing" tab and can be unpaired anytime; never share the pairing code with others.',
       statusLoading: 'Generating QR code…',
       statusReady: 'Tunnel ready — scan to open the panel',
       statusTunnelStarting: 'Tunnel starting; refresh the QR in a few seconds',

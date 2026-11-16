@@ -32,7 +32,7 @@ var import_dsh_client_store = require("@deepseek-ai/dsh-client-store");
 var import_jsx_runtime = require("react/jsx-runtime");
 var NS = "browserctl";
 var STYLE_ID = "browserctl/styles";
-var VERSION = true ? "1.0.65" : "dev";
+var VERSION = true ? "1.0.66" : "dev";
 var ABOUT_LINKS = {
   website: "https://remote.ymzcc.com/dsh-remote/",
   github: "https://github.com/Memorial-coder/dsh-remote-plugin",
@@ -2580,52 +2580,15 @@ function fmtAgoLong(ts) {
   const remH = hrs % 24;
   return days + " \u5929" + (remH ? " " + remH + " \u5C0F\u65F6" : "") + "\u524D";
 }
-function fmtLinkExpiry(exp) {
-  const d = new Date(Number(exp) * 1e3);
-  if (!exp || Number.isNaN(d.getTime())) return "";
-  const p = (n) => String(n).padStart(2, "0");
-  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
-}
-function IosGuideCard({ t, reloadToken }) {
+function IosGuideCard({ t }) {
   const [open, setOpen] = (0, import_react.useState)(false);
-  const [ttl, setTtl] = (0, import_react.useState)(86400);
-  const [uses, setUses] = (0, import_react.useState)(1);
-  const [data, setData] = (0, import_react.useState)(null);
-  const [loading, setLoading] = (0, import_react.useState)(false);
-  const [error, setError] = (0, import_react.useState)("");
   const [copied, setCopied] = (0, import_react.useState)(false);
-  const [bump, setBump] = (0, import_react.useState)(0);
-  (0, import_react.useEffect)(() => {
-    let alive = true;
-    setLoading(true);
-    setError("");
-    fetch(API_P + "/browserctl/api/link?ttl=" + ttl + "&uses=" + uses, { cache: "no-store" }).then(async (r) => {
-      const j = await r.json().catch(() => ({}));
-      if (!alive) return;
-      if (!r.ok || !j.url) {
-        setData(null);
-        setError(j.error || "HTTP " + r.status);
-        return;
-      }
-      setData(j);
-    }).catch((e) => {
-      if (!alive) return;
-      setData(null);
-      setError(String(e && e.message || e));
-    }).finally(() => {
-      if (alive) setLoading(false);
-    });
-    return () => {
-      alive = false;
-    };
-  }, [ttl, uses, bump, reloadToken]);
   (0, import_react.useEffect)(() => {
     if (!copied) return;
     const id = setTimeout(() => setCopied(false), 1600);
     return () => clearTimeout(id);
   }, [copied]);
-  const ok = !!(data && data.url);
-  const expText = ok ? fmtLinkExpiry(data.exp) : "";
+  const site = ABOUT_LINKS.website;
   return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlCard", style: { marginTop: 10 }, children: [
     /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(
       "button",
@@ -2638,90 +2601,22 @@ function IosGuideCard({ t, reloadToken }) {
           Svg.iphone,
           /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: t("linkTitle") }),
           /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlCardStat", style: {
-            color: ok ? "var(--dsw-alias-state-success-primary,#34b371)" : "var(--dsw-alias-label-tertiary,#8b8f98)"
-          }, children: ok ? t("linkReady") : loading ? "\u2026" : "" }),
+            color: "var(--dsw-alias-label-tertiary,#8b8f98)"
+          }, children: t("linkWebTag") }),
           /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlCardArrow", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("svg", { width: "12", height: "12", viewBox: "0 0 12 12", fill: "none", children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("path", { d: "M4 2.5 7.5 6 4 9.5", stroke: "currentColor", strokeWidth: "1.4", strokeLinecap: "round", strokeLinejoin: "round" }) }) })
         ]
       }
     ),
-    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlCardBody dshBrowserCtlCardBodyTall", "data-open": open, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlCardBody", "data-open": open, children: [
       /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dshBrowserCtlCardDesc", children: t("linkSubtitle") }),
-      ok && data.svg && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { style: { display: "flex", flexDirection: "column", alignItems: "center", gap: 6, marginTop: 10 }, children: [
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlQrBox", children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-          "img",
-          {
-            alt: t("linkQrAlt"),
-            style: { width: 200, height: 200 },
-            src: "data:image/svg+xml;charset=utf-8," + encodeURIComponent(data.svg)
-          }
-        ) }),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dshBrowserCtlCardDesc", style: { margin: 0, textAlign: "center" }, children: t("linkScanHint") })
+      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlUrlRow", style: { marginTop: 8, gap: 8 }, children: [
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlUrl", title: site, children: site }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "ghost", size: "sm", onClick: () => {
+          navigator.clipboard?.writeText(site).then(() => setCopied(true)).catch(() => {
+          });
+        }, children: copied ? t("linkCopied") : t("linkCopy") }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "secondary", size: "sm", onClick: () => window.open(site, "_blank", "noopener"), children: t("linkOpenSite") })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlUrlRow", style: { marginTop: 8, gap: 8, flexWrap: "wrap" }, children: [
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: { fontSize: 12, color: "var(--dsw-alias-label-tertiary,#8b8f98)", whiteSpace: "nowrap" }, children: t("linkTtlLabel") }),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(
-          "select",
-          {
-            value: ttl,
-            disabled: loading,
-            onChange: (e) => setTtl(parseInt(e.target.value, 10) || 86400),
-            style: {
-              fontSize: 12,
-              padding: "2px 4px",
-              borderRadius: 6,
-              border: "1px solid rgba(128,128,128,.35)",
-              background: "transparent",
-              color: "inherit",
-              flex: "none"
-            },
-            children: [
-              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", { value: 3600, children: t("linkTtl1h") }),
-              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", { value: 86400, children: t("linkTtl24h") }),
-              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", { value: 604800, children: t("linkTtl7d") })
-            ]
-          }
-        ),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: { fontSize: 12, color: "var(--dsw-alias-label-tertiary,#8b8f98)", whiteSpace: "nowrap" }, children: t("linkUsesLabel") }),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(
-          "select",
-          {
-            value: uses,
-            disabled: loading,
-            onChange: (e) => setUses(parseInt(e.target.value, 10) || 0),
-            style: {
-              fontSize: 12,
-              padding: "2px 4px",
-              borderRadius: 6,
-              border: "1px solid rgba(128,128,128,.35)",
-              background: "transparent",
-              color: "inherit",
-              flex: "none"
-            },
-            children: [
-              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", { value: 1, children: t("linkUses1") }),
-              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", { value: 3, children: t("linkUses3") }),
-              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", { value: 5, children: t("linkUses5") }),
-              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", { value: 0, children: t("linkUsesUnlimited") })
-            ]
-          }
-        ),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "secondary", size: "sm", disabled: loading, onClick: () => setBump((x) => x + 1), children: loading ? t("linkGenerating") : ok ? t("linkRegenerate") : t("linkGenerate") })
-      ] }),
-      ok && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlUrlRow", style: { marginTop: 6 }, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlUrl", title: data.url, children: data.url }),
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "ghost", size: "sm", onClick: () => {
-            navigator.clipboard?.writeText(data.url).then(() => setCopied(true)).catch(() => {
-            });
-          }, children: copied ? t("linkCopied") : t("linkCopy") })
-        ] }),
-        expText && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", { className: "dshBrowserCtlCardDesc", style: { marginTop: 4 }, children: [
-          t("linkExpires").replace("{t}", expText),
-          " \xB7 ",
-          data.uses ? t("linkUsesSuffix").replace("{n}", String(data.uses)) : t("linkUsesUnlimited")
-        ] })
-      ] }),
-      error && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dshBrowserCtlCardDesc", style: { marginTop: 4, color: "var(--dsw-alias-state-error-primary,#e5655c)" }, children: error }),
       /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dshBrowserCtlCardDesc", style: { marginTop: 10, fontWeight: 500, color: "var(--dsw-alias-label-secondary,#a6aab2)" }, children: t("linkStepsTitle") }),
       /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("ol", { style: { margin: "4px 0 0", paddingLeft: 18, fontSize: 11.5, lineHeight: "18px", color: "var(--dsw-alias-label-tertiary,#8b8f98)" }, children: [
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)("li", { children: t("linkStep1") }),
@@ -4558,7 +4453,7 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
             ),
             /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "ghost", size: "sm", disabled: gating, onClick: refresh, children: t("pairSwap") })
           ] }),
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)(IosGuideCard, { t, reloadToken }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)(IosGuideCard, { t }),
           elevNeed && canElevate && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { style: {
             display: "flex",
             flexDirection: "column",
@@ -4815,32 +4710,17 @@ function apply(ctx) {
       pairUsesTimes: "\u6B21",
       pairSwap: "\u6362\u4E00\u4E2A\u7801",
       linkTitle: "iOS / \u65E0 App \u8BBE\u5907",
-      linkSubtitle: "\u7ED9\u6CA1\u6709 App \u7684\u8BBE\u5907(iPhone / iPad)\u751F\u6210\u4E00\u6761\u957F\u671F\u5F15\u5BFC\u94FE\u63A5:\u6253\u5F00\u4E00\u6B21\u5373\u514D\u9A8C\u8BC1 30 \u5929,\u518D\u300C\u6DFB\u52A0\u5230\u4E3B\u5C4F\u5E55\u300D\u5F53 App \u7528\u3002",
-      linkTtlLabel: "\u94FE\u63A5\u6709\u6548\u671F",
-      linkTtl1h: "1 \u5C0F\u65F6",
-      linkTtl24h: "24 \u5C0F\u65F6",
-      linkTtl7d: "7 \u5929",
-      linkGenerate: "\u751F\u6210\u5F15\u5BFC\u94FE\u63A5",
-      linkGenerating: "\u6B63\u5728\u751F\u6210\u2026",
-      linkRegenerate: "\u91CD\u65B0\u751F\u6210",
+      linkWebTag: "\u7F51\u9875\u7ED1\u5B9A",
+      linkSubtitle: "\u6CA1\u6709 App \u7684\u8BBE\u5907(iPhone / iPad)\u7528\u300C\u957F\u671F\u914D\u5BF9\u7801\u300D\u7ED1\u5B9A\u7F51\u9875\u7248:\u626B\u4E00\u6B21\u7801\u767B\u8BB0\u8BBE\u5907,30 \u5929\u514D\u9A8C\u8BC1,\u518D\u300C\u6DFB\u52A0\u5230\u4E3B\u5C4F\u5E55\u300D\u5F53 App \u7528,\u4E0D\u518D\u9700\u8981 PWA \u5F15\u5BFC\u94FE\u63A5\u3002",
       linkCopy: "\u590D\u5236\u94FE\u63A5",
       linkCopied: "\u5DF2\u590D\u5236",
-      linkReady: "\u94FE\u63A5\u5DF2\u751F\u6210",
-      linkQrAlt: "\u5F15\u5BFC\u94FE\u63A5\u4E8C\u7EF4\u7801",
-      linkScanHint: "\u7528 iPhone \u76F8\u673A\u76F4\u63A5\u626B\u8FD9\u4E2A\u7801\u5373\u53EF\u6253\u5F00(\u4E5F\u53EF\u590D\u5236\u4E0B\u65B9\u94FE\u63A5)\u3002",
-      linkExpires: "\u6709\u6548\u671F\u81F3 {t}",
-      linkUsesLabel: "\u53EF\u7528\u6B21\u6570",
-      linkUses1: "1 \u6B21(\u4E00\u6B21\u6027)",
-      linkUses3: "3 \u6B21",
-      linkUses5: "5 \u6B21",
-      linkUsesUnlimited: "\u4E0D\u9650\u6B21\u6570",
-      linkUsesSuffix: "\u53EF\u7528 {n} \u6B21",
-      linkStepsTitle: "iPhone \u64CD\u4F5C\u6B65\u9AA4",
-      linkStep1: "\u7528 Safari \u6253\u5F00\u8FD9\u6761\u94FE\u63A5\u5E76\u5B8C\u6210\u4E00\u6B21\u9A8C\u8BC1,\u8FDB\u5165\u9762\u677F(\u5730\u5740\u680F\u5E94\u4EE5 /p/<\u7AEF\u53E3>/ \u6216 /dsh-remote/p/\u2026 \u5F00\u5934;\u4E0D\u8981\u7528\u5FAE\u4FE1\u5185\u7F6E\u6D4F\u89C8\u5668,\u4E0D\u8981\u5F00\u65E0\u75D5\u6A21\u5F0F)",
-      linkStep2: "\u5728\u9762\u677F\u9875\u9762\u4E0A\u70B9 Safari \u5E95\u90E8\u300C\u5206\u4EAB\u300D\u2192\u300C\u6DFB\u52A0\u5230\u4E3B\u5C4F\u5E55\u300D(\u4E0D\u8981\u5728\u5F15\u5BFC\u94FE\u63A5\u9875\u4E0A\u52A0:\u8FD9\u6761\u94FE\u63A5\u662F\u4E00\u6B21\u6027\u7684,\u7528\u5B8C\u5373\u5931\u6548)",
-      linkStep3: "\u4ECE\u4E3B\u5C4F\u5E55\u56FE\u6807\u6253\u5F00:\u8FD9\u662F\u72EC\u7ACB\u7A97\u53E3,Cookie \u4E0E Safari \u4E92\u4E0D\u76F8\u901A,\u9700\u8981\u518D\u5B8C\u6210\u4E00\u6B21\u52A8\u6001\u7801\u9A8C\u8BC1",
-      linkStep4: "\u4E4B\u540E\u70B9\u4E3B\u5C4F\u56FE\u6807 30 \u5929\u5185\u514D\u9A8C\u8BC1;Safari \u4E0E\u4E3B\u5C4F App \u5404\u81EA\u72EC\u7ACB,\u4E92\u4E0D\u5F71\u54CD",
-      linkNote: "\u94FE\u63A5\u662F\u660E\u6587,\u522B\u53D1\u516C\u5F00\u7FA4;\u4ECB\u610F\u5C31\u628A\u6709\u6548\u671F\u8C03\u77ED,\u7528\u5B8C\u540E\u53EF\u300C\u91CD\u65B0\u751F\u6210\u300D\u3002",
+      linkOpenSite: "\u6253\u5F00\u5B98\u7F51",
+      linkStepsTitle: "\u7ED1\u5B9A\u6B65\u9AA4",
+      linkStep1: "\u624B\u673A\u6D4F\u89C8\u5668\u6253\u5F00\u4E0A\u9762\u7684\u5B98\u7F51\u5730\u5740(\u53EF\u767B\u5F55\u8D26\u53F7\u770B\u8BBE\u5907\u4E0E\u65F6\u957F;\u8FD9\u4E2A\u5165\u53E3\u957F\u671F\u4E0D\u53D8,\u7AEF\u53E3\u600E\u4E48\u53D8\u90FD\u4E0D\u53D7\u5F71\u54CD)",
+      linkStep2: "\u7535\u8111\u7AEF\u5207\u5230\u672C\u9762\u677F\u7684\u300CApp \u914D\u5BF9\u300D\u9875\u7B7E,\u51FA\u793A\u957F\u671F\u914D\u5BF9\u7801(\u626B\u5B8C\u4F1A\u81EA\u52A8\u6362\u65B0\u7801)",
+      linkStep3: "\u7528 iPhone \u76F8\u673A\u626B\u8FD9\u4E2A\u7801(\u522B\u7528\u5FAE\u4FE1\u626B):\u6D4F\u89C8\u5668\u6253\u5F00\u5373\u81EA\u52A8\u767B\u8BB0\u8BBE\u5907\u5E76\u7ED1\u5B9A,30 \u5929\u514D\u9A8C\u8BC1\u76F4\u8FBE\u9762\u677F",
+      linkStep4: "\u5728\u9762\u677F\u9875\u9762\u70B9\u6D4F\u89C8\u5668\u300C\u5206\u4EAB \u2192 \u6DFB\u52A0\u5230\u4E3B\u5C4F\u5E55\u300D,\u628A\u5165\u53E3\u6C38\u4E45\u4FDD\u5B58;\u514D\u9A8C\u8BC1\u671F\u8FC7\u540E\u518D\u626B\u4E00\u6B21\u7801\u5373\u53EF\u6062\u590D",
+      linkNote: "\u626B\u7801\u7ED1\u5B9A\u7684\u8BBE\u5907\u4F1A\u51FA\u73B0\u5728\u300CApp \u914D\u5BF9\u300D\u9875\u7B7E\u300C\u5DF2\u914D\u5BF9\u7684\u624B\u673A\u300D\u5217\u8868,\u53EF\u968F\u65F6\u89E3\u9664;\u914D\u5BF9\u7801\u522B\u622A\u56FE\u53D1\u7ED9\u522B\u4EBA\u3002",
       statusLoading: "\u6B63\u5728\u751F\u6210\u4E8C\u7EF4\u7801\u2026",
       statusReady: "\u96A7\u9053\u5C31\u7EEA,\u626B\u7801\u5373\u53EF\u6253\u5F00\u9762\u677F",
       statusTunnelStarting: "\u96A7\u9053\u6B63\u5728\u5EFA\u7ACB,\u8BF7\u7A0D\u5019\u51E0\u79D2\u540E\u5237\u65B0\u4E8C\u7EF4\u7801",
@@ -5099,32 +4979,17 @@ function apply(ctx) {
       pairUsesTimes: "uses",
       pairSwap: "New code",
       linkTitle: "iOS / No-App devices",
-      linkSubtitle: 'Generate a long-lived bootstrap link for devices without the app (iPhone / iPad): open it once to skip verification for 30 days, then "Add to Home Screen" to use it like an app.',
-      linkTtlLabel: "Link validity",
-      linkTtl1h: "1 hour",
-      linkTtl24h: "24 hours",
-      linkTtl7d: "7 days",
-      linkGenerate: "Generate link",
-      linkGenerating: "Generating\u2026",
-      linkRegenerate: "Regenerate",
+      linkWebTag: "Web pairing",
+      linkSubtitle: 'For devices without the app (iPhone / iPad): open the official site, then scan the long-term pairing code from the "App pairing" tab \u2014 one scan registers the device for 30 days of verification-free access; then "Add to Home Screen" to use it like an app. No PWA invite link needed.',
       linkCopy: "Copy link",
       linkCopied: "Copied",
-      linkReady: "Link ready",
-      linkQrAlt: "Bootstrap link QR code",
-      linkScanHint: "Scan this code with the iPhone camera to open it (or copy the link below).",
-      linkExpires: "Valid until {t}",
-      linkUsesLabel: "Max uses",
-      linkUses1: "1 (single use)",
-      linkUses3: "3 times",
-      linkUses5: "5 times",
-      linkUsesUnlimited: "Unlimited",
-      linkUsesSuffix: "{n} use(s)",
-      linkStepsTitle: "iPhone steps",
-      linkStep1: "Open the link in Safari and verify once to enter the panel (the address bar should start with /p/<port>/ or /dsh-remote/p/\u2026; not WeChat in-app browser, not private mode)",
-      linkStep2: 'On the panel page, tap Share \u2192 "Add to Home Screen" (never on the invite page itself: that link is one-time and dies after first use)',
-      linkStep3: "Open the home-screen icon: it is a standalone window with storage separate from Safari, so verify once more there",
-      linkStep4: "Launching from the icon stays verification-free for 30 days; Safari and the home-screen app are independent",
-      linkNote: "The link is plain text \u2014 don't post it publicly; shorten the validity if concerned, and regenerate after use.",
+      linkOpenSite: "Open site",
+      linkStepsTitle: "Binding steps",
+      linkStep1: "Open the official site above in the phone browser (sign-in optional; this entry never changes, no matter how ports rotate)",
+      linkStep2: 'On the computer, switch to the "App pairing" tab and show the long-term pairing code (it rotates automatically after each scan)',
+      linkStep3: "Scan it with the iPhone camera (not WeChat): the browser registers and binds the device, then opens the panel verification-free for 30 days",
+      linkStep4: 'On the panel page, tap Share \u2192 "Add to Home Screen" to keep the entry permanently; after the 30-day window, scan a fresh code to renew',
+      linkNote: 'Paired devices appear in the "App pairing" tab and can be unpaired anytime; never share the pairing code with others.',
       statusLoading: "Generating QR code\u2026",
       statusReady: "Tunnel ready \u2014 scan to open the panel",
       statusTunnelStarting: "Tunnel starting; refresh the QR in a few seconds",
