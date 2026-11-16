@@ -6196,6 +6196,17 @@ color:#fff;text-decoration:none;font-size:14px}
             else:
                 tags = _MOBILE_TOOLBAR_TAG + _FILE_DL_TAG
         else:
+            # L2 批次4(2026-11-16):App WebView 绝不能有 PWA SW——sw.js 在 App 里没有
+            # 设备密钥,fetch handler 把页面请求(主框架导航/<img> 等)无签名透传,且透传
+            # 走 SW 自己的网络栈,既绕过 App 的 WebViewClient/ServiceWorkerClient 双
+            # 拦截器(实测漏签),又不进 WebView HTTP 缓存(实测「加载变慢/没走缓存」)。
+            # App UA(含 DshRemote/)改注「注销已有注册」脚本自愈历史装机;浏览器 PWA 不变。
+            sw_tag = (
+                b'<script>try{navigator.serviceWorker&&navigator.serviceWorker.getRegistrations()'
+                b'.then(function(rs){rs.forEach(function(r){r.unregister()})}).catch(function(){})}catch(e){}</script>'
+                if is_app else
+                b'<script>try{navigator.serviceWorker&&navigator.serviceWorker.register("sw.js")}catch(e){}</script>'
+            )
             tags = (
                 b'<meta name="apple-mobile-web-app-capable" content="yes">'
                 b'<meta name="mobile-web-app-capable" content="yes">'
@@ -6203,7 +6214,7 @@ color:#fff;text-decoration:none;font-size:14px}
                 b'<meta name="theme-color" content="#121316">'
                 b'<link rel="manifest" href="manifest.webmanifest">'
                 b'<link rel="apple-touch-icon" href="icon-180.png">'
-                b'<script>try{navigator.serviceWorker&&navigator.serviceWorker.register("sw.js")}catch(e){}</script>'
+                + sw_tag
                 + (_SYS_PANEL_TAG if is_app else _MOBILE_TOOLBAR_TAG)
                 + _FILE_DL_TAG
             )
