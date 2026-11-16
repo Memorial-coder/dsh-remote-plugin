@@ -4060,15 +4060,30 @@ class GateHandler(BaseHTTPRequestHandler):
             if dev is None:
                 dev = _secrets.token_hex(8)
             # 复用 dev:设备重新扫码后仍是同一台设备(不在册时重新登记)
+            # 2026-11-16 修复:ip_location 有 3s 网络超时且内部取 _gate_lock,
+            # 绝不能在持 _gate_lock 时调用——新设备/换 IP 瞬间会长时间占锁,
+            # pair_create/pair_status 全部排队(实测:面板「正在生成二维码」卡死、
+            # App 长时间「正在连接」,py-spy 抓到 45+ 线程堵在 _gate_lock 上)。
+            # 锁外补查归属地,和 _dump_sessions 的注释同一原则。
+            _loc = ""
             _sessions[dev] = {"ip": ip, "ua": ua,
                               "name": name, "kind": kind,
                               "since": now, "ts": now,
-                              "loc": ip_location(ip)}
+                              "loc": _loc}
         known = bool(_device_known(_device_key(dev)))
         if not known:
             with _devices_lock:
                 _d = _devices.get(_device_key(dev))
                 prev_ip = (_d or {}).get("ip", "")
+        # 锁外补归属地(网络调用);查不到就留空,下次 _dump_sessions 会再补
+        if not _loc:
+            try:
+                _loc = ip_location(ip)
+                if _loc and dev in _sessions:
+                    with _gate_lock:
+                        _sessions[dev]["loc"] = _loc
+            except Exception:
+                pass
         _device_ensure(dev, _sessions[dev])
         _dump_sessions()
         # 2026-11-16 新设备/新 IP 通知:档案里没见过 → 新设备;见过但 IP 变了 → 新 IP。
