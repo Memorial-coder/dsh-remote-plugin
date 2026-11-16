@@ -862,6 +862,194 @@ new MutationObserver(function(){
 })();"""
 _MOBILE_TOOLBAR_TAG = b'<script>' + _MOBILE_TOOLBAR_JS.encode('utf-8') + b'</script>'
 
+# ---- 主机状态面板(2026-11-16):只注入进 App 远控页(UA 含 DshRemote/) ----
+# 用户要求:远控页原生顶栏的「切换」改成「状态」,点开就是当前电脑的状态面板。
+# 面板代码由闸机下发(以后调面板不用重发 App);数据走页面同源相对路径
+# browserctl-gate/sysinfo(会话 Cookie 鉴权;闸机自报本机信息,无需设备 id)。
+# 手机浏览器(非 App UA)不注入——用户明确「网页端远控就不用了,只在 app 里面留」。
+# App 原生顶栏按钮经 evaluateJavascript 调 window.__dshSysToggle();老闸机没注入
+# 时探测不到该函数,原生侧会给出「先重启闸机」的提示。
+_SYS_PANEL_JS = """(function(){
+try{
+if (window.__dshSysReady) return;
+window.__dshSysReady = true;
+var opened=false, timer=null, busy=false, lastLink=null;
+var css='#dshSysMask{position:fixed;inset:0;z-index:2147483000;background:rgba(0,0,0,.55);'
+ +'opacity:0;pointer-events:none;transition:opacity .22s;'
+ +'font-family:system-ui,-apple-system,"Segoe UI","PingFang SC",sans-serif}'
+ +'#dshSysMask.open{opacity:1;pointer-events:auto}'
+ +'#dshSysMask .sheet{position:fixed;left:0;right:0;bottom:0;max-height:84vh;overflow-y:auto;'
+ +'-webkit-overflow-scrolling:touch;box-sizing:border-box;padding:14px 16px calc(16px + env(safe-area-inset-bottom,0px));'
+ +'border-radius:20px 20px 0 0;background:#1b1d22;color:#fff;'
+ +'transform:translateY(100%);transition:transform .26s cubic-bezier(.2,.7,.3,1);'
+ +'box-shadow:0 -12px 40px rgba(0,0,0,.5)}'
+ +'#dshSysMask.open .sheet{transform:translateY(0)}'
+ +'#dshSysMask .sheet>*{flex:0 0 auto}'
+ +'#dshSysMask .head{display:flex;align-items:center;gap:8px;margin-bottom:4px}'
+ +'#dshSysMask .dot{width:8px;height:8px;border-radius:50%;background:#34C759;flex:0 0 auto}'
+ +'#dshSysMask .name{font-size:15px;font-weight:700;flex:1;min-width:0;'
+ +'overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
+ +'#dshSysMask .lat{font-size:11px;color:rgba(255,255,255,.55);background:rgba(255,255,255,.08);'
+ +'border-radius:999px;padding:3px 9px;flex:0 0 auto}'
+ +'#dshSysMask .x{width:30px;height:30px;border-radius:10px;border:0;background:rgba(255,255,255,.1);'
+ +'color:#fff;font-size:15px;line-height:1;cursor:pointer;flex:0 0 auto}'
+ +'#dshSysMask .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:8px 0 2px}'
+ +'#dshSysMask .cell{background:rgba(255,255,255,.05);border-radius:12px;padding:9px 6px;text-align:center}'
+ +'#dshSysMask .cell b{display:block;font-size:16px;font-weight:700}'
+ +'#dshSysMask .cell span{display:block;margin-top:3px;font-size:10.5px;color:rgba(255,255,255,.45)}'
+ +'#dshSysMask .sec{margin-top:12px;font-size:12px;font-weight:700;color:rgba(255,255,255,.55)}'
+ +'#dshSysMask .kv{display:flex;align-items:center;gap:8px;min-height:34px;font-size:13px}'
+ +'#dshSysMask .kv em{font-style:normal;color:rgba(255,255,255,.5);flex:0 0 auto}'
+ +'#dshSysMask .kv b{font-weight:600;margin-left:auto;text-align:right;word-break:break-all}'
+ +'#dshSysMask .kv b.bad{color:#FF453A}'
+ +'#dshSysMask .kv b.good{color:#34C759}'
+ +'#dshSysMask .mini{margin:2px 0 6px;padding:7px 10px;border-radius:10px;background:rgba(255,255,255,.04);'
+ +'font-size:12px;color:rgba(255,255,255,.6)}'
+ +'#dshSysMask .mini b{color:#fff;font-weight:600}'
+ +'#dshSysMask .br{margin:4px 0 8px}'
+ +'#dshSysMask .br em{font-style:normal;display:flex;justify-content:space-between;font-size:11.5px;'
+ +'color:rgba(255,255,255,.55);margin-bottom:4px}'
+ +'#dshSysMask .bar{height:6px;border-radius:4px;background:rgba(255,255,255,.08);overflow:hidden}'
+ +'#dshSysMask .bar i{display:block;height:100%;border-radius:4px;background:#4a9eff;transition:width .3s}'
+ +'#dshSysMask .foot{display:flex;align-items:center;gap:8px;margin-top:14px}'
+ +'#dshSysMask .hint{flex:1;font-size:10.5px;color:rgba(255,255,255,.35);line-height:1.5}'
+ +'#dshSysMask .rf{flex:0 0 auto;height:36px;padding:0 16px;border:0;border-radius:10px;'
+ +'background:#4a9eff;color:#fff;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit}'
+ +'#dshSysMask .rf.on{opacity:.55}'
+ +'#dshSysMask .rf.ok{background:#34C759}';
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){
+  return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+function fmtRate(n){ if(n==null||!isFinite(n)) return '—';
+  if(n>=1048576) return (n/1048576).toFixed(1)+' MB/s';
+  if(n>=1024) return (n/1024).toFixed(1)+' KB/s'; return Math.round(n)+' B/s'; }
+function fmtBytes(n){ if(n==null||!isFinite(n)) return '—';
+  if(n>=1073741824) return (n/1073741824).toFixed(2)+' GB';
+  if(n>=1048576) return (n/1048576).toFixed(1)+' MB';
+  if(n>=1024) return (n/1024).toFixed(1)+' KB'; return Math.round(n)+' B'; }
+function fmtUptime(s){ if(s==null||!isFinite(s)) return '—'; s=Math.max(0,Math.round(s));
+  var d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);
+  if(d>0) return d+' 天 '+h+' 小时'; if(h>0) return h+' 小时 '+m+' 分钟'; return m+' 分钟'; }
+function pct(a,b){ if(!a||!b) return null; var v=100*(a-b)/b; return (v<0?0:(v>100?100:v)); }
+function barRow(label,val,cls){
+  return '<div class="br"><em><span>'+esc(label)+'</span><span>'+esc(val)+'</span></em>'
+   +'<div class="bar"><i style="width:'+(cls==null?0:Math.round(cls))+'%"></i></div></div>'; }
+function kv(k,v,cls){ return '<div class="kv"><em>'+esc(k)+'</em><b'+(cls?' class="'+cls+'"':'')+'>'+v+'</b></div>'; }
+function mini(l1,l2){ return '<div class="mini"><b>'+esc(l1)+'</b> · '+l2+'</div>'; }
+function section(t,inner){ return '<div class="sec">'+esc(t)+'</div>'+inner; }
+
+var mask=null, bodyEl=null, latEl=null, rfBtn=null;
+function ensure(){
+  if (mask && mask.isConnected) return;
+  if (!mask){
+    mask=document.createElement('div'); mask.id='dshSysMask';
+    mask.innerHTML='<div class="sheet">'
+     +'<div class="head"><div class="dot"></div><div class="name">主机状态</div>'
+     +'<div class="lat">延迟 —</div><button class="x" type="button">✕</button></div>'
+     +'<div class="bd"></div>'
+     +'<div class="foot"><div class="hint">数据来自这台电脑上的闸机服务（约 10 秒缓存）；面板打开期间每 10 秒自动刷新。网络只统计经闸机的远程消耗，不是整机网卡流量。</div>'
+     +'<button class="rf" type="button">刷新</button></div>'
+     +'</div>';
+    var st=document.createElement('style'); st.textContent=css; mask.appendChild(st);
+    document.documentElement.appendChild(mask);
+    bodyEl=mask.querySelector('.bd'); latEl=mask.querySelector('.lat'); rfBtn=mask.querySelector('.rf');
+    mask.addEventListener('click',function(e){ if(e.target===mask) closeP(); });
+    mask.querySelector('.x').addEventListener('click',closeP);
+    rfBtn.addEventListener('click',function(){ loadSys(); });
+    new MutationObserver(function(){
+      if(!mask.isConnected){ document.documentElement.appendChild(mask); }
+    }).observe(document.documentElement,{childList:true});
+  } else { document.documentElement.appendChild(mask); }
+}
+function setBtn(txt,cls){ if(!rfBtn) return; rfBtn.textContent=txt; rfBtn.className='rf'+(cls?' '+cls:''); }
+function closeP(){ opened=false; if(mask) mask.classList.remove('open');
+  if(timer){ clearInterval(timer); timer=null; } }
+function openP(){ ensure(); opened=true; mask.classList.add('open');
+  loadSys(); if(timer) clearInterval(timer);
+  timer=setInterval(function(){ if(opened) loadSys(); },10000); }
+
+function renderSys(d,lat){
+  var g=d||{}; var memP=pct(g.memTotal&&g.memFree,g.memTotal);
+  var pdA=null; (g.pdisks||[]).forEach(function(p){ if(p&&p.active!=null&&(pdA==null||p.active>pdA)) pdA=p.active; });
+  var cells='<div class="cell"><b>'+(g.cpu==null?'—':Math.round(g.cpu)+'%')+'</b><span>CPU</span></div>'
+   +'<div class="cell"><b>'+(memP==null?'—':Math.round(memP)+'%')+'</b><span>内存</span></div>'
+   +'<div class="cell"><b>'+(g.gpu==null?'—':Math.round(g.gpu)+'%')+'</b><span>显卡</span></div>'
+   +'<div class="cell"><b>'+(pdA==null?'—':Math.round(pdA)+'%')+'</b><span>磁盘</span></div>';
+  var html='<div class="grid">'+cells+'</div>';
+  var ds=(g.pdisks||[]);
+  if (ds.length){
+    var s1='';
+    ds.forEach(function(p){ if(!p) return;
+      var lab='磁盘 '+(p.name||'');
+      s1+=barRow(lab+' 活动时间',(p.active==null?'待采样':Math.round(p.active)+'%'),p.active);
+    });
+    html+=section('磁盘活动（任务管理器同口径，非容量）',s1);
+    var s1b='';
+    ds.forEach(function(p){ if(!p) return;
+      s1b+=mini('磁盘 '+(p.name||''),'读 '+esc(fmtRate(p.read))+' · 写 '+esc(fmtRate(p.write)));
+    });
+    html+=s1b;
+  }
+  var lk=g.link||{};
+  var nowT=Date.now(), rateDown=null, rateUp=null;
+  if (lk.txBytes!=null&&lk.rxBytes!=null){
+    if (lastLink&&nowT-lastLink.t>=5000){
+      var dts=(nowT-lastLink.t)/1000;
+      if (lk.txBytes>=lastLink.tx) rateDown=(lk.txBytes-lastLink.tx)/dts;
+      if (lk.rxBytes>=lastLink.rx) rateUp=(lk.rxBytes-lastLink.rx)/dts;
+    }
+    lastLink={t:nowT,rx:lk.rxBytes,tx:lk.txBytes};
+  }
+  var s2=kv('下行速率（电脑→手机）',esc(fmtRate(rateDown)))
+   +kv('上行速率（手机→电脑）',esc(fmtRate(rateUp)))
+   +(lk.txBytes!=null?kv('远程累计下行',esc(fmtBytes(lk.txBytes))):'')
+   +(lk.rxBytes!=null?kv('远程累计上行',esc(fmtBytes(lk.rxBytes))):'');
+  html+=section('远程链路流量（只算经闸机的远程消耗）',s2);
+  var dsk=(g.disks||[]);
+  if (dsk.length){
+    var s3='';
+    dsk.forEach(function(k){ if(!k) return;
+      var pp=pct(k.used,k.total);
+      s3+=barRow((k.name||'盘')+' '+esc(fmtBytes(k.used))+' / '+esc(fmtBytes(k.total)),
+        (pp==null?'—':pp.toFixed(0)+'%'),pp);
+    });
+    html+=section('磁盘容量',s3);
+  }
+  var lnk=(g.link||{});
+  var tun=lnk.tunnelOk?('<span class="good">正常'+(lnk.remotePort?(' · 公网端口 '+esc(lnk.remotePort)):'')+'</span>')
+    :('<span class="bad">'+esc(lnk.tunnelError?('未连接 · '+lnk.tunnelError):'未连接')+'</span>');
+  var s4=kv('系统',esc(g.os||'—'))
+   +kv('开机时长',g.boot?esc(fmtUptime((Date.now()-Date.parse(g.boot))/1000)):'—')
+   +kv('进程数',g.procs==null?'—':Math.round(g.procs))
+   +kv('显卡专用内存',g.gpuMem==null?'—':esc(fmtBytes(g.gpuMem)))
+   +kv('隧道',tun)
+   +kv('闸机运行时长',esc(fmtUptime(lnk.gateUptime)))
+   +kv('活跃会话（10 秒内）',lnk.activeSessions==null?'—':Math.round(lnk.activeSessions));
+  html+=section('系统 / 链路',s4);
+  bodyEl.innerHTML=html;
+  if (lat!=null&&latEl) latEl.textContent='延迟 '+lat+' ms';
+}
+function loadSys(){
+  if (busy) return; busy=true; setBtn('刷新中…','on');
+  var t0=performance.now();
+  fetch('browserctl-gate/sysinfo',{cache:'no-store'})
+   .then(function(r){ var lat=Math.round(performance.now()-t0); return r.json().then(function(j){ return {j:j,lat:lat}; }); })
+   .then(function(o){
+     var j=o.j||{};
+     if (!j.ok) throw new Error(j.error||'闸机返回失败');
+     renderSys(j.sysinfo,o.lat);
+     setBtn('已更新','ok'); setTimeout(function(){ if(!busy) setBtn('刷新',''); },1200);
+   })
+   .catch(function(e){
+     if (bodyEl) bodyEl.innerHTML='<div class="kv"><b class="bad">读取失败：'+esc(e&&e.message||e)+'</b></div>';
+     setBtn('刷新','');
+   })
+   .then(function(){ busy=false; });
+}
+window.__dshSysToggle=function(){ if(opened) closeP(); else openP(); };
+}catch(e){}
+})();"""
+_SYS_PANEL_TAG = b'<script>' + _SYS_PANEL_JS.encode('utf-8') + b'</script>'
+
 # 面板根 HTML 加载动效:在 DSH Web 完全渲染前显示一个深色全屏 spinner,
 # 告诉用户"正在连接,首次加载稍慢",避免看到空白页以为卡住。
 # JS 自动消除:window load(资源加载完成) + #root 出现内容(SPA 渲染完成) + 20s 兜底。
@@ -3563,6 +3751,111 @@ def _ws_unmask(payload, mask_key):
     return bytes(payload[i] ^ mask_key[i % 4] for i in range(len(payload)))
 
 
+# ---- 远程链路字节统计(2026-11-16,用户要求状态面板只显示「通过远程实际消耗」) ----
+# 所有远程流量(DSH 面板反代/WS 画面流/闸机自有端点)都经闸机进/出,所以直接在
+# 客户端 socket 上计数:recv=收到(=手机上行 ↑),sendall=发出(=手机下行 ↓)。
+# 本地插件/win_push 的轮询也走 3080,量级每分钟只有几 KB,并入后不影响量级。
+_LINK_BYTES_LOCK = threading.Lock()
+_LINK_RX = 0  # 闸机收到(手机→电脑,App 视角的上行)
+_LINK_TX = 0  # 闸机发出(电脑→手机,App 视角的下行)
+
+
+def _link_add_rx(n):
+    global _LINK_RX
+    if n > 0:
+        with _LINK_BYTES_LOCK:
+            _LINK_RX += n
+
+
+def _link_add_tx(n):
+    global _LINK_TX
+    if n > 0:
+        with _LINK_BYTES_LOCK:
+            _LINK_TX += n
+
+
+class _CountingSock(object):
+    """包住客户端 socket 的薄壳:只加字节计数,其余属性全部透传给真 socket。
+    WS 泵直接用 self.connection(recv/sendall)→ 走这里;
+    HTTP 的 rfile/wfile 由 setup() 里 connection.makefile 创建 → 也走这里,
+    所以一条连接的字节只入账一次(WS 握手走 rfile,泵在握手后才开始)。"""
+
+    __slots__ = ("_sock",)
+
+    def __init__(self, sock):
+        self._sock = sock
+
+    def recv(self, *a):
+        d = self._sock.recv(*a)
+        _link_add_rx(len(d))
+        return d
+
+    def recv_into(self, buf, nbytes=0):
+        n = self._sock.recv_into(buf, nbytes)
+        _link_add_rx(n)
+        return n
+
+    def sendall(self, b):
+        self._sock.sendall(b)
+        _link_add_tx(len(b))
+
+    def send(self, b):
+        n = self._sock.send(b)
+        _link_add_tx(n)
+        return n
+
+    def makefile(self, *a, **kw):
+        # socketserver 用 connection.makefile 建 rfile/wfile:包一层计数壳,
+        # 否则缓冲流直接绑真 socket,HTTP 请求字节就不入账了。
+        f = self._sock.makefile(*a, **kw)
+        mode = (a[0] if a else kw.get("mode", "")) or ""
+        if "r" in mode:
+            return _CountingFile(f, True)
+        if "w" in mode:
+            return _CountingFile(f, False)
+        return f
+
+    def __getattr__(self, name):
+        return getattr(self._sock, name)
+
+
+class _CountingFile(object):
+    """rfile/wfile 计数壳(经 makefile 交给 socketserver 的缓冲流)。"""
+
+    __slots__ = ("_f", "_rx")
+
+    def __init__(self, f, rx):
+        self._f = f
+        self._rx = rx  # True=入账 rx(读),False=入账 tx(写)
+
+    def read(self, *a):
+        d = self._f.read(*a)
+        if self._rx:
+            _link_add_rx(len(d))
+        return d
+
+    def readline(self, *a):
+        d = self._f.readline(*a)
+        if self._rx:
+            _link_add_rx(len(d))
+        return d
+
+    def readinto(self, b):
+        n = self._f.readinto(b)
+        if self._rx:
+            _link_add_rx(max(0, n))
+        return n
+
+    def write(self, b):
+        n = self._f.write(b)
+        if not self._rx:
+            _link_add_tx(len(b) if n is None else max(0, n))
+        return n
+
+    def __getattr__(self, name):
+        return getattr(self._f, name)
+
+
 class GateHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     # keep-alive 空闲回收:浏览器/nginx 断开前不再占用线程死等(线程随连接存活)。
@@ -3571,6 +3864,15 @@ class GateHandler(BaseHTTPRequestHandler):
 
     def log_message(self, fmt, *args):  # 静默,写文件由外层负责
         pass
+
+    def setup(self):
+        # 远程链路字节统计(见 _CountingSock 注释):先包客户端 socket,
+        # 再让父类从包好的对象创建 rfile/wfile(HTTP 与 WS 两条路都入账)。
+        try:
+            self.connection = _CountingSock(self.connection)
+        except Exception:
+            pass
+        super().setup()
 
     # ---- 工具 ----
 
@@ -5879,7 +6181,8 @@ color:#fff;text-decoration:none;font-size:14px}
         和移动端工具条(返回/全屏/视口,见 _MOBILE_TOOLBAR_JS,仅触屏设备自行显示)。
         toolbar_only=True 时只注入工具条,跳过 PWA 标签(用于非根 HTML 页面)。
         App(UA 含 DshRemote/)不注入工具条——App 有自己的原生导航,不需要悬浮按钮;
-        但文件卡片「下载」按钮(_FILE_DL_TAG,触屏自生效)对 App 一样注入。
+        但注入主机状态面板(_SYS_PANEL_TAG,顶栏「状态」按钮触发)和
+        文件卡片「下载」按钮(_FILE_DL_TAG,触屏自生效)。
         全部用相对路径:面板无论从 /p/<port>/ 还是 /dsh-remote/p/<uid>/(uid 稳定配对)
         打开,都解析到当前前缀下的本闸机静态资源 —— 端口变化后 PWA 图标/SW 照常工作。
         必须在校验 / 压缩之前调用,让 ETag 覆盖注入后的真实字节。"""
@@ -5888,7 +6191,8 @@ color:#fff;text-decoration:none;font-size:14px}
         is_app = "dshremote/" in ua
         if toolbar_only:
             if is_app:
-                tags = _FILE_DL_TAG
+                # App:不注工具条(原生导航),但注主机状态面板(顶栏「状态」按钮触发)
+                tags = _SYS_PANEL_TAG + _FILE_DL_TAG
             else:
                 tags = _MOBILE_TOOLBAR_TAG + _FILE_DL_TAG
         else:
@@ -5900,7 +6204,7 @@ color:#fff;text-decoration:none;font-size:14px}
                 b'<link rel="manifest" href="manifest.webmanifest">'
                 b'<link rel="apple-touch-icon" href="icon-180.png">'
                 b'<script>try{navigator.serviceWorker&&navigator.serviceWorker.register("sw.js")}catch(e){}</script>'
-                + (b"" if is_app else _MOBILE_TOOLBAR_TAG)
+                + (_SYS_PANEL_TAG if is_app else _MOBILE_TOOLBAR_TAG)
                 + _FILE_DL_TAG
             )
         idx = html.lower().find(b"<head")
@@ -6221,18 +6525,8 @@ _SYSINFO_PS = (
     " [ordered]@{ name=$_.Name;"
     " active=$(if ($null -ne $_.PercentIdleTime) { [math]::Max(0,[math]::Min(100,[math]::Round(100-[double]$_.PercentIdleTime,1))) } else { $null });"
     " read=[int64]$_.DiskReadBytesPersec; write=[int64]$_.DiskWriteBytesPersec } }) }catch{};"
-    # 网卡(2026-11-16):Formatted 类出速率,Raw 类的 Persec 计数器原始值=开机以来累计字节;
-    # 过滤环回/隧道过渡口与断链网卡(CurrentBandwidth=0)
-    "$nics=@();"
-    "try{ $fmt=@{};"
-    "Get-CimInstance Win32_PerfFormattedData_Tcpip_NetworkInterface | ForEach-Object {"
-    " $fmt[$_.Name]=[pscustomobject]@{ rx=[double]$_.BytesReceivedPersec; tx=[double]$_.BytesSentPersec;"
-    " bw=[int64]$_.CurrentBandwidth } };"
-    "$nics=@(Get-CimInstance Win32_PerfRawData_Tcpip_NetworkInterface | Where-Object {"
-    " $_.Name -notmatch 'Loopback|isatap|Teredo' -and $fmt.ContainsKey($_.Name)"
-    " -and [int64]$fmt[$_.Name].bw -gt 0 } | ForEach-Object {"
-    " [ordered]@{ name=$_.Name; rx=[double]$fmt[$_.Name].rx; tx=[double]$fmt[$_.Name].tx;"
-    " totalRx=[uint64]$_.BytesReceivedPersec; totalTx=[uint64]$_.BytesSentPersec } }) }catch{};"
+    # 网卡整机流量已按用户要求移除(2026-11-16):App 只看「通过远程实际消耗」的
+    # 上下行 —— 那部分在闸机侧计数,见 _CountingSock/link.rxBytes/txBytes。
     # GPU(2026-11-16):各引擎类型利用率求和取最大(≈任务管理器 GPU%);专用显存=LocalUsage 求和。
     # 旧系统/服务器没有这两个 CIM 类 → 保持 null,前端显示「—」
     "$gpu=$null; $gpumem=$null;"
@@ -6249,7 +6543,7 @@ _SYSINFO_PS = (
     "[ordered]@{ ok=$true; cpu=$cpu; memTotal=[int64]$os.TotalVisibleMemorySize;"
     " memFree=[int64]$os.FreePhysicalMemory; boot=$os.LastBootUpTime.ToString('o');"
     " os=$os.Caption; procs=[uint32]$os.NumberOfProcesses;"
-    " disks=$disks; pdisks=$pdisks; nics=$nics; gpu=$gpu; gpuMem=$gpumem }"
+    " disks=$disks; pdisks=$pdisks; gpu=$gpu; gpuMem=$gpumem }"
     " | ConvertTo-Json -Compress -Depth 4"
 )
 
@@ -6289,6 +6583,9 @@ def _gate_link_info(now):
             "tunnelError": str(st.get("tunnel_error") or "")[:160],
             "dshOk": bool(st.get("dsh_port")),
             "gateUptime": max(0, int(now - _SYS_PROC_START)),
+            # 远程链路字节(闸机本次运行以来累计;recv=上行/收,sendall=下行/发)
+            "rxBytes": _LINK_RX,
+            "txBytes": _LINK_TX,
         }
         active = 0
         with _gate_lock:
