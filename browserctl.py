@@ -2335,6 +2335,13 @@ _SIG_NONCE_TTL = 180
 # 后新设备永远无法配对(没有密钥=永远过不了验签=死锁,e2e 实测抓到)。
 # 签名 SW 本体在 PWA sw.js(经 /sw.js 服务,浏览器不经过 fetch handler 取它)。
 _SIG_EXEMPT = ("/dev-bind", "/dev-boot", "/pair/claim", "/bootstrap")
+
+# 内容寻址静态资源(URL 即内容指纹)判定:与 GateHandler._cache_policy 的
+# 可缓存分类同判据(哈希文件名 / plugins?rev= 指纹),供 L1 验签豁免使用。
+# 这类资源无敏感数据,App 端必须走 WebView 原生栈才能命中 HTTP 缓存
+# (shouldInterceptRequest 的响应不进缓存,曾致 13MB 插件包每次启动重下)。
+_STATIC_HASHED_NAME = re.compile(
+    r"-[A-Za-z0-9_-]{6,}\.(?:js|mjs|css|map|json|woff2?|ttf|otf|svg|png|webp|jpe?g|gif|avif)$")
 _sig_nonce_lock = threading.Lock()
 _sig_nonces = {}  # dev -> {nonce: 过期时刻}
 _sig_missing_last = [0.0]  # 宽容期缺签名事件节流(60s 一条,防刷屏)
@@ -2538,6 +2545,11 @@ def _dev_sig_verify(handler, path):
     # WebSocket 握手无法加自定义头(fetch 不覆盖 ws://),签名层暂豁免,
     # 防护仍由 bc-gate cookie 承担(握手自动带 cookie);记录待改进项。
     if (handler.headers.get("Upgrade") or "").lower() == "websocket":
+        return None
+    # 内容寻址静态资源豁免(2026-11-16):GET + 哈希文件名/rev 指纹,URL 即内容,
+    # 无敏感数据;App 端 WebView 只有走原生网络栈才能命中 HTTP 缓存,豁免后
+    # 这类请求不再产生「宽容期无签名」事件,强制开关才具备开启条件。
+    if (handler.command or "GET").upper() == "GET" and _static_cacheable_path(handler.path):
         return None
 
     def _h(name):
