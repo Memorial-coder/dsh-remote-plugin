@@ -4070,21 +4070,24 @@ class GateHandler(BaseHTTPRequestHandler):
                               "name": name, "kind": kind,
                               "since": now, "ts": now,
                               "loc": _loc}
-        known = bool(_device_known(_device_key(dev)))
+        # 浏览器临时配对没有 devid,以闸机 cookie 的 dev 作为稳定设备键。
+        dev_key = _device_key({"dev": dev})
+        known = bool(_device_known(dev_key))
         if not known:
             with _devices_lock:
-                _d = _devices.get(_device_key(dev))
+                _d = _devices.get(dev_key)
                 prev_ip = (_d or {}).get("ip", "")
-        # 锁外补归属地(网络调用);查不到就留空,下次 _dump_sessions 会再补
+        # 锁外补归属地(网络调用);查不到就留空,下次 _dump_sessions 会再补。
         if not _loc:
             try:
                 _loc = ip_location(ip)
-                if _loc and dev in _sessions:
+                if _loc:
                     with _gate_lock:
-                        _sessions[dev]["loc"] = _loc
+                        if dev in _sessions:
+                            _sessions[dev]["loc"] = _loc
             except Exception:
                 pass
-        _device_ensure(dev, _sessions[dev])
+        _device_ensure(dev_key, _sessions[dev])
         _dump_sessions()
         # 2026-11-16 新设备/新 IP 通知:档案里没见过 → 新设备;见过但 IP 变了 → 新 IP。
         # known 且同 IP 的重新登记属正常会话恢复,静默。通知失败绝不影响放行。
