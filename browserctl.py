@@ -3421,7 +3421,9 @@ function idbPut(k,v){return idb().then(function(db){return new Promise(function(
   tx.oncomplete=function(){res()};tx.onerror=function(){rej(tx.error)};});});}
 var segs=location.pathname.split('/');
 var root='/';
-if(segs[1]==='p'&&segs[2])root='/'+segs[1]+'/'+segs[2]+'/';
+for(var i=0;i<segs.length-1;i++){
+  if(segs[i]==='p'&&segs[i+1]){root='/'+segs.slice(0,i+2).join('/')+'/';break;}
+}
 if(!navigator.serviceWorker){fail('此浏览器不支持 Service Worker,请用系统浏览器打开或更新 App。');return;}
 if(sessionStorage.getItem('bc-devkey-ok')==='1'){
   st.textContent='凭证已安装过;若反复跳回本页,请截图反馈(签名链路未生效)。';
@@ -6197,7 +6199,11 @@ color:#fff;text-decoration:none;font-size:14px}
             self._send(200, data, "image/png",
                        headers=[("Cache-Control", "public, max-age=86400")])
             return True
-        if p == "/sw.js":
+        if p == "/sw.js" or p.endswith("/sw.js"):
+            # 面板前缀形态(/p/<port>/sw.js、/dsh-remote/p/<uid>/sw.js)也要吃到真 JS:
+            # 引导页按面板根注册 SW,脚本 URL 带前缀时旧判据只认根路径 → 返回了
+            # DSH 反代 HTML → "script resource is behind a redirect" 引导链路全断
+            # (kb/06 第 35 条强制签名失败的根因之一)。
             try:
                 data = (PWA_DIR / "sw.js").read_bytes()
             except OSError:
