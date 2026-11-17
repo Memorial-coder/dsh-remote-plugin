@@ -2351,7 +2351,8 @@ _SIG_NONCE_TTL = 180
 # 服务器沦陷也伪造不出来 → 无签名可达它们不破坏 L1 目标;不豁免则 enforce ON
 # 后新设备永远无法配对(没有密钥=永远过不了验签=死锁,e2e 实测抓到)。
 # 签名 SW 本体在 PWA sw.js(经 /sw.js 服务,浏览器不经过 fetch handler 取它)。
-_SIG_EXEMPT = ("/dev-bind", "/dev-boot", "/pair/claim", "/bootstrap", "/verify")
+_SIG_EXEMPT = ("/dev-bind", "/dev-boot", "/pair/claim", "/bootstrap", "/verify",
+                "/app", "/app/version")
 
 # 内容寻址静态资源(URL 即内容指纹)判定:与 GateHandler._cache_policy 的
 # 可缓存分类同判据(哈希文件名 / plugins?rev= 指纹),供 L1 验签豁免使用。
