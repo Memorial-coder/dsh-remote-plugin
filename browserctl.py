@@ -3440,7 +3440,7 @@ navigator.serviceWorker.register(root+'sw.js',{scope:root}).then(function(reg){
     chk();
   });
 }).then(function(){
-  return fetch('dev-bind',{cache:'no-store'}).then(function(r){return r.json()});
+  return fetch(root+'dev-bind',{cache:'no-store'}).then(function(r){return r.text().then(function(t){try{return JSON.parse(t)}catch(e){throw new Error('dev-bind 返回非 JSON (HTTP '+r.status+' @'+root+') 内容:'+((t||'(空)').slice(0,80)));}});});
 }).then(function(j){
   if(!j||!j.ok)throw new Error((j&&j.error)||'设备凭证获取失败');
   window.__dev=j.dev;
@@ -3455,7 +3455,7 @@ navigator.serviceWorker.register(root+'sw.js',{scope:root}).then(function(reg){
     };
     navigator.serviceWorker.controller.postMessage({type:'genkeys'},[ch.port2]);
   }).then(function(pub){
-    return fetch('dev-bind?pubkey='+pub,{method:'POST',cache:'no-store'})
+    return fetch(root+'dev-bind?pubkey='+pub,{method:'POST',cache:'no-store'})
       .then(function(r){return r.json()})
       .then(function(j2){
         if(!j2||!j2.ok)throw new Error((j2&&j2.error)||'公钥登记失败');
