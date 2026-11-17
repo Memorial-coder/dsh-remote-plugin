@@ -3496,16 +3496,63 @@ function ping(){return new Promise(function(res){var to=setTimeout(function(){re
   ch.port1.onmessage=function(m){clearTimeout(to);res(m.data||null)};
   try{navigator.serviceWorker.controller.postMessage({type:'ping'},[ch.port2])}
   catch(e){clearTimeout(to);res(null)}});}
-function bind(){return fetch(gate+'dev-bind',{cache:'no-store'}).then(function(r){
+function bind(code){return fetch(gate+'dev-bind'+(code?('?code='+encodeURIComponent(code)):''),{cache:'no-store'}).then(function(r){
   return r.text().then(function(t){var j;try{j=JSON.parse(t)}catch(e){
     throw new Error('dev-bind 返回非 JSON (HTTP '+r.status+' @'+gate+') 内容:'+((t||'(空)').slice(0,120)));}
-    if(!j||!j.ok)throw new Error((j&&j.error)||('设备凭证获取失败 (HTTP '+r.status+')'));return j;});});}
+    if(!j||!j.ok){var e2=new Error((j&&j.error)||('设备凭证获取失败 (HTTP '+r.status+')'));e2.needCode=!!(j&&j.need_code);throw e2;}return j;});});}
 function genkeys(){return new Promise(function(res,rej){var ch=new MessageChannel();
   var to=setTimeout(function(){rej(new Error('genkeys 超时（Service Worker 没有回应）'))},8000);
   ch.port1.onmessage=function(m){clearTimeout(to);var d=m.data||{};
     if(d.ok)res(d.pub);else rej(new Error(d.error||'genkeys 失败'))};
   try{navigator.serviceWorker.controller.postMessage({type:'genkeys'},[ch.port2])}
   catch(e){clearTimeout(to);rej(new Error('SW 通信失败: '+e))}});}
+
+function showRecover(firstErr){
+  if(document.getElementById('bc-rec'))return;
+  var box=document.createElement('div');box.id='bc-rec';
+  box.style.cssText='margin:14px 0;padding:16px;border:1px solid #e5e5e5;border-radius:14px;background:#fff;text-align:left';
+  var t=document.createElement('div');
+  t.style.cssText='font-size:14px;line-height:1.6;color:#333;margin-bottom:10px';
+  t.textContent='本机设备凭证已被撤销（例如刚点过「全部踢下线」）。输入一次动态码即可恢复，不需要重新扫码配对。';
+  var inp=document.createElement('input');inp.id='bc-code';inp.inputMode='numeric';inp.maxLength=6;
+  inp.placeholder='6 位动态码';inp.autocomplete='one-time-code';
+  inp.style.cssText='width:100%;height:50px;font-size:24px;letter-spacing:8px;text-align:center;border:1px solid #d9d9d9;border-radius:12px;margin-bottom:10px;box-sizing:border-box';
+  var btn=document.createElement('button');btn.id='bc-rec-btn';btn.textContent='验证并恢复';
+  btn.style.cssText='width:100%;height:50px;font-size:16px;border:0;border-radius:12px;background:#1677ff;color:#fff';
+  var msg=document.createElement('div');msg.style.cssText='margin-top:8px;font-size:13px;color:#999;min-height:18px';
+  if(firstErr)msg.textContent=String(firstErr&&firstErr.message||firstErr);
+  box.appendChild(t);box.appendChild(inp);box.appendChild(btn);box.appendChild(msg);
+  box.style.display='block';
+  document.body.appendChild(box);
+  function go(){
+    var c=(inp.value||'').replace(/\D/g,'');
+    if(c.length!==6){msg.textContent='请输入 6 位动态码';return}
+    btn.disabled=true;btn.textContent='验证中…';
+    bind(c).then(function(j){
+      D.dev=(j.dev?String(j.dev).slice(0,10)+'…':'(无)');render();
+      try{navigator.serviceWorker.controller&&navigator.serviceWorker.controller.postMessage({type:'setdev',dev:j.dev})}catch(e){}
+      return genkeys().then(function(pub){
+        return fetch(gate+'dev-bind?pubkey='+pub,{method:'POST',cache:'no-store'})
+          .then(function(r){return r.json()}).then(function(j2){
+            if(!j2||!j2.ok)throw new Error((j2&&j2.error)||'公钥登记失败');
+            return idbPut('dev',j.dev);});
+      }).catch(function(e2){
+        if(!j.key)throw e2;
+        return idbPut('dev',j.dev).then(function(){return idbPut('key',j.key)});
+      });
+    }).then(function(){
+      st.textContent='已恢复，正在进入…';render();
+      wr('bc-devkey-ok','1');wr('bc-boot-try','0');wr('bc-boot-cred','0');
+      setTimeout(function(){location.replace(root)},250);
+    }).catch(function(e){
+      btn.disabled=false;btn.textContent='验证并恢复';
+      msg.textContent=String(e&&e.message||e);
+    });
+  }
+  btn.addEventListener('click',go);
+  inp.addEventListener('keydown',function(e){if(e.key==='Enter')go()});
+  inp.focus();
+}
 
 var tries=parseInt(rd('bc-boot-try','0'),10)||0,credTries=parseInt(rd('bc-boot-cred','0'),10)||0;
 D.tries=tries;D.credTries=credTries;render();
@@ -3551,6 +3598,7 @@ navigator.serviceWorker.register(root+'sw.js',{scope:root,updateViaCache:'none'}
    setTimeout(function(){location.replace(root)},250);
  })
  .catch(function(e){
+   if(e&&e.needCode){showRecover(e);return;}
    if(/Service Worker 未接管/.test(String(e&&e.message||e)) && ctlRetry()){
      st.textContent='正在重新初始化浏览器组件…';
      setTimeout(function(){location.replace(location.href)},300);
@@ -5747,6 +5795,77 @@ color:#fff;text-decoration:none;font-size:14px}
             return
         self._send_json(200, {"ok": True, "session_days": _session_days()})
 
+    def _gate_bind_recover_code(self):
+        """dev-bind 的动态码恢复通道。成功返回 True(会话已重建),失败已自行回包并返回 False。"""
+        st = gate_state()
+        secret = st.get("totp_secret")
+        code = ""
+        try:
+            from urllib.parse import urlsplit, parse_qs
+            q = parse_qs(urlsplit(self.path).query)
+            code = (q.get("code") or [""])[0].strip()
+        except Exception:
+            code = ""
+        if not code:
+            try:
+                ln = int(self.headers.get("Content-Length") or 0)
+                body = json.loads((self.rfile.read(ln) if 0 < ln <= 8192 else b"{}").decode("utf-8", "replace") or "{}")
+                code = str(body.get("code") or "").strip()
+            except Exception:
+                code = ""
+        # ① 免动态码兜底(2026-11-17):Cookie 本身就是 HMAC 签名的 30 天设备信任凭证。
+        #    只要它有效、且设备档案在册(曾被配对/验证过),就直接重建会话并重铸密钥。
+        #    这样「全部踢下线」/开关 2FA 只会让设备掉线重连,不会把手机和电脑一起锁死。
+        cookie_dev = self._gate_cookie_dev()
+        if cookie_dev and _device_known(cookie_dev) and not code:
+            ua = self.headers.get("User-Agent", "")[:120]
+            name = _friendly_device_name(ua)
+            kind = "app" if self._is_app_ua() else "web"
+            with _gate_lock:
+                _sessions[cookie_dev] = {"ip": ip, "ua": ua, "name": name, "kind": kind,
+                                         "since": time.time(), "ts": time.time()}
+            _device_ensure(cookie_dev, _sessions[cookie_dev])
+            _dump_sessions()
+            _append_event("recover", "Cookie 信任自动恢复 dev=%s IP=%s" % (cookie_dev[:8], ip))
+            return True
+        if not (st.get("totp_enabled") and secret):
+            self._send_json(401, {"ok": False, "error": "未通过验证,请先完成动态码校验",
+                                  "need_code": True})
+            return False
+        ip = self._client_ip()
+        if verify_global_tripped():
+            self._send_json(429, {"ok": False, "error": "验证尝试过多,已临时关闭,请约 15 分钟后再试"})
+            return False
+        if not brute_check(ip):
+            self._send_json(429, {"ok": False, "error": "错误次数过多,已冻结 15 分钟"})
+            return False
+        if totp_replay_hit(code):
+            self._send_json(409, {"ok": False, "error": "该动态码刚刚已使用,请等下一个动态码(约 30 秒)后再试"})
+            return False
+        if not totp_verify(secret, code):
+            brute_fail(ip)
+            verify_global_fail_bump()
+            self._send_json(401, {"ok": False, "error": "动态码错误", "need_code": True})
+            return False
+        brute_clear(ip)
+        dev = self._gate_cookie_dev()
+        if not dev:
+            dev = (self.headers.get("X-BC-Dev") or "").strip() or _secrets.token_hex(8)
+        ua = self.headers.get("User-Agent", "")[:120]
+        name = _friendly_device_name(ua)
+        kind = "app" if self._is_app_ua() else "web"
+        with _gate_lock:
+            _sessions[dev] = {"ip": ip, "ua": ua, "name": name, "kind": kind,
+                              "since": time.time(), "ts": time.time()}
+        _device_ensure(dev, _sessions[dev])
+        _dump_sessions()
+        _append_event("recover", "动态码恢复设备凭证 dev=%s IP=%s UA=%s" % (dev[:8], ip, ua[:40]))
+        try:
+            _server_register_device(dev, name, ip, ua)
+        except Exception:
+            pass
+        return True
+
     def _gate_dev_bind(self):
         """L1/L2 密钥分发:已验证会话(bc-gate cookie)换本设备签名凭证。
         - GET(存量 SW 1.1.0 兼容):下发对称 dev_key;
@@ -5754,12 +5873,16 @@ color:#fff;text-decoration:none;font-size:14px}
         - POST(L2):设备上送 ECDSA P-256 公钥(私钥在设备端生成且不出设备),
           服务器/TLS 沦陷也截不到可伪造签名的材料。反代会排空请求体 → 兼容 ?pubkey=。"""
         if not self._gate_ok():
-            self._send_json(401, {"ok": False, "error": "未通过验证,请先完成动态码校验"})
-            return
+            # 免二维码恢复(2026-11-17):「全部踢下线」/2FA 开关会清会话,设备密钥也可能已被撤销,
+            # 此时旧链路只剩「重新扫码配对」一条路,手机端等于彻底进不去。这里允许用一次动态码
+            # (第二因子)恢复:校验通过就为当前 Cookie 设备重建会话,再照常下发/登记密钥。
+            if not self._gate_bind_recover_code():
+                return
         dev = self._gate_cookie_dev()
         if not dev:
             self._send_json(400, {"ok": False,
-                                  "error": "无法识别设备身份,请用配对链接重新打开"})
+                                  "error": "无法识别设备身份,请用配对链接重新打开",
+                                  "need_code": True})
             return
         if self.command == "POST":
             pk_hex = ""
