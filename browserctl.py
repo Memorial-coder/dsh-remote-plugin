@@ -2362,6 +2362,18 @@ _STATIC_HASHED_NAME = re.compile(
     r"-[A-Za-z0-9_-]{6,}\.(?:js|mjs|css|map|json|woff2?|ttf|otf|svg|png|webp|jpe?g|gif|avif)$")
 
 
+def _wants_html(handler):
+    """这个请求是不是「浏览器导航/整页加载」?是的话失败时要给 HTML 引导页而不是 JSON。"""
+    try:
+        acc = (handler.headers.get("Accept") or "").lower()
+        dest = (handler.headers.get("Sec-Fetch-Dest") or "").lower()
+    except Exception:
+        return False
+    if dest in ("document", "iframe", "frame"):
+        return True
+    return "text/html" in acc
+
+
 def _static_cacheable_path(path):
     """GET 且 URL 即内容指纹的静态资源:① /assets/<n>-<hash>.<ext>;
     ② /plugins 组合包(query 带 rev= 指纹)。动态 API/HTML 一律不匹配。"""
@@ -2616,7 +2628,13 @@ def _dev_sig_verify(handler, path):
     if not key and not pk_hex:
         if not _sig_enforced():
             return None
-        return (401, {"ok": False, "error": "未知设备,请重新配对"})
+        # 设备档案没有密钥 = 被踢下线撤销过(或档案被清)。此时**浏览器导航**必须落引导页,
+        # 让 SW/引导页走 dev-bind 自动重绑;只回一段裸 JSON 会让用户以为「配对已失效」且
+        # 完全无法自愈(2026-11-17 用户实测:正式版短期/长期链接全卡在这段 JSON)。
+        if _wants_html(handler):
+            return (401, _sig_boot_html())
+        return (401, {"ok": False, "error": "未知设备,请重新配对",
+                      "boot": "dev-boot", "rebind": True})
     try:
         ts_i = int(float(ts))
     except Exception:
@@ -3514,6 +3532,7 @@ navigator.serviceWorker.register(root+'sw.js',{scope:root,updateViaCache:'none'}
    st.textContent='正在安装设备凭证…';render();
    return bind().then(function(j){
      D.dev=(j.dev?String(j.dev).slice(0,10)+'…':'(无)');render();
+     try{navigator.serviceWorker.controller&&navigator.serviceWorker.controller.postMessage({type:'setdev',dev:j.dev})}catch(e){}
      return genkeys().then(function(pub){
        return fetch(gate+'dev-bind?pubkey='+pub,{method:'POST',cache:'no-store'})
          .then(function(r){return r.json()}).then(function(j2){
