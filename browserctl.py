@@ -1425,6 +1425,18 @@ def totp_verify(secret_b32, code):
     return False
 
 
+def totp_replay_hit(code):
+    """该动态码刚刚验证成功过(REPLAY_WINDOW 内)?
+    用于把「重复提交同一个码」和「输错码」分开:前者是正常手滑,不该按爆破计数
+    (否则连点 5 次就冻结 15 分钟,2026-11-17 实测)。_used_codes 只存验证成功过的码,
+    所以随机错误码不会命中这里。"""
+    code = (code or "").strip()
+    if not code:
+        return False
+    with _gate_lock:
+        return code in _used_codes
+
+
 def totp_uri(secret_b32, account="DeepSeekPanel"):
     safe_issuer = "DshRemote"
     return ("otpauth://totp/%s:%s?secret=%s&issuer=%s&algorithm=SHA1&digits=6&period=30"
@@ -6043,6 +6055,10 @@ color:#fff;text-decoration:none;font-size:14px}
             self._send_json(400, {"ok": False, "error": "2FA 未启用"})
             return
         code = str(data.get("code", "")).strip()
+        if totp_replay_hit(code):
+            self._send_json(409, {"ok": False,
+                                  "error": "该动态码刚刚已使用,请等下一个动态码(约 30 秒)后再试"})
+            return
         if not totp_verify(secret, code):
             brute_fail(ip)
             verify_global_fail_bump()  # 全局熔断计数:跨 IP 汇总(见防爆破区常量)
