@@ -14,9 +14,11 @@
  * v1.2.2(2026-11-17, 绑定失效自愈):闸机踢下线会撤销设备密钥,本地旧凭证
  *   会让签名永远 401。fetch 拦到 401(JSON ok:false)连续 3 次 → 清 IndexedDB
  *   凭证 + 向页面广播 rebind → 页面清 sessionStorage 引导标记并跳 dev-boot 重装。
+ * v1.2.5(2026-11-17, 引导页自愈):ping 回报 cred/dev,配合引导页 1.3.0 的
+ *   「凭证已就绪→直接进面板 / 否则重装」判定,消除「凭证已安装过」死循环。
  * 更新方式:修改本文件任意内容,浏览器下次访问会自动比对并激活新 SW。
  */
-const SW_VERSION = '1.2.3'
+const SW_VERSION = '1.2.5'
 var KV = { dev: '', key: '', priv: null, privjwk: '', pub: '' }
 
 function idb() {
@@ -78,8 +80,11 @@ function genPair() {
         })
     })
 }
-/* 装机状态就绪:优先 ECDSA(priv/privjwk+pub),退回存量 HMAC(key)。 */
-function ensureCred() {
+/* 装机状态就绪:优先 ECDSA(priv/privjwk+pub),退回存量 HMAC(key)。
+ * v1.2.4 修复:ECDSA 分支原来只取 pub/priv,**没取 dev**——于是 X-BC-Dev 恒为空,
+ * 闸机按「无签名」回引导页,页面重载后永远跳回「正在验证此设备」死循环
+ * (2026-11-17 真浏览器实测:IndexedDB 有 bc-devkey 但面板永远 401)。 */
+function loadCred() {
   if ((KV.priv || KV.privjwk) && KV.pub) return Promise.resolve(KV)
   if (KV.key) return Promise.resolve(KV)
   return idbGet('pub').then(function (pub) {
@@ -96,6 +101,15 @@ function ensureCred() {
     return idbGet('key').then(function (key) {
       if (!key) throw new Error('no-cred')
       return idbGet('dev').then(function (dev) { KV.dev = dev; KV.key = key; return KV })
+    })
+  })
+}
+function ensureCred() {
+  return loadCred().then(function (kv) {
+    if (kv.dev) return kv
+    return idbGet('dev').then(function (dev) {
+      if (dev) kv.dev = dev
+      return kv
     })
   })
 }
@@ -197,7 +211,18 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('message', function (e) {
   var d = e.data || {}
   if (d.type === 'ping' && e.ports && e.ports[0]) {
-    e.ports[0].postMessage({ ok: true, version: SW_VERSION, exempt: EXEMPT.slice() })
+    /* v1.2.5:连凭证状态一起回报——引导页据此判断「直接进面板」还是「重装凭证」。
+     * 没有它，页面只能盲装；遇到被踢/旧 SW 场景就会在引导页与面板之间来回跳。 */
+    var port = e.ports[0]
+    ensureCred().then(function (kv) {
+      port.postMessage({
+        ok: true, version: SW_VERSION, exempt: EXEMPT.slice(),
+        cred: !!(kv && kv.dev && (kv.priv || kv.privjwk || kv.key)),
+        dev: (kv && kv.dev) || ''
+      })
+    }, function () {
+      port.postMessage({ ok: true, version: SW_VERSION, exempt: EXEMPT.slice(), cred: false, dev: '' })
+    })
     return
   }
   if (d.type === 'setKey') { KV.dev = d.dev; KV.key = d.key }
