@@ -18,7 +18,7 @@
  *   「凭证已就绪→直接进面板 / 否则重装」判定,消除「凭证已安装过」死循环。
  * 更新方式:修改本文件任意内容,浏览器下次访问会自动比对并激活新 SW。
  */
-const SW_VERSION = '1.2.5'
+const SW_VERSION = '1.2.6'
 var KV = { dev: '', key: '', priv: null, privjwk: '', pub: '' }
 
 function idb() {
@@ -174,9 +174,9 @@ function failBump() {
     return idbPut(FAIL_KEY, n).then(function () { return n })
   })
 }
-function healRevoke() {
+function healRevoke(force) {
   return idbGet(FAIL_KEY).then(function (n) {
-    if ((n || 0) < FAIL_LIMIT) return false
+    if (!force && (n || 0) < FAIL_LIMIT) return false
     return Promise.all([
       idbPut(FAIL_KEY, 0), idbPut('priv', ''), idbPut('privjwk', ''),
       idbPut('pub', ''), idbPut('dev', ''), idbPut('key', '')
@@ -226,6 +226,12 @@ self.addEventListener('message', function (e) {
     return
   }
   if (d.type === 'setKey') { KV.dev = d.dev; KV.key = d.key }
+  /* 引导页 dev-bind 拿到新 dev 后同步过来：SW 实例常驻，KV.dev 里的旧 id
+   * 会让重绑后的请求继续签旧 id → 闸机仍判「未知设备」（2026-11-17 实测）。*/
+  if (d.type === 'setdev' && d.dev) {
+    KV.dev = d.dev
+    idbPut('dev', d.dev)
+  }
   // L2:引导页通过 MessageChannel 请求生成密钥对并回传公钥 hex(65B 非压缩点)
   if (d.type === 'genkeys') {
     var port = e.ports && e.ports[0]
@@ -249,10 +255,15 @@ self.addEventListener('fetch', function (e) {
   e.respondWith(ensureCred().then(function (kv) {
     return withSig(req, method, p).then(function (resp) {
       if (looksGate401(resp)) {
-        // 克隆一份数 401(响应体留给页面);连到阈值就清凭证广播 rebind
+        // 克隆一份数 401(响应体留给页面);连到阈值就清凭证广播 rebind。
+        // 「未知设备」= 密钥已被撤销,立刻自愈(等 3 次只会让用户多转两圈)。
         try {
-          resp.clone().text().catch(function () {})
-          failBump().then(function (n) { if (n >= FAIL_LIMIT) return healRevoke() })
+          resp.clone().text().then(function (body) {
+            if (body && body.indexOf('未知设备') >= 0) return healRevoke(true)
+            return failBump().then(function (n) { if (n >= FAIL_LIMIT) return healRevoke() })
+          }).catch(function () {
+            failBump().then(function (n) { if (n >= FAIL_LIMIT) return healRevoke() })
+          })
         } catch (e2) {}
       } else if (resp.ok) {
         idbGet(FAIL_KEY).then(function (n) { if (n) idbPut(FAIL_KEY, 0) })
