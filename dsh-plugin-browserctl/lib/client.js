@@ -32,7 +32,7 @@ var import_dsh_client_store = require("@deepseek-ai/dsh-client-store");
 var import_jsx_runtime = require("react/jsx-runtime");
 var NS = "browserctl";
 var STYLE_ID = "browserctl/styles";
-var VERSION = true ? "1.0.70" : "dev";
+var VERSION = true ? "1.0.71" : "dev";
 var ABOUT_LINKS = {
   website: "https://remote.ymzcc.com/dsh-remote/",
   github: "https://github.com/Memorial-coder/dsh-remote-plugin",
@@ -2796,6 +2796,194 @@ function SessionDaysCard({ t, disabled }) {
       )) }),
       err && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { style: { margin: 0, fontSize: 12, lineHeight: "17px", color: "var(--dsw-alias-state-error-primary,#e5655c)" }, children: err }),
       /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { style: { margin: 0, fontSize: 12, lineHeight: "17px", color: "var(--dsw-alias-label-tertiary,#8b8f98)" }, children: t("sdHint") })
+    ] })
+  ] });
+}
+function SigEnforceCard({ t, reloadToken }) {
+  const [data, setData] = (0, import_react.useState)(null);
+  const [busy, setBusy] = (0, import_react.useState)(false);
+  const [confirming, setConfirming] = (0, import_react.useState)(false);
+  const [err, setErr] = (0, import_react.useState)("");
+  const [devsOpen, setDevsOpen] = (0, import_react.useState)(false);
+  const [acting, setActing] = (0, import_react.useState)("");
+  const [msg, setMsg] = (0, import_react.useState)("");
+  const [dedupeConfirm, setDedupeConfirm] = (0, import_react.useState)(false);
+  (0, import_react.useEffect)(() => {
+    let alive = true;
+    fetch(API_P + "/browserctl/api/sig", { cache: "no-store" }).then((r) => r.json().catch(() => ({}))).then((j) => {
+      if (alive && j && j.ok) setData(j);
+    }).catch(() => {
+    });
+    return () => {
+      alive = false;
+    };
+  }, [reloadToken]);
+  async function toggle(next) {
+    if (busy) return;
+    if (next && !confirming) {
+      setConfirming(true);
+      return;
+    }
+    setBusy(true);
+    setErr("");
+    setConfirming(false);
+    try {
+      const r = await fetch(API_P + "/browserctl/api/sig-toggle?enforce=" + (next ? "1" : "0"), { method: "POST", cache: "no-store" });
+      const j = await r.json().catch(() => ({}));
+      if (j && j.ok) setData((d) => ({ ...d || {}, enforce: !!next }));
+      else setErr(j && j.error || t("sigFail"));
+    } catch (e) {
+      setErr(t("sigFail"));
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function refetch() {
+    try {
+      const r = await fetch(API_P + "/browserctl/api/sig", { cache: "no-store" });
+      const j = await r.json().catch(() => ({}));
+      if (j && j.ok) setData(j);
+    } catch (e) {
+    }
+  }
+  async function revoke(dev) {
+    if (acting) return;
+    setActing(dev);
+    setMsg("");
+    try {
+      let r = await fetch(API_P + "/browserctl-gate/kick", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ dev })
+      }).catch(() => null);
+      if (!r || !r.ok) r = await fetch(API_P + "/browserctl/api/totp-kick?dev=" + encodeURIComponent(dev), { cache: "no-store" }).catch(() => null);
+      if (r && r.ok) {
+        setMsg(t("sigRevoked"));
+        await refetch();
+      } else setMsg(t("sigFail2"));
+    } catch (e) {
+      setMsg(t("sigFail2"));
+    } finally {
+      setActing("");
+    }
+  }
+  const dups = (() => {
+    const list = data && data.device_list || [];
+    const groups = {};
+    list.forEach((d) => {
+      const k = (d.name || "") + "|" + (d.ip || "");
+      (groups[k] = groups[k] || []).push(d);
+    });
+    const out = [];
+    Object.keys(groups).forEach((k) => {
+      const g = groups[k];
+      if (g.length < 2) return;
+      const keep = g.slice().sort((a, b) => (b.has_pubkey ? 1 : 0) - (a.has_pubkey ? 1 : 0) || (b.last_seen || 0) - (a.last_seen || 0))[0];
+      g.forEach((d) => {
+        if (d.dev !== keep.dev) out.push(d.dev);
+      });
+    });
+    return out;
+  })();
+  async function dedupe() {
+    if (acting || !dups.length) return;
+    setActing("dedupe");
+    setMsg("");
+    setDedupeConfirm(false);
+    try {
+      for (const dev of dups) {
+        let r = await fetch(API_P + "/browserctl-gate/kick", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ dev })
+        }).catch(() => null);
+        if (!r || !r.ok) r = await fetch(API_P + "/browserctl/api/totp-kick?dev=" + encodeURIComponent(dev), { cache: "no-store" }).catch(() => null);
+      }
+      setMsg(t("sigDedupeDone"));
+      await refetch();
+    } catch (e) {
+      setMsg(t("sigFail2"));
+    } finally {
+      setActing("");
+    }
+  }
+  const enforce = !!(data && data.enforce);
+  return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlCard", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlCardHead", "data-open": "true", style: { cursor: "default" }, children: [
+      Svg.shield,
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: t("sigTitle") }),
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: {
+        fontWeight: 500,
+        fontSize: 12,
+        color: data ? enforce ? "var(--dsw-alias-state-success-primary,#34b371)" : "var(--dsw-alias-label-tertiary,#8b8f98)" : "inherit"
+      }, children: data ? enforce ? t("sigOn") : t("sigOff") : t("sigLoading") })
+    ] }),
+    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlCardBody", "data-open": "true", children: [
+      data && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { style: { margin: 0, fontSize: 12, lineHeight: "17px", color: "var(--dsw-alias-label-tertiary,#8b8f98)" }, children: t("sigCounts").replace("{d}", String(data.devices ?? 0)).replace("{k}", String(data.devices_with_key ?? 0)).replace("{p}", String(data.devices_with_pubkey ?? 0)) }),
+      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlSwitchRow", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { className: "dshBrowserCtlSwitchLabel", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlSwitchTitle", children: t("sigSwitchLabel") }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlSwitchHint", children: t("sigSwitchHint") })
+        ] }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(
+          "button",
+          {
+            type: "button",
+            role: "switch",
+            "aria-checked": enforce,
+            "aria-label": t("sigSwitchLabel"),
+            className: "dshBrowserCtlSwitch",
+            "data-on": enforce ? "true" : "false",
+            "data-busy": busy ? "true" : "false",
+            disabled: busy || !data,
+            onClick: () => toggle(!enforce),
+            children: [
+              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlSwitchKnob", "aria-hidden": "true" }),
+              busy && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlSwitchBusy", "aria-hidden": "true" })
+            ]
+          }
+        )
+      ] }),
+      confirming && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlActions", role: "alertdialog", "aria-label": t("sigYes"), children: [
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { style: { margin: 0, fontSize: 12, lineHeight: "17px", color: "var(--dsw-alias-state-warning-primary,#c78d33)" }, children: t("sigConfirm") }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "primary", size: "sm", disabled: busy, onClick: () => toggle(true), children: t("sigYes") }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "secondary", size: "sm", disabled: busy, onClick: () => setConfirming(false), children: t("sigCancel") })
+      ] }),
+      data && Array.isArray(data.device_list) && data.device_list.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { style: { marginTop: 10 }, children: [
+        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", { type: "button", className: "dshBrowserCtlCardHead", "data-open": devsOpen ? "true" : "false", style: { width: "100%", background: "transparent", border: 0, cursor: "pointer", padding: "4px 0", display: "flex", alignItems: "center", gap: 6 }, onClick: () => setDevsOpen((o) => !o), children: [
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: { fontSize: 12, fontWeight: 600 }, children: t("sigDevs") }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlCardStat", style: { color: "var(--dsw-alias-label-tertiary,#8b8f98)" }, children: data.device_list.length }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: { flex: 1 } }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { "aria-hidden": "true", style: { fontSize: 10, color: "var(--dsw-alias-label-tertiary,#8b8f98)" }, children: devsOpen ? "\u25B2" : "\u25BC" })
+        ] }),
+        devsOpen && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { style: { display: "flex", flexDirection: "column", gap: 6 }, children: [
+          data.device_list.map((d) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { style: { display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", border: "1px solid var(--dsw-alias-separator,#2a2c33)", borderRadius: 8 }, children: [
+            /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { style: { flex: 1, minWidth: 0 }, children: [
+              /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { style: { fontSize: 12, color: "var(--dsw-alias-label-primary,#e7e9ee)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }, children: [
+                d.name || d.dev || "(\u672A\u547D\u540D)",
+                d.online ? " \xB7 \u5728\u7EBF" : ""
+              ] }),
+              /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { style: { fontSize: 11, color: "var(--dsw-alias-label-tertiary,#8b8f98)" }, children: [
+                d.kind || "?",
+                " \xB7 ",
+                d.ip || "?",
+                " \xB7 ",
+                d.last_seen ? new Date(d.last_seen * 1e3).toLocaleString() : "\u2014"
+              ] })
+            ] }),
+            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: { fontSize: 10, padding: "1px 6px", borderRadius: 999, flexShrink: 0, background: d.has_pubkey ? "rgba(52,179,113,.16)" : d.has_key ? "rgba(61,126,255,.14)" : "rgba(229,101,92,.14)", color: d.has_pubkey ? "#34b371" : d.has_key ? "#3d7eff" : "#e5655c" }, children: d.has_pubkey ? t("sigHasPub") : d.has_key ? t("sigHasKeyB") : t("sigNoKey") }),
+            /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "ghost", size: "sm", disabled: !!acting, onClick: () => revoke(d.dev), children: acting === d.dev ? t("sigRevoking") : t("sigRevoke") })
+          ] }, d.dev)),
+          dups.length > 0 && (dedupeConfirm ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlActions", role: "alertdialog", "aria-label": t("sigDedupeYes"), children: [
+            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { style: { margin: 0, fontSize: 12, lineHeight: "17px", color: "var(--dsw-alias-state-warning-primary,#c78d33)" }, children: t("sigDedupeHint").replace("{n}", String(dups.length)) }),
+            /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "primary", size: "sm", disabled: !!acting, onClick: dedupe, children: t("sigDedupeYes") }),
+            /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "secondary", size: "sm", disabled: !!acting, onClick: () => setDedupeConfirm(false), children: t("sigCancel") })
+          ] }) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: { display: "flex", justifyContent: "center", paddingTop: 2 }, children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "secondary", size: "sm", disabled: !!acting, onClick: () => setDedupeConfirm(true), children: t("sigDedupe").replace("{n}", String(dups.length)) }) })),
+          msg && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { style: { margin: 0, fontSize: 12, textAlign: "center", color: "var(--dsw-alias-state-success-primary,#34b371)" }, children: msg })
+        ] })
+      ] }),
+      err && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { style: { margin: 0, fontSize: 12, lineHeight: "17px", color: "var(--dsw-alias-state-error-primary,#e5655c)" }, children: err }),
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { style: { margin: 0, fontSize: 12, lineHeight: "17px", color: "var(--dsw-alias-label-tertiary,#8b8f98)" }, children: t("sigHint") })
     ] })
   ] });
 }

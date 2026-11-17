@@ -2877,6 +2877,189 @@ function SessionDaysCard({ t, disabled }) {
 /* ---------- 批次1-A5:主机遥测(CPU/内存/磁盘;闸机 10s 缓存) ---------- */
 /* ---------- L1 设备签名强制开关 + 设备凭证管理(闸机 sig-toggle;GET 读/POST 仅本机管理员) ---------- */
 
+function SigEnforceCard({ t, reloadToken }) {
+  const [data, setData] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [confirming, setConfirming] = useState(false)
+  const [err, setErr] = useState('')
+  const [devsOpen, setDevsOpen] = useState(false)
+  const [acting, setActing] = useState('')
+  const [msg, setMsg] = useState('')
+  const [dedupeConfirm, setDedupeConfirm] = useState(false)
+  useEffect(() => {
+    let alive = true
+    fetch(API_P + '/browserctl/api/sig', { cache: 'no-store' })
+      .then(r => r.json().catch(() => ({})))
+      .then(j => { if (alive && j && j.ok) setData(j) })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [reloadToken])
+  async function toggle(next) {
+    if (busy) return
+    if (next && !confirming) { setConfirming(true); return }
+    setBusy(true); setErr(''); setConfirming(false)
+    try {
+      const r = await fetch(API_P + '/browserctl/api/sig-toggle?enforce=' + (next ? '1' : '0'), { method: 'POST', cache: 'no-store' })
+      const j = await r.json().catch(() => ({}))
+      if (j && j.ok) setData(d => ({ ...(d || {}), enforce: !!next }))
+      else setErr((j && j.error) || t('sigFail'))
+    } catch (e) {
+      setErr(t('sigFail'))
+    } finally {
+      setBusy(false)
+    }
+  }
+  async function refetch() {
+    try {
+      const r = await fetch(API_P + '/browserctl/api/sig', { cache: 'no-store' })
+      const j = await r.json().catch(() => ({}))
+      if (j && j.ok) setData(j)
+    } catch (e) {}
+  }
+  async function revoke(dev) {
+    if (acting) return
+    setActing(dev); setMsg('')
+    try {
+      let r = await fetch(API_P + '/browserctl-gate/kick', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ dev }),
+      }).catch(() => null)
+      if (!r || !r.ok) r = await fetch(API_P + '/browserctl/api/totp-kick?dev=' + encodeURIComponent(dev), { cache: 'no-store' }).catch(() => null)
+      if (r && r.ok) { setMsg(t('sigRevoked')); await refetch() } else setMsg(t('sigFail2'))
+    } catch (e) { setMsg(t('sigFail2')) } finally { setActing('') }
+  }
+  const dups = (() => {
+    const list = (data && data.device_list) || []
+    const groups = {}
+    list.forEach(d => { const k = (d.name || '') + '|' + (d.ip || ''); (groups[k] = groups[k] || []).push(d) })
+    const out = []
+    Object.keys(groups).forEach(k => {
+      const g = groups[k]
+      if (g.length < 2) return
+      const keep = g.slice().sort((a, b) => ((b.has_pubkey ? 1 : 0) - (a.has_pubkey ? 1 : 0)) || ((b.last_seen || 0) - (a.last_seen || 0)))[0]
+      g.forEach(d => { if (d.dev !== keep.dev) out.push(d.dev) })
+    })
+    return out
+  })()
+  async function dedupe() {
+    if (acting || !dups.length) return
+    setActing('dedupe'); setMsg(''); setDedupeConfirm(false)
+    try {
+      for (const dev of dups) {
+        let r = await fetch(API_P + '/browserctl-gate/kick', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ dev }),
+        }).catch(() => null)
+        if (!r || !r.ok) r = await fetch(API_P + '/browserctl/api/totp-kick?dev=' + encodeURIComponent(dev), { cache: 'no-store' }).catch(() => null)
+      }
+      setMsg(t('sigDedupeDone')); await refetch()
+    } catch (e) { setMsg(t('sigFail2')) } finally { setActing('') }
+  }
+  const enforce = !!(data && data.enforce)
+  return (
+    <div className="dshBrowserCtlCard">
+      <div className="dshBrowserCtlCardHead" data-open="true" style={{ cursor: 'default' }}>
+        {Svg.shield}
+        <span>{t('sigTitle')}</span>
+        <span style={{
+          fontWeight: 500, fontSize: 12,
+          color: data ? (enforce ? 'var(--dsw-alias-state-success-primary,#34b371)' : 'var(--dsw-alias-label-tertiary,#8b8f98)') : 'inherit',
+        }}>{data ? (enforce ? t('sigOn') : t('sigOff')) : t('sigLoading')}</span>
+      </div>
+      <div className="dshBrowserCtlCardBody" data-open="true">
+        {data && (
+          <p style={{ margin: 0, fontSize: 12, lineHeight: '17px', color: 'var(--dsw-alias-label-tertiary,#8b8f98)' }}>
+            {t('sigCounts').replace('{d}', String(data.devices ?? 0)).replace('{k}', String(data.devices_with_key ?? 0)).replace('{p}', String(data.devices_with_pubkey ?? 0))}
+          </p>
+        )}
+        <div className="dshBrowserCtlSwitchRow">
+          <span className="dshBrowserCtlSwitchLabel">
+            <span className="dshBrowserCtlSwitchTitle">{t('sigSwitchLabel')}</span>
+            <span className="dshBrowserCtlSwitchHint">{t('sigSwitchHint')}</span>
+          </span>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={enforce}
+            aria-label={t('sigSwitchLabel')}
+            className="dshBrowserCtlSwitch"
+            data-on={enforce ? 'true' : 'false'}
+            data-busy={busy ? 'true' : 'false'}
+            disabled={busy || !data}
+            onClick={() => toggle(!enforce)}
+          >
+            <span className="dshBrowserCtlSwitchKnob" aria-hidden="true" />
+            {busy && <span className="dshBrowserCtlSwitchBusy" aria-hidden="true" />}
+          </button>
+        </div>
+        {confirming && (
+          <div className="dshBrowserCtlActions" role="alertdialog" aria-label={t('sigYes')}>
+            <p style={{ margin: 0, fontSize: 12, lineHeight: '17px', color: 'var(--dsw-alias-state-warning-primary,#c78d33)' }}>{t('sigConfirm')}</p>
+            <Button variant="primary" size="sm" disabled={busy} onClick={() => toggle(true)}>{t('sigYes')}</Button>
+            <Button variant="secondary" size="sm" disabled={busy} onClick={() => setConfirming(false)}>{t('sigCancel')}</Button>
+          </div>
+        )}
+        {data && Array.isArray(data.device_list) && data.device_list.length > 0 && (
+          <div style={{ marginTop: 10 }}>
+            <button type="button" className="dshBrowserCtlCardHead" data-open={devsOpen ? 'true' : 'false'} style={{ width: '100%', background: 'transparent', border: 0, cursor: 'pointer', padding: '4px 0', display: 'flex', alignItems: 'center', gap: 6 }} onClick={() => setDevsOpen(o => !o)}>
+              <span style={{ fontSize: 12, fontWeight: 600 }}>{t('sigDevs')}</span>
+              <span className="dshBrowserCtlCardStat" style={{ color: 'var(--dsw-alias-label-tertiary,#8b8f98)' }}>{data.device_list.length}</span>
+              <span style={{ flex: 1 }} />
+              <span aria-hidden="true" style={{ fontSize: 10, color: 'var(--dsw-alias-label-tertiary,#8b8f98)' }}>{devsOpen ? '▲' : '▼'}</span>
+            </button>
+            {devsOpen && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {data.device_list.map(d => (
+                  <div key={d.dev} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', border: '1px solid var(--dsw-alias-separator,#2a2c33)', borderRadius: 8 }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12, color: 'var(--dsw-alias-label-primary,#e7e9ee)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {d.name || d.dev || '(未命名)'}{d.online ? ' · 在线' : ''}
+                      </div>
+                      <div style={{ fontSize: 11, color: 'var(--dsw-alias-label-tertiary,#8b8f98)' }}>
+                        {d.kind || '?'} · {d.ip || '?'} · {d.last_seen ? new Date(d.last_seen * 1000).toLocaleString() : '—'}
+                      </div>
+                    </div>
+                    <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 999, flexShrink: 0, background: d.has_pubkey ? 'rgba(52,179,113,.16)' : (d.has_key ? 'rgba(61,126,255,.14)' : 'rgba(229,101,92,.14)'), color: d.has_pubkey ? '#34b371' : (d.has_key ? '#3d7eff' : '#e5655c') }}>
+                      {d.has_pubkey ? t('sigHasPub') : (d.has_key ? t('sigHasKeyB') : t('sigNoKey'))}
+                    </span>
+                    <Button variant="ghost" size="sm" disabled={!!acting} onClick={() => revoke(d.dev)}>{acting === d.dev ? t('sigRevoking') : t('sigRevoke')}</Button>
+                  </div>
+                ))}
+                {dups.length > 0 && (
+                  dedupeConfirm ? (
+                    <div className="dshBrowserCtlActions" role="alertdialog" aria-label={t('sigDedupeYes')}>
+                      <p style={{ margin: 0, fontSize: 12, lineHeight: '17px', color: 'var(--dsw-alias-state-warning-primary,#c78d33)' }}>{t('sigDedupeHint').replace('{n}', String(dups.length))}</p>
+                      <Button variant="primary" size="sm" disabled={!!acting} onClick={dedupe}>{t('sigDedupeYes')}</Button>
+                      <Button variant="secondary" size="sm" disabled={!!acting} onClick={() => setDedupeConfirm(false)}>{t('sigCancel')}</Button>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 2 }}>
+                      <Button variant="secondary" size="sm" disabled={!!acting} onClick={() => setDedupeConfirm(true)}>
+                        {t('sigDedupe').replace('{n}', String(dups.length))}
+                      </Button>
+                    </div>
+                  )
+                )}
+                {msg && (
+                  <p style={{ margin: 0, fontSize: 12, textAlign: 'center', color: 'var(--dsw-alias-state-success-primary,#34b371)' }}>{msg}</p>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+        {err && (
+          <p style={{ margin: 0, fontSize: 12, lineHeight: '17px', color: 'var(--dsw-alias-state-error-primary,#e5655c)' }}>{err}</p>
+        )}
+        <p style={{ margin: 0, fontSize: 12, lineHeight: '17px', color: 'var(--dsw-alias-label-tertiary,#8b8f98)' }}>
+          {t('sigHint')}
+        </p>
+      </div>
+    </div>
+  )
+}
+
+/* ---------- 批次1-A5:主机遥测(CPU/内存/磁盘;闸机 10s 缓存) ---------- */
+
 function SysinfoCard({ t }) {
   const [d, setD] = useState(null)
   const [busy, setBusy] = useState(false)
