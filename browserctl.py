@@ -5816,8 +5816,10 @@ color:#fff;text-decoration:none;font-size:14px}
         # ① 免动态码兜底(2026-11-17):Cookie 本身就是 HMAC 签名的 30 天设备信任凭证。
         #    只要它有效、且设备档案在册(曾被配对/验证过),就直接重建会话并重铸密钥。
         #    这样「全部踢下线」/开关 2FA 只会让设备掉线重连,不会把手机和电脑一起锁死。
+        ip = self._client_ip()
         cookie_dev = self._gate_cookie_dev()
-        if cookie_dev and _device_known(cookie_dev) and not code:
+        if cookie_dev and cookie_dev not in _gate_kicked_set() \
+                and _device_known(cookie_dev) and not code:
             ua = self.headers.get("User-Agent", "")[:120]
             name = _friendly_device_name(ua)
             kind = "app" if self._is_app_ua() else "web"
@@ -5849,6 +5851,8 @@ color:#fff;text-decoration:none;font-size:14px}
             return False
         brute_clear(ip)
         dev = self._gate_cookie_dev()
+        if dev and dev in _gate_kicked_set():
+            dev = None  # 已踢设备不给旧身份:换新设备号,与 /verify 行为对齐
         if not dev:
             dev = (self.headers.get("X-BC-Dev") or "").strip() or _secrets.token_hex(8)
         ua = self.headers.get("User-Agent", "")[:120]
@@ -5952,9 +5956,21 @@ color:#fff;text-decoration:none;font-size:14px}
         with _devices_lock:
             n = sum(1 for d in _devices.values() if d.get("dev_key"))
             npk = sum(1 for d in _devices.values() if d.get("dev_pubkey"))
+            rows = sorted(_devices.values(), key=lambda d: -(d.get("last_seen") or 0))[:100]
+            device_list = [{
+                "dev": d.get("key") or "",
+                "name": d.get("name") or "",
+                "kind": d.get("kind") or "",
+                "ip": d.get("ip") or "",
+                "last_seen": int(d.get("last_seen") or 0),
+                "times": int(d.get("times") or 0),
+                "online": bool(d.get("online")),
+                "has_key": bool(d.get("dev_key")),
+                "has_pubkey": bool(d.get("dev_pubkey")),
+            } for d in rows]
         self._send_json(200, {"ok": True, "enforce": _sig_enforced(),
                               "devices": len(_devices), "devices_with_key": n,
-                              "devices_with_pubkey": npk})
+                              "devices_with_pubkey": npk, "device_list": device_list})
 
     # ---- App 发布管理 ----
 
