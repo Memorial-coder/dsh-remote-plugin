@@ -6339,7 +6339,7 @@ color:#fff;text-decoration:none;font-size:14px}
                 # 网页版用户全程无感,无需重扫码(dev-boot 靠 bc-gate cookie 走通)。
                 b'<script>try{navigator.serviceWorker.addEventListener("message",function(e){'
                 b'if(e.data&&e.data.type==="rebind"){try{sessionStorage.removeItem("bc-devkey-ok")}catch(e2){}'
-                b'location.href="browserctl-gate/dev-boot"}}});'
+                b'location.href="browserctl-gate/dev-boot"}});'
                 b'navigator.serviceWorker.register("sw.js")}catch(e){}</script>'
             )
             tags = (
