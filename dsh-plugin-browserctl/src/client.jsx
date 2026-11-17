@@ -2875,6 +2875,8 @@ function SessionDaysCard({ t, disabled }) {
 }
 
 /* ---------- 批次1-A5:主机遥测(CPU/内存/磁盘;闸机 10s 缓存) ---------- */
+/* ---------- L1 设备签名强制开关 + 设备凭证管理(闸机 sig-toggle;GET 读/POST 仅本机管理员) ---------- */
+
 function SysinfoCard({ t }) {
   const [d, setD] = useState(null)
   const [busy, setBusy] = useState(false)
@@ -4734,7 +4736,10 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
             </>
           )}
           {tab === 'app' && (
-            <AppPairCard t={t} reloadToken={reloadToken} />
+            <>
+              <AppPairCard t={t} reloadToken={reloadToken} />
+              <SigEnforceCard t={t} reloadToken={reloadToken} />
+            </>
           )}
           {tab === 'push' && (
             <PushCard t={t} reloadToken={reloadToken} />
@@ -5081,6 +5086,55 @@ export function apply(ctx) {
       sdHint: '新设备验证通过后,免重复验证的有效期。只影响之后新签发的会话;要立即让全部设备重新验证,用 2FA 页的「全部踢下线」。',
       sdSaveFail: '保存失败',
       sdLoadFail: '读取失败(闸机未运行?)',
+      // ---- 批次4-②:L1 设备签名强制开关 ----
+      sigTitle: '强制设备签名',
+      sigLoading: '…',
+      sigOff: '宽容期',
+      sigOn: '强制',
+      sigCounts: '设备 {d} · 持密钥 {k} · 持公钥 {p}',
+      sigSwitchLabel: '开启强制校验',
+      sigSwitchHint: '开启后,无有效设备签名的请求一律 401+引导页;持 30 天会话但未绑密钥的设备会被拒。',
+      sigConfirm: '再确认一次:所有常用设备都已升级到 v1.0.55+ 并完成密钥绑定?开启误伤自己时,回来这里关掉即可(立即生效)。',
+      sigYes: '确认开启',
+      sigCancel: '取消',
+      sigHint: '判据:运行日志里「宽容期:无签名请求」不再出现(事件 60s 节流,关掉手机浏览器后台刷新再等几分钟再看)。',
+      sigFail: '切换失败(需 DSH 重启后生效的 host 路由未就绪?)',
+      sigDevs: '设备凭证',
+      sigRevoke: '停止授权',
+      sigRevoking: '停止中…',
+      sigRevoked: '已停止授权,该设备需重新配对或输动态码',
+      sigHasPub: '公钥',
+      sigHasKeyB: '密钥',
+      sigNoKey: '无密钥',
+      sigDedupe: '一键去重({n})',
+      sigDedupeHint: '同机重复档案 {n} 台:停止授权并只保留最新一台',
+      sigDedupeYes: '确认去重',
+      sigDedupeDone: '去重完成',
+      sigFail2: '操作失败',
+      sigTitle: 'Enforce device signatures',
+      sigLoading: '…',
+      sigOff: 'Grace period',
+      sigOn: 'Enforced',
+      sigCounts: 'Devices {d} · With key {k} · With pubkey {p}',
+      sigSwitchLabel: 'Enable enforcement',
+      sigSwitchHint: 'When enabled, requests without a valid device signature are rejected with 401 + onboarding page; devices holding a 30-day session but no bound key are refused.',
+      sigConfirm: 'Confirm once more: all regular devices are on v1.0.55+ with keys bound? If this locks you out, come back here to switch it off (effective immediately).',
+      sigYes: 'Confirm',
+      sigCancel: 'Cancel',
+      sigHint: 'Criterion: "grace: unsigned request" stops appearing in the run log (events are throttled to 60s; close background phone browser tabs and wait a few minutes before judging).',
+      sigFail: 'Switch failed (host route not ready? needs DSH restart)',
+      sigDevs: 'Device credentials',
+      sigRevoke: 'Revoke',
+      sigRevoking: 'Revoking…',
+      sigRevoked: 'Revoked; the device must re-pair or verify with a code',
+      sigHasPub: 'PubKey',
+      sigHasKeyB: 'Key',
+      sigNoKey: 'No key',
+      sigDedupe: 'Dedupe ({n})',
+      sigDedupeHint: '{n} duplicate records of the same device: revoke them, keep the latest',
+      sigDedupeYes: 'Confirm dedupe',
+      sigDedupeDone: 'Deduplicated',
+      sigFail2: 'Operation failed',
       sysTitle: '主机状态',
       sysLoading: '读取中…',
       sysFail: '读取失败(闸机未运行?)',

@@ -2206,6 +2206,42 @@ export function apply(ctx, config = {}) {
           sendJson(res, 200, { ok: true })
           return
         }
+        if (route === '/browserctl/api/sig') {
+          // L1 设备签名状态(批次4 ②):转发闸机 sig-toggle GET。
+          // 返回 { enforce, devices, devices_with_key, devices_with_pubkey } 供面板卡片展示。
+          // 鉴权已由分发入口统一做(apiAuthorized),这里只管转发。
+          try {
+            const r = await fetch('http://127.0.0.1:' + gatePort() + '/browserctl-gate/sig-toggle', {
+              method: 'GET',
+              headers: adminHeaders(),
+              signal: AbortSignal.timeout(4000),
+            })
+            const j = await r.json()
+            sendJson(res, j && j.ok ? 200 : 503, j)
+          } catch (e) {
+            sendJson(res, 503, { ok: false, error: '闸机未运行' })
+          }
+          return
+        }
+        if (route === '/browserctl/api/sig-toggle') {
+          // L1 强制开关切换:闸机侧仅本机管理员可 POST,这里代持令牌转发。
+          // 面板先核对「宽容期事件归零」再点;闸机对错签名恒拒,误开也不放大权限。
+          // DSH webServer 排空请求体:enforce 走查询串(?enforce=1/0),与 totp-toggle 同口径;
+          // 鉴权/CSRF 已在分发入口集中处理(apiAuthorized + CSRF_PROTECTED),无需重复。
+          const enforce = (url.searchParams.get('enforce') || '').trim() === '1' ? '1' : '0'
+          try {
+            const r = await fetch('http://127.0.0.1:' + gatePort() + '/browserctl-gate/sig-toggle?enforce=' + enforce, {
+              method: 'POST',
+              headers: adminHeaders(),
+              signal: AbortSignal.timeout(4000),
+            })
+            const j = await r.json()
+            sendJson(res, j && j.ok ? 200 : 502, j)
+          } catch (e) {
+            sendJson(res, 503, { ok: false, error: '闸机未运行' })
+          }
+          return
+        }
         sendJson(res, 404, { error: 'unknown route' })
       },
   }), 'dshremote: routes')

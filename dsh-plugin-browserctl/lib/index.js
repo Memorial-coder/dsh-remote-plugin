@@ -4627,7 +4627,7 @@ function adminHeaders() {
   }
   return {};
 }
-var VERSION = true ? "1.0.66" : "dev";
+var VERSION = true ? "1.0.70" : "dev";
 var sessionTunnel = false;
 var ensureRunning = null;
 var lastEnsureError = "";
@@ -6538,6 +6538,35 @@ function apply(ctx, config = {}) {
           return;
         }
         sendJson(res, 200, { ok: true });
+        return;
+      }
+      if (route === "/browserctl/api/sig") {
+        try {
+          const r = await fetch("http://127.0.0.1:" + gatePort() + "/browserctl-gate/sig-toggle", {
+            method: "GET",
+            headers: adminHeaders(),
+            signal: AbortSignal.timeout(4e3)
+          });
+          const j = await r.json();
+          sendJson(res, j && j.ok ? 200 : 503, j);
+        } catch (e) {
+          sendJson(res, 503, { ok: false, error: "\u95F8\u673A\u672A\u8FD0\u884C" });
+        }
+        return;
+      }
+      if (route === "/browserctl/api/sig-toggle") {
+        const enforce = (url.searchParams.get("enforce") || "").trim() === "1" ? "1" : "0";
+        try {
+          const r = await fetch("http://127.0.0.1:" + gatePort() + "/browserctl-gate/sig-toggle?enforce=" + enforce, {
+            method: "POST",
+            headers: adminHeaders(),
+            signal: AbortSignal.timeout(4e3)
+          });
+          const j = await r.json();
+          sendJson(res, j && j.ok ? 200 : 502, j);
+        } catch (e) {
+          sendJson(res, 503, { ok: false, error: "\u95F8\u673A\u672A\u8FD0\u884C" });
+        }
         return;
       }
       sendJson(res, 404, { error: "unknown route" });
