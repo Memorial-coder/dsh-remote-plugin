@@ -3394,23 +3394,57 @@ body{background:#0d1117;color:#e8e4d9;font-family:-apple-system,BlinkMacSystemFo
 </html>"""
 
 # L1.5 引导页:无签名请求(enforce 开启时)的落点——装凭证、自动刷新。
+# v1.3.0(2026-11-17):
+#   ① 修「凭证已安装过但永远跳回本页」死循环:原来是 sessionStorage 标记已存在就直接
+#      return,连 SW 都不再注册/更新 → 旧 SW(1.2.3 及以前的空 X-BC-Dev 缺陷)永远换不掉。
+#      现在每次进来都 register + reg.update()(updateViaCache:'none')并 ping SW 拿版本/凭证态。
+#   ② 加账号主反馈通道:复制诊断信息 / 清除凭证并重试 / 去官网反馈,失败时自动显示,
+#      用户不用截图也能把 SW 版本、凭证态、错误原文发给开发者。
 _SIG_BOOT_HTML = r"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>正在验证设备…</title><style>
 html,body{background:#101216;color:#e8eaf0;font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;height:100%;margin:0}
-.c{max-width:340px;margin:18vh auto 0;padding:0 20px;text-align:center}
+.c{max-width:360px;margin:12vh auto 0;padding:0 20px 40px;text-align:center}
 .t{font-size:17px;font-weight:700;margin-bottom:10px}
 .s{font-size:13px;color:#9aa0ab;line-height:1.7}
-.e{font-size:13px;color:#e5655c;line-height:1.7;margin-top:12px;display:none}
+.e{font-size:13px;color:#e5655c;line-height:1.7;margin-top:12px;display:none;text-align:left;word-break:break-all}
+.btns{display:none;margin-top:18px;gap:10px;justify-content:center;flex-wrap:wrap}
+.btns.on{display:flex}
+button,a.b{appearance:none;border:1px solid #2a2f3a;background:#1b202a;color:#e8eaf0;font-size:13px;
+padding:9px 14px;border-radius:9px;cursor:pointer;text-decoration:none;line-height:1.2;font-family:inherit}
+button:active,a.b:active{background:#232a36}
+button[disabled]{opacity:.6}
+.diag{display:none;margin-top:14px;width:100%;height:150px;background:#0b0d11;color:#9aa0ab;border:1px solid #222834;
+border-radius:9px;padding:10px;font-size:11px;font-family:ui-monospace,Consolas,monospace;line-height:1.5;resize:vertical;box-sizing:border-box}
+.diag.on{display:block}
+.hint{font-size:12px;color:#6d7480;margin-top:14px;line-height:1.6;text-align:left}
 </style></head><body><div class="c">
 <div class="t">正在验证此设备…</div>
-<div class="s" id="st">首次使用需要安装设备凭证,几秒后自动继续。</div>
+<div class="s" id="st">首次使用需要安装设备凭证，几秒后自动继续。</div>
 <div class="e" id="err"></div>
+<div class="btns" id="btns">
+<button id="b-copy" type="button">复制诊断信息</button>
+<button id="b-retry" type="button">清除凭证并重试</button>
+<a class="b" id="b-site" href="https://remote.ymzcc.com/" target="_blank" rel="noopener">去官网反馈</a>
+</div>
+<textarea class="diag" id="diag" readonly></textarea>
+<div class="hint" id="hint">若长时间停在此页，可点「复制诊断信息」把内容发给开发者；本页不会显示任何密钥。</div>
 </div><script>
 (function(){
 'use strict';
-var st=document.getElementById('st'),err=document.getElementById('err');
-function fail(m){err.style.display='block';err.textContent=m;st.style.display='none';}
+var st=document.getElementById('st'),err=document.getElementById('err'),btns=document.getElementById('btns'),
+    diagEl=document.getElementById('diag'),hint=document.getElementById('hint');
+var segs=location.pathname.split('/'),root='/',gate='';
+for(var i=0;i<segs.length-1;i++){if(segs[i]==='p'&&segs[i+1]){root=segs.slice(0,i+2).join('/')+'/';break;}}
+gate=root+'browserctl-gate/';
+var gi=-1;for(var k=0;k<segs.length-1;k++){if(segs[k]==='browserctl-gate'){gi=k;break;}}
+if(gi>0){gate=segs.slice(0,gi+1).join('/')+'/';root=segs.slice(0,gi).join('/')+'/';}
+var D={boot:'1.3.0',url:location.href,root:root,gate:gate,sw:'(未注册)',cred:'?',tries:0,
+       dev:'(无)',err:'',ua:navigator.userAgent,at:new Date().toISOString()};
+function rd(k,d){try{return sessionStorage.getItem(k)||d}catch(e){return d}}
+function wr(k,v){try{sessionStorage.setItem(k,v)}catch(e){}}
+function render(){diagEl.value=JSON.stringify(D,null,2)}
+function fail(m){D.err=m;err.style.display='block';err.textContent=m;st.style.display='none';btns.classList.add('on');render()}
 function idb(){return new Promise(function(res,rej){
   var r=indexedDB.open('bc-devkey',1);
   r.onupgradeneeded=function(){r.result.createObjectStore('kv')};
@@ -3419,58 +3453,94 @@ function idb(){return new Promise(function(res,rej){
 function idbPut(k,v){return idb().then(function(db){return new Promise(function(res,rej){
   var tx=db.transaction('kv','readwrite');tx.objectStore('kv').put(v,k);
   tx.oncomplete=function(){res()};tx.onerror=function(){rej(tx.error)};});});}
-var segs=location.pathname.split('/');
-// 注意:segs[0] 是空串,join 出来天然带前导斜杠。再手拼 '/' 会得到
-// "//dsh-remote/p/<uid>/" —— 被浏览器当协议相对 URL,主机名变 dsh-remote,
-// SW 注册直接失败("origin of the provided scriptURL does not match")。
-var root='/';
-for(var i=0;i<segs.length-1;i++){
-  if(segs[i]==='p'&&segs[i+1]){root=segs.slice(0,i+2).join('/')+'/';break;}
-}
-if(!navigator.serviceWorker){fail('此浏览器不支持 Service Worker,请用系统浏览器打开或更新 App。');return;}
-if(sessionStorage.getItem('bc-devkey-ok')==='1'){
-  st.textContent='凭证已安装过;若反复跳回本页,请截图反馈(签名链路未生效)。';
-  return;
-}
-navigator.serviceWorker.register(root+'sw.js',{scope:root}).then(function(reg){
-  if(navigator.serviceWorker.controller)return reg;
-  return new Promise(function(res){
-    var w=navigator.serviceWorker;
-    function chk(){if(w.controller)return res(reg);setTimeout(chk,200);}
-    chk();
-  });
-}).then(function(){
-  return fetch(root+'dev-bind',{cache:'no-store'}).then(function(r){return r.text().then(function(t){try{return JSON.parse(t)}catch(e){throw new Error('dev-bind 返回非 JSON (HTTP '+r.status+' @'+root+') 内容:'+((t||'(空)').slice(0,80)));}});});
-}).then(function(j){
-  if(!j||!j.ok)throw new Error((j&&j.error)||'设备凭证获取失败');
-  window.__dev=j.dev;
-  // L2:优先走 ECDSA——让 SW 生成密钥对(私钥不出设备)并回传公钥,再登记到闸机。
-  return new Promise(function(res,rej){
-    var ch=new MessageChannel();
-    var to=setTimeout(function(){rej(new Error('genkeys-timeout'))},8000);
-    ch.port1.onmessage=function(m){
-      clearTimeout(to);
-      var d=m.data||{};
-      if(d.ok)res(d.pub);else rej(new Error(d.error||'genkeys-failed'));
-    };
-    navigator.serviceWorker.controller.postMessage({type:'genkeys'},[ch.port2]);
-  }).then(function(pub){
-    return fetch(root+'dev-bind?pubkey='+pub,{method:'POST',cache:'no-store'})
-      .then(function(r){return r.json()})
-      .then(function(j2){
-        if(!j2||!j2.ok)throw new Error((j2&&j2.error)||'公钥登记失败');
-        return idbPut('dev',window.__dev);
-      });
-  }).catch(function(e2){
-    // 回退:SW 1.1.0 存量(不认识 genkeys)或生成失败 → 老协议收对称密钥
-    if(!j.key)throw e2;
-    return idbPut('dev',j.dev).then(function(){return idbPut('key',j.key)});
-  });
-}).then(function(){
-  st.textContent='凭证已安装,正在进入…';
-  sessionStorage.setItem('bc-devkey-ok','1');
-  setTimeout(function(){location.href=root},400);
-}).catch(function(e){fail('设置失败:'+(e&&e.message?e.message:e)+' 关闭本页后重新打开通常即可恢复。')});
+function waitCtl(){return new Promise(function(res,rej){var n=0;(function chk(){
+  if(navigator.serviceWorker.controller)return res();
+  // 150 次 × 100ms = 15s：慢网/首次安装时 SW 激活可能要几秒，等太短会误报
+  if(n++>150)return rej(new Error('Service Worker 未接管本页（可能被浏览器禁用或处于无痕模式的限制）'));
+  setTimeout(chk,100);})();});}
+function ctlRetry(){var n=parseInt(rd('bc-boot-ctl','0'),10)||0;
+  if(n>=1)return false;wr('bc-boot-ctl',String(n+1));return true;}
+function ping(){return new Promise(function(res){var to=setTimeout(function(){res(null)},2500);
+  var ch=new MessageChannel();
+  ch.port1.onmessage=function(m){clearTimeout(to);res(m.data||null)};
+  try{navigator.serviceWorker.controller.postMessage({type:'ping'},[ch.port2])}
+  catch(e){clearTimeout(to);res(null)}});}
+function bind(){return fetch(gate+'dev-bind',{cache:'no-store'}).then(function(r){
+  return r.text().then(function(t){var j;try{j=JSON.parse(t)}catch(e){
+    throw new Error('dev-bind 返回非 JSON (HTTP '+r.status+' @'+gate+') 内容:'+((t||'(空)').slice(0,120)));}
+    if(!j||!j.ok)throw new Error((j&&j.error)||('设备凭证获取失败 (HTTP '+r.status+')'));return j;});});}
+function genkeys(){return new Promise(function(res,rej){var ch=new MessageChannel();
+  var to=setTimeout(function(){rej(new Error('genkeys 超时（Service Worker 没有回应）'))},8000);
+  ch.port1.onmessage=function(m){clearTimeout(to);var d=m.data||{};
+    if(d.ok)res(d.pub);else rej(new Error(d.error||'genkeys 失败'))};
+  try{navigator.serviceWorker.controller.postMessage({type:'genkeys'},[ch.port2])}
+  catch(e){clearTimeout(to);rej(new Error('SW 通信失败: '+e))}});}
+
+var tries=parseInt(rd('bc-boot-try','0'),10)||0,credTries=parseInt(rd('bc-boot-cred','0'),10)||0;
+D.tries=tries;D.credTries=credTries;render();
+if(!navigator.serviceWorker){fail('此浏览器不支持 Service Worker。请用 Chrome / Edge / Safari 打开本页；在 App 内请更新到最新版本。');return;}
+if(!(window.isSecureContext!==false)){fail('当前不是 HTTPS 安全上下文，浏览器会禁用设备凭证。请用 https 打开。');return;}
+
+navigator.serviceWorker.register(root+'sw.js',{scope:root,updateViaCache:'none'}).then(function(reg){
+  return reg.update().catch(function(){}).then(function(){return reg});
+}).then(function(){return waitCtl();})
+ .then(function(){return ping();})
+ .then(function(info){
+   D.sw=(info&&info.version)||'(无响应)';
+   D.cred=(info&&info.cred)?'yes':'no';
+   render();
+   // 凭证就绪且不是「刚被踢」的场景：直接进面板（最多 2 次，防止 401↔引导页来回跳）
+   if(info&&info.cred&&credTries<2){
+     wr('bc-boot-cred',String(credTries+1));
+     st.textContent='凭证已就绪，正在进入…';
+     setTimeout(function(){location.replace(root)},150);
+     return null;
+   }
+   if(tries>=3){fail('设备凭证反复安装失败（已重试 '+tries+' 次）。请点「复制诊断信息」把内容发给开发者。');return null;}
+   wr('bc-boot-try',String(tries+1));D.tries=tries+1;
+   st.textContent='正在安装设备凭证…';render();
+   return bind().then(function(j){
+     D.dev=(j.dev?String(j.dev).slice(0,10)+'…':'(无)');render();
+     return genkeys().then(function(pub){
+       return fetch(gate+'dev-bind?pubkey='+pub,{method:'POST',cache:'no-store'})
+         .then(function(r){return r.json()}).then(function(j2){
+           if(!j2||!j2.ok)throw new Error((j2&&j2.error)||'公钥登记失败');
+           return idbPut('dev',j.dev);});
+     }).catch(function(e2){
+       if(!j.key)throw e2;
+       return idbPut('dev',j.dev).then(function(){return idbPut('key',j.key)});
+     });
+   });
+ })
+ .then(function(r){
+   if(r===null)return;
+   st.textContent='凭证已安装，正在进入…';render();
+   wr('bc-devkey-ok','1');wr('bc-boot-try','0');wr('bc-boot-cred','0');
+   setTimeout(function(){location.replace(root)},250);
+ })
+ .catch(function(e){
+   if(/Service Worker 未接管/.test(String(e&&e.message||e)) && ctlRetry()){
+     st.textContent='正在重新初始化浏览器组件…';
+     setTimeout(function(){location.replace(location.href)},300);
+     return;
+   }
+   fail('设置失败:'+((e&&e.message)||e));
+   hint.textContent='可先点「清除凭证并重试」清掉本机旧凭证再装一次；仍不行请点「复制诊断信息」发给开发者。';
+ });
+
+document.getElementById('b-copy').addEventListener('click',function(){
+  render();diagEl.classList.add('on');
+  var b=this,txt=diagEl.value;
+  function done(){b.textContent='已复制';setTimeout(function(){b.textContent='复制诊断信息'},1800)}
+  if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(txt).then(done,function(){try{diagEl.select();document.execCommand('copy');done()}catch(e){}})}
+  else{try{diagEl.select();document.execCommand('copy');done()}catch(e){}}
+});
+document.getElementById('b-retry').addEventListener('click',function(){
+  var b=this;b.disabled=true;b.textContent='正在清除…';
+  wr('bc-devkey-ok','');wr('bc-boot-try','0');wr('bc-boot-cred','0');
+  var done=false;function go(){if(done)return;done=true;location.reload()}
+  try{var r=indexedDB.deleteDatabase('bc-devkey');r.onsuccess=go;r.onerror=go;r.onblocked=go;setTimeout(go,1200)}catch(e){go()}
+});
 })();
 </script></body></html>"""
 
