@@ -16,7 +16,7 @@
  *   凭证 + 向页面广播 rebind → 页面清 sessionStorage 引导标记并跳 dev-boot 重装。
  * 更新方式:修改本文件任意内容,浏览器下次访问会自动比对并激活新 SW。
  */
-const SW_VERSION = '1.2.2'
+const SW_VERSION = '1.2.3'
 var KV = { dev: '', key: '', priv: null, privjwk: '', pub: '' }
 
 function idb() {
@@ -122,7 +122,11 @@ function sign(method, path) {
 /* 签名路径口径:剥掉 /p/<port>/ 前缀 + 去尾斜杠,与闸机 _dev_sig_verify 同一规范。 */
 function normPath(url) {
   var p = new URL(url).pathname.replace(/\/+$/, '')
-  return p.replace(/^\/p\/[0-9]+(?=\/)/, '')
+  // 两种公网入口前缀都要剥: /p/<port>/ 与 uid 稳定形态 /dsh-remote/p/<uid>/
+  // （dsh-remote 的 uid 代理按 restPath 转发，闸机根本看不到前缀；不剥=签名恒不匹配）
+  var m = /^\/(?:[^/]+\/)?p\/[^/]+/.exec(p)
+  if (m) p = p.slice(m[0].length)
+  return p
 }
 var EXEMPT = ['/dev-bind', '/dev-boot']
 /* 豁免口径与闸机 _SIG_EXEMPT 一致(endswith):引导通道原生放行(不 respondWith,

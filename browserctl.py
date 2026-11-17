@@ -3420,9 +3420,12 @@ function idbPut(k,v){return idb().then(function(db){return new Promise(function(
   var tx=db.transaction('kv','readwrite');tx.objectStore('kv').put(v,k);
   tx.oncomplete=function(){res()};tx.onerror=function(){rej(tx.error)};});});}
 var segs=location.pathname.split('/');
+// 注意:segs[0] 是空串,join 出来天然带前导斜杠。再手拼 '/' 会得到
+// "//dsh-remote/p/<uid>/" —— 被浏览器当协议相对 URL,主机名变 dsh-remote,
+// SW 注册直接失败("origin of the provided scriptURL does not match")。
 var root='/';
 for(var i=0;i<segs.length-1;i++){
-  if(segs[i]==='p'&&segs[i+1]){root='/'+segs.slice(0,i+2).join('/')+'/';break;}
+  if(segs[i]==='p'&&segs[i+1]){root=segs.slice(0,i+2).join('/')+'/';break;}
 }
 if(!navigator.serviceWorker){fail('此浏览器不支持 Service Worker,请用系统浏览器打开或更新 App。');return;}
 if(sessionStorage.getItem('bc-devkey-ok')==='1'){
