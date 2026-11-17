@@ -929,7 +929,7 @@ function fmtBytes(n){ if(n==null||!isFinite(n)) return '—';
 function fmtUptime(s){ if(s==null||!isFinite(s)) return '—'; s=Math.max(0,Math.round(s));
   var d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);
   if(d>0) return d+' 天 '+h+' 小时'; if(h>0) return h+' 小时 '+m+' 分钟'; return m+' 分钟'; }
-function pct(a,b){ if(!a||!b) return null; var v=100*(a-b)/b; return (v<0?0:(v>100?100:v)); }
+function share(a,b){ if(a==null||b==null||b<=0) return null; var v=100*a/b; return (v<0?0:(v>100?100:v)); }
 function barRow(label,val,cls){
   return '<div class="br"><em><span>'+esc(label)+'</span><span>'+esc(val)+'</span></em>'
    +'<div class="bar"><i style="width:'+(cls==null?0:Math.round(cls))+'%"></i></div></div>'; }
@@ -946,7 +946,7 @@ function ensure(){
      +'<div class="head"><div class="dot"></div><div class="name">主机状态</div>'
      +'<div class="lat">延迟 —</div><button class="x" type="button">✕</button></div>'
      +'<div class="bd"></div>'
-     +'<div class="foot"><div class="hint">数据来自这台电脑上的闸机服务（约 10 秒缓存）；面板打开期间每 10 秒自动刷新。网络只统计经闸机的远程消耗，不是整机网卡流量。</div>'
+     +'<div class="foot"><div class="hint">数据来自这台电脑上的闸机服务（实时采样）；面板打开期间每 1 秒自动同步。网络只统计经闸机的远程消耗，不是整机网卡流量。</div>'
      +'<button class="rf" type="button">刷新</button></div>'
      +'</div>';
     var st=document.createElement('style'); st.textContent=css; mask.appendChild(st);
@@ -965,10 +965,10 @@ function closeP(){ opened=false; if(mask) mask.classList.remove('open');
   if(timer){ clearInterval(timer); timer=null; } }
 function openP(){ ensure(); opened=true; mask.classList.add('open');
   loadSys(); if(timer) clearInterval(timer);
-  timer=setInterval(function(){ if(opened) loadSys(); },10000); }
+  timer=setInterval(function(){ if(opened) loadSys(); },1000); }
 
 function renderSys(d,lat){
-  var g=d||{}; var memP=pct(g.memTotal&&g.memFree,g.memTotal);
+  var g=d||{}; var memP=(g.memTotal&&g.memFree!=null)?share(g.memTotal-g.memFree,g.memTotal):null;
   var pdA=null; (g.pdisks||[]).forEach(function(p){ if(p&&p.active!=null&&(pdA==null||p.active>pdA)) pdA=p.active; });
   var cells='<div class="cell"><b>'+(g.cpu==null?'—':Math.round(g.cpu)+'%')+'</b><span>CPU</span></div>'
    +'<div class="cell"><b>'+(memP==null?'—':Math.round(memP)+'%')+'</b><span>内存</span></div>'
@@ -992,7 +992,7 @@ function renderSys(d,lat){
   var lk=g.link||{};
   var nowT=Date.now(), rateDown=null, rateUp=null;
   if (lk.txBytes!=null&&lk.rxBytes!=null){
-    if (lastLink&&nowT-lastLink.t>=5000){
+    if (lastLink&&nowT-lastLink.t>=700){
       var dts=(nowT-lastLink.t)/1000;
       if (lk.txBytes>=lastLink.tx) rateDown=(lk.txBytes-lastLink.tx)/dts;
       if (lk.rxBytes>=lastLink.rx) rateUp=(lk.rxBytes-lastLink.rx)/dts;
@@ -1008,7 +1008,7 @@ function renderSys(d,lat){
   if (dsk.length){
     var s3='';
     dsk.forEach(function(k){ if(!k) return;
-      var pp=pct(k.used,k.total);
+      var pp=share(k.used,k.total);
       s3+=barRow((k.name||'盘')+' '+esc(fmtBytes(k.used))+' / '+esc(fmtBytes(k.total)),
         (pp==null?'—':pp.toFixed(0)+'%'),pp);
     });
@@ -6698,6 +6698,7 @@ def gate_serve():
                 # _sessions 在这里才是活的（看门狗是独立进程、恒空）。
                 _gate_heartbeat_tick()
                 _reqlog_flush_tick()
+                _sysinfo_idle_tick()   # 状态面板关了(60s 无请求)就停掉常驻遥测采样
                 _process_kicks()
                 _prune_bootstrap()   # 丢弃已过期的引导链接使用计数
                 # 清理老旧会话:超过 10 分钟未收到心跳的设备自动移除
@@ -6822,16 +6823,31 @@ def _port_open(port, timeout=1.0):
 
 # ---- 主机遥测(sysinfo,批次 1;契约见 docs/notes/功能批次-链路加固与文件遥测-2026-11-14.md) ----
 
-_SYSINFO_TTL = 10.0         # 成功缓存秒数:防高频轮询反复起 powershell
-_SYSINFO_FAIL_TTL = 3.0     # 失败负缓存秒数:采集挂了也别每次请求都重试打爆 CPU
+# 2026-11-17 改版(常驻采样):App 状态面板要「打开期间每 1 秒同步」,旧版「过期后起一个
+# powershell 采一次(成功缓存 10s)」拿不出 1s 级新鲜度,每秒起一次进程(~0.3-0.8s CPU)又会
+# 打爆 CPU。现在:首次 /sysinfo 拉起一条常驻 powershell 循环采样(每行一个 JSON),
+# Python 读线程只留最新样本;60s 无请求自动停掉省资源;父进程(fwd)退出时 powershell
+# 自检退出,不留孤儿进程。
+_SYSINFO_SAMPLE_MS = 800       # powershell 内采样间隔(前端按 1s 拉,留 ~200ms 余量)
+_SYSINFO_IDLE_SHUTDOWN = 60.0  # 多久没有 /sysinfo 请求就停掉常驻采样(面板关了别空转)
+_SYSINFO_FIRST_WAIT = 2.5      # 首次请求(或采样刚重启)最多等首样本的秒数
+_SYSINFO_STALE_RESTART = 10.0  # 超过这么久没新样本=采样进程僵死,杀掉等下次请求重启
 _sysinfo_lock = threading.Lock()
 _sysinfo_cache = {"ts": 0.0, "data": None}
+_sysinfo_req_ts = 0.0          # 最近一次 /sysinfo 请求时刻(面板开着的信号)
+_sysinfo_ps = {"proc": None, "started_at": 0.0}
 
-# 单次 pwsh 采样 CPU/内存/磁盘。全部走 CIM(Win32_*),不用 Get-Counter/typeperf
-# ——计数器名在中文 Windows 上是本地化的(「处理器时间」),硬编码英文路径必炸。
-# 输出纯 ASCII 单行 JSON,无中文 → 解码无坑;LoadPercentage 可能上报 null,Where 过滤。
+# 常驻 pwsh 采样循环(2026-11-17):一个 powershell 进程内 while 循环,每 ~0.8s 采一轮
+# CPU/内存/磁盘,每行输出一个 JSON,由 Python 读线程消费。全部走 CIM(Win32_*),不用
+# Get-Counter/typeperf——计数器名在中文 Windows 上是本地化的(「处理器时间」),硬编码
+# 英文路径必炸。输出纯 ASCII 单行 JSON(ConvertTo-Json 转义非 ASCII)→ 解码无坑。
+# 自保两件套:① 父进程(fwd)退出 → 每 5 拍查一次父进程,死了就退出,不留孤儿;
+# ② Python 侧闲置关停/僵死重启(见 _sysinfo_idle_tick/_gate_sysinfo_data)。
 _SYSINFO_PS = (
-    "$ErrorActionPreference='Stop';"
+    "$ErrorActionPreference='Continue';"
+    "$i=0;"
+    "while($true){"
+    "try{"
     "$os=Get-CimInstance Win32_OperatingSystem;"
     "$cpus=@(Get-CimInstance Win32_Processor | ForEach-Object { $_.LoadPercentage }"
     " | Where-Object { $_ -ne $null });"
@@ -6861,30 +6877,90 @@ _SYSINFO_PS = (
     "try{ $gm=@(Get-CimInstance Win32_PerfFormattedData_GPUPerformanceCounters_GPUProcessMemory"
     " | ForEach-Object { [int64]$_.LocalUsage });"
     "if($gm.Count){ $gpumem=($gm | Measure-Object -Sum).Sum } }catch{};"
-    "[ordered]@{ ok=$true; cpu=$cpu; memTotal=[int64]$os.TotalVisibleMemorySize;"
+    "$sj=([ordered]@{ ok=$true; cpu=$cpu; memTotal=[int64]$os.TotalVisibleMemorySize;"
     " memFree=[int64]$os.FreePhysicalMemory; boot=$os.LastBootUpTime.ToString('o');"
     " os=$os.Caption; procs=[uint32]$os.NumberOfProcesses;"
     " disks=$disks; pdisks=$pdisks; gpu=$gpu; gpuMem=$gpumem }"
-    " | ConvertTo-Json -Compress -Depth 4"
+    " | ConvertTo-Json -Compress -Depth 4);"
+    # [Console]::Out 直写 stdout 且 AutoFlush:重定向管道下逐行送达,不吃宿主缓冲
+    "[Console]::Out.WriteLine($sj);"
+    "}catch{};"
+    "$i++;"
+    "if(($i % 5) -eq 0){"
+    "try{ $ppid=(Get-CimInstance Win32_Process -Filter ('ProcessId=' + $PID)).ParentProcessId;"
+    "if(-not (Get-Process -Id $ppid -ErrorAction SilentlyContinue)){ break } }catch{}"
+    "};"
+    f"Start-Sleep -Milliseconds {_SYSINFO_SAMPLE_MS}"
+    "}"
 )
 
 
-def _collect_sysinfo(timeout=15.0):
-    """跑一次 pwsh 采样。文本捕获 errors=replace(kb/04 第 12 条),失败返回 ok:false。"""
+def _sysinfo_kill_locked():
+    """持锁杀掉常驻采样进程(闲置关停/僵死重启用)。读线程检测到 EOF 会自行清指针。"""
+    p = _sysinfo_ps["proc"]
+    _sysinfo_ps["proc"] = None
+    if p is not None:
+        try:
+            p.kill()
+        except Exception:
+            pass
+
+
+def _sysinfo_start_locked():
+    """持锁确保常驻采样在跑(僵死/刚启动则重新拉起)。返回 True=有采样在跑。
+    文本捕获 errors=replace(kb/04 第 12 条);读线程为 daemon,进程退出不阻塞。"""
+    p = _sysinfo_ps["proc"]
+    if p is not None and p.poll() is None:
+        return True
     try:
-        r = subprocess.run(["powershell", "-NoProfile", "-Command", _SYSINFO_PS],
-                           capture_output=True, text=True, errors="replace",
-                           timeout=timeout, creationflags=CREATE_NO_WINDOW)
-        if r.returncode != 0:
-            return {"ok": False, "error": "采集失败(exit %d)" % r.returncode}
-        data = json.loads((r.stdout or "").strip())
-        if not isinstance(data, dict):
-            return {"ok": False, "error": "采集输出异常"}
-        return data
-    except subprocess.TimeoutExpired:
-        return {"ok": False, "error": "采集超时"}
-    except Exception as e:
-        return {"ok": False, "error": "采集异常: %s" % e}
+        proc = subprocess.Popen(
+            ["powershell", "-NoProfile", "-Command", _SYSINFO_PS],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            text=True, errors="replace", bufsize=1,
+            creationflags=CREATE_NO_WINDOW)
+    except Exception:
+        _sysinfo_ps["proc"] = None
+        return False
+    _sysinfo_ps["proc"] = proc
+    _sysinfo_ps["started_at"] = time.time()
+
+    def _read():
+        # 读线程:每行一个 JSON 样本,只留最新(旧样本没人要,直接覆盖)
+        try:
+            for line in proc.stdout:
+                line = (line or "").strip()
+                if not line:
+                    continue
+                try:
+                    d = json.loads(line)
+                except Exception:
+                    continue
+                if isinstance(d, dict) and d.get("ok"):
+                    _sysinfo_cache["data"] = d
+                    _sysinfo_cache["ts"] = time.time()
+        except Exception:
+            pass
+        finally:
+            try:
+                if _sysinfo_ps["proc"] is proc:
+                    _sysinfo_ps["proc"] = None
+            except Exception:
+                pass
+
+    threading.Thread(target=_read, name="dsh-sysinfo-reader", daemon=True).start()
+    return True
+
+
+def _sysinfo_idle_tick():
+    """fwd housekeeping 每 2s 调一次:面板关了(60s 无 /sysinfo 请求)就停掉常驻采样。
+    只动内存里的进程句柄,任何异常都吞掉,绝不影响 housekeeping 其他职责。"""
+    try:
+        if time.time() - _sysinfo_req_ts > _SYSINFO_IDLE_SHUTDOWN:
+            with _sysinfo_lock:
+                if _sysinfo_ps["proc"] is not None:
+                    _sysinfo_kill_locked()
+    except Exception:
+        pass
 
 
 # 闸机进程启动时刻(≈加载本模块的时间):link.gateUptime 用(fwd 子进程各自计时)
@@ -6923,26 +6999,35 @@ def _gate_link_info(now):
 
 
 def _gate_sysinfo_data():
-    """带 10s 缓存的遥测数据;持锁采样防并发重复起 powershell。"""
+    """常驻采样版遥测:硬件部分是最新样本(最长 ~1s 旧),link/会话部分每次现算。
+    首次请求(或采样刚重启)同步等首样本,最多 _SYSINFO_FIRST_WAIT 秒;之后零等待。
+    采样进程跑了很久却一个样本都没出(环境坏)→ 不等,直接报错,别拖住每个请求。"""
+    global _sysinfo_req_ts
     now = time.time()
     with _sysinfo_lock:
-        if now - _sysinfo_cache["ts"] < _SYSINFO_TTL:
-            if _sysinfo_cache["data"]:
-                d = dict(_sysinfo_cache["data"])
-                d["cached"] = True
-                return d
-            return {"ok": False, "error": "上次采集失败,稍后重试"}
-        d = _collect_sysinfo()
-        if d.get("ok"):
-            # 链路/闸机自况并入同一响应(失败静默,不影响硬件遥测部分)
-            d["link"] = _gate_link_info(now)
-            _sysinfo_cache["ts"] = time.time()
-            _sysinfo_cache["data"] = d
-        else:
-            # 负缓存 3 秒(ts 往前拨到刚好只差 FAIL_TTL 过期),失败不重试打爆
-            _sysinfo_cache["ts"] = time.time() - (_SYSINFO_TTL - _SYSINFO_FAIL_TTL)
-            _sysinfo_cache["data"] = None
-        return dict(d)
+        _sysinfo_req_ts = now
+        started = _sysinfo_start_locked()
+        # 采样进程僵死(很久没新样本):杀掉重启,本次请求稍等首样本
+        if started and _sysinfo_cache["data"] is not None \
+                and now - _sysinfo_cache["ts"] > _SYSINFO_STALE_RESTART:
+            _sysinfo_kill_locked()
+            started = _sysinfo_start_locked()
+    if _sysinfo_cache["data"] is None:
+        # 冷启动:等首样本;但采样进程明显跑不动(远超启动预算仍零样本)就别等了
+        born = _sysinfo_ps.get("started_at") or 0
+        hopeless = born and (now - born) > (_SYSINFO_FIRST_WAIT + 5.0)
+        deadline = now + _SYSINFO_FIRST_WAIT
+        while not hopeless and _sysinfo_cache["data"] is None and time.time() < deadline:
+            if not _sysinfo_start_locked():
+                break
+            time.sleep(0.1)
+    d = _sysinfo_cache["data"]
+    if d is None:
+        return {"ok": False, "error": "遥测采集启动中,请稍候再刷新"}
+    out = dict(d)
+    # 链路/闸机自况每次现算(失败静默,不影响硬件遥测部分):速率/累计字节/活跃会话实时
+    out["link"] = _gate_link_info(now)
+    return out
 
 
 def _gate_is_ours(port, timeout=1.5):
