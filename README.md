@@ -1,6 +1,6 @@
 # DshRemote · 让 DeepSeek 助手随时随地远程访问
 
-> DSH 远程助手（DshRemote）：一款 [DeepSeek Harness (DSH)](https://dsh.venice.ai) Web 面板配套工具，
+> DSH 远程助手（DshRemote）：一款 [DeepSeek Harness (DSH)](https://www.deepseek.com/en/harness/) Web 面板配套工具，
 > 一键把本机 DSH 面板安全穿透到手机与外网浏览器，随时随地远程控制自己的电脑，全程 AI 辅助。
 
 > 在线体验：[立即体验 DshRemote](https://remote.ymzcc.com/dsh-remote/)
