@@ -2928,6 +2928,14 @@ function SigEnforceCard({ t, reloadToken }) {
     } catch (e) { setHealth({ ok: false }) }
   }
   useEffect(() => { loadHealth() }, [reloadToken])
+  // 状态轮询(2026-11-18 用户实测:别处开/关后本面板一直显示旧值):
+  // 5s 一刷 + 标签页切回前台立刻刷,开关状态/授权台数不再需要手动刷新页面。
+  useEffect(() => {
+    const timer = setInterval(() => { refetch(); loadHealth() }, 5000)
+    const onVis = () => { if (!document.hidden) { refetch(); loadHealth() } }
+    document.addEventListener('visibilitychange', onVis)
+    return () => { clearInterval(timer); document.removeEventListener('visibilitychange', onVis) }
+  }, [])
   async function restartGate() {
     if (restarting) return
     setRestarting(true)

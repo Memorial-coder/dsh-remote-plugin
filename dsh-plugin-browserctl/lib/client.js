@@ -32,7 +32,7 @@ var import_dsh_client_store = require("@deepseek-ai/dsh-client-store");
 var import_jsx_runtime = require("react/jsx-runtime");
 var NS = "browserctl";
 var STYLE_ID = "browserctl/styles";
-var VERSION = true ? "1.0.75" : "dev";
+var VERSION = true ? "1.0.76" : "dev";
 var ABOUT_LINKS = {
   website: "https://remote.ymzcc.com/dsh-remote/",
   github: "https://github.com/Memorial-coder/dsh-remote-plugin",
@@ -2862,6 +2862,23 @@ function SigEnforceCard({ t, reloadToken }) {
   (0, import_react.useEffect)(() => {
     loadHealth();
   }, [reloadToken]);
+  (0, import_react.useEffect)(() => {
+    const timer = setInterval(() => {
+      refetch();
+      loadHealth();
+    }, 5e3);
+    const onVis = () => {
+      if (!document.hidden) {
+        refetch();
+        loadHealth();
+      }
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, []);
   async function restartGate() {
     if (restarting) return;
     setRestarting(true);
