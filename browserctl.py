@@ -2662,6 +2662,10 @@ def _dev_sig_verify(handler, path):
         return None
     if p.endswith(_SIG_EXEMPT):
         return None
+    # App 安装包下载:公开资源(无鉴权分发),必须免签——否则 enforce ON 后
+    # /app/download/<apk> 恒 401,App 内更新永远下载不到(2026-11-18 实测)。
+    if "/app/download/" in p:
+        return None
     # WebSocket 握手无法加自定义头(fetch 不覆盖 ws://),签名层豁免;
     # _dispatch 在 _relay_ws 前会强制校验 bc-ws 短时票据(闸机本地 secret 签,
     # 不是 link_secret),伪造 bc-gate cookie 单独开不了 WS。
@@ -3760,34 +3764,40 @@ GATE_HTML = r"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
 <style>
 *{box-sizing:border-box}
 html,body{margin:0;height:100%}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Microsoft YaHei',sans-serif;
-background:radial-gradient(1200px 600px at 50% -10%,#1e2430 0%,#121316 55%,#0d0e11 100%);
-color:#e7e9ee;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px;
+/* 色板与官网 theme.css 深色主题一致:纯灰阶、无渐变、无彩色 */
+:root{--bg:#0a0a0a;--soft:#101010;--bg-3:#161616;--ink:#f2f2f2;--ink-3:#666;--line:#232323;--line-2:#303030;
+--font:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;
+--mono:"SFMono-Regular",Consolas,"JetBrains Mono","Courier New",monospace}
+body{font-family:var(--font);background:var(--soft);color:var(--ink);
+display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px;
 -webkit-font-smoothing:antialiased}
 
-/* ===== 2FA 卡片 ===== */
-.card{width:min(380px,94vw);padding:30px 26px 26px;border:1px solid #2a2c33;border-radius:18px;
-background:linear-gradient(180deg,#1c1e24 0%,#181a1f 100%);
-box-shadow:0 24px 60px rgba(0,0,0,.55),0 1px 0 rgba(255,255,255,.04) inset;text-align:center}
-.badge{width:56px;height:56px;margin:0 auto 14px;border-radius:50%;display:flex;align-items:center;justify-content:center;
-color:#38bdf8;background:rgba(59,130,246,.14);border:1px solid rgba(59,130,246,.32)}
-.badge svg{display:block}
-h1{font-size:17px;font-weight:700;margin:0 0 6px;letter-spacing:.2px}
-.sub{color:#8b8f98;font-size:12.5px;line-height:19px;margin:0 0 20px}
-#otpGroup{position:relative;display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:8px;cursor:text}
-.ocell{width:40px;height:52px;border-radius:10px;border:1.5px solid #2f333c;background:#101115;color:#e7e9ee;font-size:24px;font-weight:700;font-family:ui-monospace,Consolas,monospace;text-align:center;outline:none;caret-color:#3d7eff;transition:border-color .15s,box-shadow .15s,transform .08s;-webkit-appearance:none;appearance:none;box-sizing:border-box;padding:0}.ocell:focus{border-color:#5b93ff;box-shadow:0 0 0 3px rgba(61,126,255,.14)}.ocell.filled{border-color:#3d7eff;box-shadow:0 0 0 3px rgba(61,126,255,.14)}
-.otp-cell{width:40px;height:52px;border-radius:10px;border:1.5px solid #2f333c;background:#101115;color:#e7e9ee;
-font-size:24px;font-weight:700;font-family:ui-monospace,Consolas,monospace;display:flex;align-items:center;justify-content:center;
-transition:border-color .15s,box-shadow .15s,transform .08s}
-.otp-cell.filled{border-color:#3d7eff;box-shadow:0 0 0 3px rgba(61,126,255,.14)}
-.otp-cell.cur{border-color:#5b93ff}
-.otp-div{width:12px;height:2px;background:#3a3e48;border-radius:2px;opacity:.7;margin:0 2px;flex:none}
-button#go{width:100%;padding:13px;font-size:14px;font-weight:600;border:none;border-radius:12px;
-background:linear-gradient(180deg,#4c8bff,#3d7eff);color:#fff;cursor:pointer;margin-top:6px;
-transition:filter .15s,transform .06s;box-shadow:0 8px 20px rgba(61,126,255,.28)}
-button#go:hover{filter:brightness(1.07)} button#go:active{transform:translateY(1px)} button#go:disabled{opacity:.55;cursor:default;box-shadow:none}
-.msg{margin-top:12px;font-size:12.5px;min-height:17px;color:#e5655c}
-.hint{margin-top:16px;padding-top:14px;border-top:1px solid #24272e;color:#6f747e;font-size:11.5px;line-height:17px}
+/* ===== 2FA 卡片(同官网登录卡:细边 + 圆角,无光晕)===== */
+.card{width:min(400px,100%);padding:34px 30px;border:1px solid var(--line-2);border-radius:18px;
+background:var(--bg);box-shadow:0 24px 80px rgba(0,0,0,.35)}
+h1{font-size:20px;font-weight:700;letter-spacing:-.02em;margin:0 0 4px}
+.sub{color:var(--ink-3);font-size:13px;line-height:1.6;margin:0 0 22px}
+
+/* ===== 验证码输入(对齐官网 CodeSlots:灰格 + 填满后内描边,无光晕)===== */
+.code-row{position:relative;display:flex;gap:8px;justify-content:center;margin:0 0 14px;
+cursor:text;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+.code-box{position:relative;width:44px;height:52px;border-radius:12px;background:var(--bg-3);color:var(--ink);
+display:flex;align-items:center;justify-content:center;font-size:22px;font-family:var(--mono);font-weight:600;
+font-variant-numeric:tabular-nums;transition:background-color .15s ease;user-select:none;-webkit-user-select:none}
+.code-box.filled{background:var(--bg);box-shadow:inset 0 0 0 1.5px var(--ink)}
+.code-box.active{box-shadow:inset 0 0 0 1.5px var(--ink)}
+.code-box.error{background:rgba(229,72,77,.18);box-shadow:inset 0 0 0 1.5px #e5484d}
+.code-box.active::after{content:'';position:absolute;width:1.5px;height:50%;top:25%;left:calc(50% - .75px);
+background:var(--ink);animation:cs-blink 1s linear infinite}
+@keyframes cs-blink{0%,49.9%{opacity:1}50%,100%{opacity:0}}
+/* 隐藏输入框透明覆盖在格子上:点击/自动聚焦都落在真实输入框上,移动端不必先点一下才能打字 */
+.code-input-hidden{position:absolute;left:0;top:0;width:100%;height:100%;opacity:0;z-index:1;
+border:none;background:transparent;outline:none;margin:0;padding:0;cursor:text;font-size:16px;caret-color:transparent}
+button#go{width:100%;height:46px;border:none;border-radius:10px;background:var(--ink);color:var(--bg);
+font-family:inherit;font-size:14px;font-weight:600;cursor:pointer;margin-top:6px;transition:opacity .12s}
+button#go:hover{opacity:.88} button#go:disabled{opacity:.5;cursor:default}
+.msg{font-size:12px;min-height:18px;color:#e5484d}
+.hint{margin-top:16px;padding-top:14px;border-top:1px solid var(--line);color:var(--ink-3);font-size:12px;line-height:1.65}
 
 /* ===== 开场动画 ===== */
 #introStageViewport{position:fixed;inset:0;width:100vw;height:100vh;height:100dvh;z-index:99999;background:#121212;overflow:hidden;user-select:none;-webkit-user-select:none;display:none}
@@ -3827,17 +3837,10 @@ font-family:ui-monospace,Consolas,monospace;letter-spacing:.8px;cursor:pointer;b
 </style></head><body>
 <div class="card" id="card">
   <div id="form">
-    <div class="badge"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.5 19.5 6v5.5c0 4.4-3.2 8.3-7.5 9.5-4.3-1.2-7.5-5.1-7.5-9.5V6z"/><path d="m8.6 12.1 2.4 2.4 4.4-4.6"/></svg></div>
-    <h1>双因素安全验证 (2FA)</h1>
-    <p class="sub">输入验证器 App 上的 6 位动态验证码</p>
-    <div id="otpGroup">
-      <input class="ocell" id="oc0" type="tel" maxlength="1" inputmode="numeric" autocomplete="one-time-code" value="" data-i="0">
-      <input class="ocell" id="oc1" type="tel" maxlength="1" inputmode="numeric" value="" data-i="1">
-      <input class="ocell" id="oc2" type="tel" maxlength="1" inputmode="numeric" value="" data-i="2">
-      <div class="otp-div"></div>
-      <input class="ocell" id="oc3" type="tel" maxlength="1" inputmode="numeric" value="" data-i="3">
-      <input class="ocell" id="oc4" type="tel" maxlength="1" inputmode="numeric" value="" data-i="4">
-      <input class="ocell" id="oc5" type="tel" maxlength="1" inputmode="numeric" value="" data-i="5">
+    <h1>两步验证</h1>
+    <p class="sub">输入验证器 App 上显示的 6 位动态验证码</p>
+    <div class="code-row" id="otpGroup">
+      <input class="code-input-hidden" id="otpCode" type="text" maxlength="6" inputmode="numeric" autocomplete="one-time-code" aria-label="6 位动态验证码">
     </div>
     <div class="msg" id="msg"></div>
     <button id="go">验证并进入</button>
@@ -3866,48 +3869,64 @@ var __BC_P=(function(){
 })();
 </script>
 <script>
-/* ---------- 2FA 六格输入 ---------- */
+/* ---------- 2FA 验证码输入(单输入框 + 六格展示,与官网登录页同款) ---------- */
 (function(){
-  const cells=[0,1,2,3,4,5].map(i=>document.getElementById('oc'+i)),msg=document.getElementById('msg'),go=document.getElementById('go');
-  function getVal(){return cells.map(c=>c.value.replace(/\D/g,'')).join('').slice(0,6);}
-  cells.forEach((c,i)=>{
-    c.addEventListener('input',function(){
-      const v=this.value.replace(/\D/g,'').slice(0,1);this.value=v;
-      const full=getVal();
-      if(full.length===6)submit(full);
-      else if(v&&i<5)cells[i+1].focus();
+  const group=document.getElementById('otpGroup'),input=document.getElementById('otpCode'),
+        msg=document.getElementById('msg'),go=document.getElementById('go');
+  const boxes=[];
+  for(let i=0;i<6;i++){
+    const b=document.createElement('div');b.className='code-box';b.setAttribute('data-index',i);
+    group.appendChild(b);boxes.push(b);
+  }
+  // 输入框放到格子上层:点击、粘贴、自动聚焦都落在真实输入框上
+  group.appendChild(input);
+  group.addEventListener('click',()=>input.focus());
+  let busy=false;
+  function render(){
+    const code=input.value.replace(/\D/g,'').slice(0,6);
+    input.value=code;
+    const focused=document.activeElement===input;
+    boxes.forEach((b,i)=>{
+      const ch=code[i]||'';
+      b.textContent=ch;
+      b.classList.toggle('filled',!!ch);
+      b.classList.toggle('active',focused&&i===code.length);
+      if(code.length)b.classList.remove('error');
     });
-    c.addEventListener('keydown',function(e){
-      if(e.key==='Backspace'&&!this.value&&i>0){cells[i-1].focus();cells[i-1].value='';e.preventDefault()}
-      if(e.key==='Enter')submit(getVal());
-      if(e.key==='ArrowLeft'&&i>0)cells[i-1].focus();
-      if(e.key==='ArrowRight'&&i<5)cells[i+1].focus();
-    });
-    c.addEventListener('focus',function(){this.select()});
-  });
-  document.addEventListener('paste',function(e){
-    e.preventDefault();
-    const t=(e.clipboardData||window.clipboardData).getData('text').replace(/\D/g,'').slice(0,6);
-    if(!t)return;
-    cells.forEach((c,i)=>{c.value=t[i]||''});
-    const next=cells[Math.min(t.length,5)];if(next)next.focus();
-    if(t.length===6)submit(t);
-  });
-  go.addEventListener('click',()=>submit(getVal()));
+    return code;
+  }
+  function fail(text){
+    busy=false;
+    msg.textContent=text;
+    input.value='';
+    boxes.forEach(b=>{b.textContent='';b.classList.remove('filled','error')});
+    go.disabled=false;go.textContent='验证并进入';
+    render();
+  }
   function submit(raw){
-    const v=(raw||'').replace(/\\D/g,'');
-    if(v.length!==6){msg.textContent='请输入完整的 6 位验证码';return}
-    msg.textContent='';go.disabled=true;go.textContent='正在校验…';
+    if(busy)return;
+    const v=(raw||'').replace(/\D/g,'').slice(0,6);
+    if(v.length!==6){msg.textContent='请输入完整的 6 位验证码';input.focus();return}
+    busy=true;msg.textContent='';go.disabled=true;go.textContent='正在校验…';
     verify(v);
   }
+  input.addEventListener('input',()=>{
+    const code=render();
+    if(code.length===6&&!busy)submit(code);
+  });
+  input.addEventListener('focus',render);
+  input.addEventListener('blur',render);
+  input.addEventListener('keydown',e=>{if(e.key==='Enter')submit(input.value)});
+  go.addEventListener('click',()=>submit(input.value));
+  render();
   window.__verifyHook=null;
   function verify(code){
     // 开发演示:?demo 直接成功(不走真实闸机)
     if(location.search.indexOf('demo')>=0){setTimeout(()=>onOk(),400);return}
     fetch(__BC_P+'/browserctl-gate/verify',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({code})})
       .then(r=>r.json())
-      .then(j=>{if(j.ok){onOk();return}msg.textContent=j.error||'验证失败';cells.forEach(c=>{c.value='';c.classList.remove('filled')});go.disabled=false;go.textContent='验证并进入';})
-      .catch(()=>{msg.textContent='网络错误,请重试';go.disabled=false;go.textContent='验证并进入';});
+      .then(j=>{if(j.ok){onOk();return}fail(j.error||'验证失败')})
+      .catch(()=>fail('网络错误,请重试'));
   }
   function onOk(){
     // 隐藏表单
