@@ -2886,6 +2886,10 @@ function SigEnforceCard({ t, reloadToken }) {
   const [acting, setActing] = useState('')
   const [msg, setMsg] = useState('')
   const [dedupeConfirm, setDedupeConfirm] = useState(false)
+  const [health, setHealth] = useState(null)
+  const [allConfirm, setAllConfirm] = useState(false)
+  const [allMsg, setAllMsg] = useState('')
+  const [restarting, setRestarting] = useState(false)
   useEffect(() => {
     let alive = true
     fetch(API_P + '/browserctl/api/sig', { cache: 'no-store' })
@@ -2915,6 +2919,36 @@ function SigEnforceCard({ t, reloadToken }) {
       const j = await r.json().catch(() => ({}))
       if (j && j.ok) setData(j)
     } catch (e) {}
+  }
+  async function loadHealth() {
+    try {
+      const r = await fetch(API_P + '/browserctl/api/sig-health', { cache: 'no-store' })
+      const j = await r.json().catch(() => ({}))
+      setHealth(j && j.ok ? j : { ok: false })
+    } catch (e) { setHealth({ ok: false }) }
+  }
+  useEffect(() => { loadHealth() }, [reloadToken])
+  async function restartGate() {
+    if (restarting) return
+    setRestarting(true)
+    try { await fetch(API_P + '/browserctl/api/gate-restart', { method: 'POST', cache: 'no-store' }) } catch (e) {}
+    let n = 0
+    const timer = setInterval(async () => {
+      n += 1; await loadHealth()
+      if (n >= 5) { clearInterval(timer); setRestarting(false) }
+    }, 2000)
+  }
+  async function revokeAll() {
+    if (acting) return
+    setActing('all'); setAllMsg('')
+    try {
+      const r = await fetch(API_P + '/browserctl/api/revoke-all', { method: 'POST', cache: 'no-store' })
+      const j = await r.json().catch(() => ({}))
+      if (j && j.ok) {
+        setAllMsg('已清除:' + (j.sessions || 0) + ' 台在线会话、' + (j.devices || 0) + ' 台设备密钥、' + (j.grants || 0) + ' 个未用配对码')
+        await refetch(); await loadHealth()
+      } else setAllMsg((j && j.error) || t('sigFail2'))
+    } catch (e) { setAllMsg(t('sigFail2')) } finally { setActing(''); setAllConfirm(false) }
   }
   async function revoke(dev) {
     if (acting) return
@@ -2992,6 +3026,17 @@ function SigEnforceCard({ t, reloadToken }) {
             {busy && <span className="dshBrowserCtlSwitchBusy" aria-hidden="true" />}
           </button>
         </div>
+        {health && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--dsw-alias-label-tertiary,#8b8f98)' }}>
+            <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: 999, flexShrink: 0, background: health.ok ? '#34b371' : '#e5655c' }} />
+            {health.ok
+              ? <span>闸机运行中 · 强制签名{health.enforce ? '已生效' : '未开启'} · 已授权 {health.devices_with_pubkey} 台 · 在线 {health.sessions} 台</span>
+              : <span style={{ color: '#e5655c' }}>闸机未响应(隧道/进程可能已停)</span>}
+            <span style={{ flex: 1 }} />
+            <button type="button" style={{ fontSize: 11, background: 'transparent', border: 0, color: 'inherit', cursor: 'pointer', padding: 0 }} onClick={loadHealth}>刷新</button>
+            <button type="button" style={{ fontSize: 11, background: 'transparent', border: 0, color: 'inherit', cursor: 'pointer', padding: 0 }} onClick={restartGate}>{restarting ? '重启中…' : '重启闸机'}</button>
+          </div>
+        )}
         {confirming && (
           <div className="dshBrowserCtlActions" role="alertdialog" aria-label={t('sigYes')}>
             <p style={{ margin: 0, fontSize: 12, lineHeight: '17px', color: 'var(--dsw-alias-state-warning-primary,#c78d33)' }}>{t('sigConfirm')}</p>
@@ -3046,6 +3091,22 @@ function SigEnforceCard({ t, reloadToken }) {
               </div>
             )}
           </div>
+        )}
+        {allConfirm ? (
+          <div className="dshBrowserCtlActions" role="alertdialog" aria-label="清除所有授权">
+            <p style={{ margin: 0, fontSize: 12, lineHeight: '17px', color: 'var(--dsw-alias-state-error-primary,#e5655c)' }}>
+              将撤销【所有设备】的登录会话与签名密钥,并作废未使用的配对码。之后每台手机/浏览器都必须重新扫码,确定继续?
+            </p>
+            <Button variant="primary" size="sm" disabled={!!acting} onClick={revokeAll}>{acting === 'all' ? '正在清除…' : '确认清除'}</Button>
+            <Button variant="secondary" size="sm" disabled={!!acting} onClick={() => setAllConfirm(false)}>{t('sigCancel')}</Button>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <Button variant="ghost" size="sm" disabled={!!acting} onClick={() => { setAllConfirm(true); setAllMsg('') }}>清除所有授权</Button>
+          </div>
+        )}
+        {allMsg && (
+          <p style={{ margin: 0, fontSize: 12, lineHeight: '17px', color: 'var(--dsw-alias-label-secondary,#c9ccd4)' }}>{allMsg}</p>
         )}
         {err && (
           <p style={{ margin: 0, fontSize: 12, lineHeight: '17px', color: 'var(--dsw-alias-state-error-primary,#e5655c)' }}>{err}</p>

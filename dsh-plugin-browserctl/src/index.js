@@ -2249,6 +2249,42 @@ export function apply(ctx, config = {}) {
           }
           return
         }
+        if (route === '/browserctl/api/sig-health') {
+          try {
+            const r = await fetch('http://127.0.0.1:' + gatePort() + '/browserctl-gate/healthz', {
+              method: 'GET', headers: adminHeaders(), signal: AbortSignal.timeout(4000),
+            })
+            const j = await r.json()
+            sendJson(res, j && j.ok ? 200 : 503, j)
+          } catch (e) {
+            sendJson(res, 503, { ok: false, error: '闸机未运行' })
+          }
+          return
+        }
+        if (route === '/browserctl/api/gate-restart') {
+          try {
+            const r = await fetch('http://127.0.0.1:' + gatePort() + '/browserctl-gate/gate-restart', {
+              method: 'POST', headers: adminHeaders(), signal: AbortSignal.timeout(4000),
+            })
+            const j = await r.json().catch(() => ({}))
+            sendJson(res, j && j.ok ? 200 : 502, j)
+          } catch (e) {
+            sendJson(res, 200, { ok: true, restarting: true, hint: '闸机已退出,正在重启' })
+          }
+          return
+        }
+        if (route === '/browserctl/api/revoke-all') {
+          try {
+            const r = await fetch('http://127.0.0.1:' + gatePort() + '/browserctl-gate/revoke-all', {
+              method: 'POST', headers: adminHeaders(), signal: AbortSignal.timeout(15000),
+            })
+            const j = await r.json()
+            sendJson(res, j && j.ok ? 200 : 502, j)
+          } catch (e) {
+            sendJson(res, 503, { ok: false, error: '闸机未运行' })
+          }
+          return
+        }
         sendJson(res, 404, { error: 'unknown route' })
       },
   }), 'dshremote: routes')

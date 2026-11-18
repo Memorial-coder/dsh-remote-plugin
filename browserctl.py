@@ -5826,6 +5826,9 @@ color:#fff;text-decoration:none;font-size:14px}
             else:
                 self._gate_push_config_read()
             return
+        if path.endswith("/healthz"):
+            self._gate_healthz()
+            return
         if path.endswith("/push-poll"):
             self._gate_push_poll()
             return
@@ -5853,6 +5856,12 @@ color:#fff;text-decoration:none;font-size:14px}
                 return
             if path.endswith("/kick-all"):
                 self._gate_kick_all()
+                return
+            if path.endswith("/gate-restart"):
+                self._gate_restart()
+                return
+            if path.endswith("/revoke-all"):
+                self._gate_revoke_all()
                 return
             if path.endswith("/verify"):
                 self._gate_verify()
@@ -6666,6 +6675,101 @@ color:#fff;text-decoration:none;font-size:14px}
         except Exception:
             pass
         self._send_json(200, {"ok": True})
+
+    def _gate_revoke_all(self):
+        """一键清除所有授权(2026-11-18 用户需求):撤销全部设备的登录会话与签名密钥,
+        并作废所有未使用的配对码/引导 token。执行后每台设备都必须重新扫码。
+
+        与「全部踢下线」的区别:踢下线只遍历在线设备,离线设备的档案密钥会留着,
+        回来照旧能用;这里是真·全清——把设备档案里的 dev_pubkey / dev_key 一起抹掉。
+        幂等:没有任何授权时返回 0/0/0,不报错、不改动任何东西。
+        """
+        if not self._is_admin_call():
+            self._send_json(403, {"ok": False, "error": "仅限本机管理员"})
+            return
+        with _gate_lock:
+            n_sess = len(_sessions)
+            _sessions.clear()
+        n_dev = 0
+        dev_ids = []
+        try:
+            rows = json.loads(DEVICES_FILE.read_text(encoding="utf-8")) if DEVICES_FILE.exists() else []
+        except Exception:
+            rows = []
+        if isinstance(rows, list):
+            for r in rows:
+                if not isinstance(r, dict):
+                    continue
+                if r.get("dev_pubkey") or r.get("dev_key"):
+                    n_dev += 1
+                r.pop("dev_pubkey", None)
+                r.pop("dev_key", None)
+                r["online"] = False
+                if r.get("dev"):
+                    dev_ids.append(r["dev"])
+            try:
+                tmp = DEVICES_FILE.with_suffix(".tmp")
+                tmp.write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
+                os.replace(tmp, DEVICES_FILE)
+            except Exception:
+                pass
+        n_grant = 0
+        try:
+            if GRANTS_FILE.exists():
+                g = json.loads(GRANTS_FILE.read_text(encoding="utf-8"))
+                if isinstance(g, dict):
+                    n_grant = len(g)
+                GRANTS_FILE.write_text("{}", encoding="utf-8")
+        except Exception:
+            pass
+
+        def _bump(st):
+            st["gate_kick_seq"] = int(st.get("gate_kick_seq") or 0) + 1
+            st["gate_kicked_devs"] = _cap_kicked(list(st.get("gate_kicked_devs") or []) + dev_ids)
+            return st
+
+        update_state(_bump)
+        _append_event("settings", "一键清除所有授权:会话 %d / 密钥 %d / 配对码 %d"
+                      % (n_sess, n_dev, n_grant))
+        self._send_json(200, {"ok": True, "sessions": n_sess, "devices": n_dev, "grants": n_grant})
+
+    def _gate_restart(self):
+        """面板上一键重启闸机(2026-11-18 用户需求:改完设置不用再手动重启)。
+
+        实现:先回 200 让浏览器拿到结果,再 os._exit —— 看门狗每 5s 巡检,
+        发现端口没人监听会用新代码重新拉起(最多约 8s)。不弹 UAC、不碰 frpc。
+        幂等/防呆:重启期间公网会短暂 502,面板会显示「闸机未响应」,5~10s 后自动恢复。
+        """
+        if not self._is_admin_call():
+            self._send_json(403, {"ok": False, "error": "仅限本机管理员"})
+            return
+        _append_event("settings", "闸机重启(面板操作)")
+        self._send_json(200, {"ok": True, "restarting": True, "hint": "约 5~10 秒后自动恢复"})
+        try:
+            self.wfile.flush()
+        except Exception:
+            pass
+        threading.Timer(0.5, lambda: os._exit(0)).start()
+
+    def _gate_healthz(self):
+        """闸机自检(面板状态灯用):强制开关是否生效、已授权设备数、在线会话数。"""
+        if not (self._is_admin_call() or self._gate_ok()):
+            self._send_json(401, {"ok": False, "error": "未通过验证"})
+            return
+        st = gate_state()
+        n_pk = 0
+        try:
+            rows = json.loads(DEVICES_FILE.read_text(encoding="utf-8"))
+            if isinstance(rows, list):
+                n_pk = sum(1 for r in rows if isinstance(r, dict) and r.get("dev_pubkey"))
+        except Exception:
+            n_pk = 0
+        self._send_json(200, {
+            "ok": True, "pid": os.getpid(),
+            "enforce": bool((st.get("settings") or {}).get("enforce_dev_sig")),
+            "devices_with_pubkey": n_pk, "sessions": len(_sessions),
+            "kick_seq": st.get("gate_kick_seq") or 0,
+        })
 
     def _gate_kick_all(self):
         """全部踢下线:立即清空所有会话,但保留当前管理员(自己)。

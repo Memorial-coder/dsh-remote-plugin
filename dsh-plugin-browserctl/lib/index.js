@@ -4627,7 +4627,7 @@ function adminHeaders() {
   }
   return {};
 }
-var VERSION = true ? "1.0.73" : "dev";
+var VERSION = true ? "1.0.74" : "dev";
 var sessionTunnel = false;
 var ensureRunning = null;
 var lastEnsureError = "";
@@ -6568,6 +6568,48 @@ function apply(ctx, config = {}) {
             method: "POST",
             headers: adminHeaders(),
             signal: AbortSignal.timeout(4e3)
+          });
+          const j = await r.json();
+          sendJson(res, j && j.ok ? 200 : 502, j);
+        } catch (e) {
+          sendJson(res, 503, { ok: false, error: "\u95F8\u673A\u672A\u8FD0\u884C" });
+        }
+        return;
+      }
+      if (route === "/browserctl/api/sig-health") {
+        try {
+          const r = await fetch("http://127.0.0.1:" + gatePort() + "/browserctl-gate/healthz", {
+            method: "GET",
+            headers: adminHeaders(),
+            signal: AbortSignal.timeout(4e3)
+          });
+          const j = await r.json();
+          sendJson(res, j && j.ok ? 200 : 503, j);
+        } catch (e) {
+          sendJson(res, 503, { ok: false, error: "\u95F8\u673A\u672A\u8FD0\u884C" });
+        }
+        return;
+      }
+      if (route === "/browserctl/api/gate-restart") {
+        try {
+          const r = await fetch("http://127.0.0.1:" + gatePort() + "/browserctl-gate/gate-restart", {
+            method: "POST",
+            headers: adminHeaders(),
+            signal: AbortSignal.timeout(4e3)
+          });
+          const j = await r.json().catch(() => ({}));
+          sendJson(res, j && j.ok ? 200 : 502, j);
+        } catch (e) {
+          sendJson(res, 200, { ok: true, restarting: true, hint: "\u95F8\u673A\u5DF2\u9000\u51FA,\u6B63\u5728\u91CD\u542F" });
+        }
+        return;
+      }
+      if (route === "/browserctl/api/revoke-all") {
+        try {
+          const r = await fetch("http://127.0.0.1:" + gatePort() + "/browserctl-gate/revoke-all", {
+            method: "POST",
+            headers: adminHeaders(),
+            signal: AbortSignal.timeout(15e3)
           });
           const j = await r.json();
           sendJson(res, j && j.ok ? 200 : 502, j);

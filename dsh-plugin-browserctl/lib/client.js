@@ -32,7 +32,7 @@ var import_dsh_client_store = require("@deepseek-ai/dsh-client-store");
 var import_jsx_runtime = require("react/jsx-runtime");
 var NS = "browserctl";
 var STYLE_ID = "browserctl/styles";
-var VERSION = true ? "1.0.73" : "dev";
+var VERSION = true ? "1.0.74" : "dev";
 var ABOUT_LINKS = {
   website: "https://remote.ymzcc.com/dsh-remote/",
   github: "https://github.com/Memorial-coder/dsh-remote-plugin",
@@ -2808,6 +2808,10 @@ function SigEnforceCard({ t, reloadToken }) {
   const [acting, setActing] = (0, import_react.useState)("");
   const [msg, setMsg] = (0, import_react.useState)("");
   const [dedupeConfirm, setDedupeConfirm] = (0, import_react.useState)(false);
+  const [health, setHealth] = (0, import_react.useState)(null);
+  const [allConfirm, setAllConfirm] = (0, import_react.useState)(false);
+  const [allMsg, setAllMsg] = (0, import_react.useState)("");
+  const [restarting, setRestarting] = (0, import_react.useState)(false);
   (0, import_react.useEffect)(() => {
     let alive = true;
     fetch(API_P + "/browserctl/api/sig", { cache: "no-store" }).then((r) => r.json().catch(() => ({}))).then((j) => {
@@ -2844,6 +2848,54 @@ function SigEnforceCard({ t, reloadToken }) {
       const j = await r.json().catch(() => ({}));
       if (j && j.ok) setData(j);
     } catch (e) {
+    }
+  }
+  async function loadHealth() {
+    try {
+      const r = await fetch(API_P + "/browserctl/api/sig-health", { cache: "no-store" });
+      const j = await r.json().catch(() => ({}));
+      setHealth(j && j.ok ? j : { ok: false });
+    } catch (e) {
+      setHealth({ ok: false });
+    }
+  }
+  (0, import_react.useEffect)(() => {
+    loadHealth();
+  }, [reloadToken]);
+  async function restartGate() {
+    if (restarting) return;
+    setRestarting(true);
+    try {
+      await fetch(API_P + "/browserctl/api/gate-restart", { method: "POST", cache: "no-store" });
+    } catch (e) {
+    }
+    let n = 0;
+    const timer = setInterval(async () => {
+      n += 1;
+      await loadHealth();
+      if (n >= 5) {
+        clearInterval(timer);
+        setRestarting(false);
+      }
+    }, 2e3);
+  }
+  async function revokeAll() {
+    if (acting) return;
+    setActing("all");
+    setAllMsg("");
+    try {
+      const r = await fetch(API_P + "/browserctl/api/revoke-all", { method: "POST", cache: "no-store" });
+      const j = await r.json().catch(() => ({}));
+      if (j && j.ok) {
+        setAllMsg("\u5DF2\u6E05\u9664:" + (j.sessions || 0) + " \u53F0\u5728\u7EBF\u4F1A\u8BDD\u3001" + (j.devices || 0) + " \u53F0\u8BBE\u5907\u5BC6\u94A5\u3001" + (j.grants || 0) + " \u4E2A\u672A\u7528\u914D\u5BF9\u7801");
+        await refetch();
+        await loadHealth();
+      } else setAllMsg(j && j.error || t("sigFail2"));
+    } catch (e) {
+      setAllMsg(t("sigFail2"));
+    } finally {
+      setActing("");
+      setAllConfirm(false);
     }
   }
   async function revoke(dev) {
@@ -2944,6 +2996,21 @@ function SigEnforceCard({ t, reloadToken }) {
           }
         )
       ] }),
+      health && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { style: { display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--dsw-alias-label-tertiary,#8b8f98)" }, children: [
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { "aria-hidden": "true", style: { width: 7, height: 7, borderRadius: 999, flexShrink: 0, background: health.ok ? "#34b371" : "#e5655c" } }),
+        health.ok ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
+          "\u95F8\u673A\u8FD0\u884C\u4E2D \xB7 \u5F3A\u5236\u7B7E\u540D",
+          health.enforce ? "\u5DF2\u751F\u6548" : "\u672A\u5F00\u542F",
+          " \xB7 \u5DF2\u6388\u6743 ",
+          health.devices_with_pubkey,
+          " \u53F0 \xB7 \u5728\u7EBF ",
+          health.sessions,
+          " \u53F0"
+        ] }) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: { color: "#e5655c" }, children: "\u95F8\u673A\u672A\u54CD\u5E94(\u96A7\u9053/\u8FDB\u7A0B\u53EF\u80FD\u5DF2\u505C)" }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: { flex: 1 } }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", style: { fontSize: 11, background: "transparent", border: 0, color: "inherit", cursor: "pointer", padding: 0 }, onClick: loadHealth, children: "\u5237\u65B0" }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", style: { fontSize: 11, background: "transparent", border: 0, color: "inherit", cursor: "pointer", padding: 0 }, onClick: restartGate, children: restarting ? "\u91CD\u542F\u4E2D\u2026" : "\u91CD\u542F\u95F8\u673A" })
+      ] }),
       confirming && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlActions", role: "alertdialog", "aria-label": t("sigYes"), children: [
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { style: { margin: 0, fontSize: 12, lineHeight: "17px", color: "var(--dsw-alias-state-warning-primary,#c78d33)" }, children: t("sigConfirm") }),
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "primary", size: "sm", disabled: busy, onClick: () => toggle(true), children: t("sigYes") }),
@@ -2982,6 +3049,15 @@ function SigEnforceCard({ t, reloadToken }) {
           msg && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { style: { margin: 0, fontSize: 12, textAlign: "center", color: "var(--dsw-alias-state-success-primary,#34b371)" }, children: msg })
         ] })
       ] }),
+      allConfirm ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlActions", role: "alertdialog", "aria-label": "\u6E05\u9664\u6240\u6709\u6388\u6743", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { style: { margin: 0, fontSize: 12, lineHeight: "17px", color: "var(--dsw-alias-state-error-primary,#e5655c)" }, children: "\u5C06\u64A4\u9500\u3010\u6240\u6709\u8BBE\u5907\u3011\u7684\u767B\u5F55\u4F1A\u8BDD\u4E0E\u7B7E\u540D\u5BC6\u94A5,\u5E76\u4F5C\u5E9F\u672A\u4F7F\u7528\u7684\u914D\u5BF9\u7801\u3002\u4E4B\u540E\u6BCF\u53F0\u624B\u673A/\u6D4F\u89C8\u5668\u90FD\u5FC5\u987B\u91CD\u65B0\u626B\u7801,\u786E\u5B9A\u7EE7\u7EED?" }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "primary", size: "sm", disabled: !!acting, onClick: revokeAll, children: acting === "all" ? "\u6B63\u5728\u6E05\u9664\u2026" : "\u786E\u8BA4\u6E05\u9664" }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "secondary", size: "sm", disabled: !!acting, onClick: () => setAllConfirm(false), children: t("sigCancel") })
+      ] }) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: { display: "flex", justifyContent: "flex-end" }, children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "ghost", size: "sm", disabled: !!acting, onClick: () => {
+        setAllConfirm(true);
+        setAllMsg("");
+      }, children: "\u6E05\u9664\u6240\u6709\u6388\u6743" }) }),
+      allMsg && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { style: { margin: 0, fontSize: 12, lineHeight: "17px", color: "var(--dsw-alias-label-secondary,#c9ccd4)" }, children: allMsg }),
       err && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { style: { margin: 0, fontSize: 12, lineHeight: "17px", color: "var(--dsw-alias-state-error-primary,#e5655c)" }, children: err }),
       /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { style: { margin: 0, fontSize: 12, lineHeight: "17px", color: "var(--dsw-alias-label-tertiary,#8b8f98)" }, children: t("sigHint") })
     ] })
