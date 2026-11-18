@@ -32,3 +32,4 @@ browserctl_*.log.*
 
 # local security audit artifacts (contains server credentials; never publish)
 _audit/
+browserctl_app/
