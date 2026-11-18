@@ -2522,7 +2522,10 @@ def _ws_secret():
     if s:
         return s
     cand = _secrets.token_hex(32)
-    st = update_state(lambda x: x.setdefault("ws_ticket_secret", cand))
+    # ⚠️ mutator 必须返回 state dict:update_state 的语义是「返回值真值则整体覆盖」,
+    # 这里若写 x.setdefault(...) 它返回的是 cand 字符串,会把整个 state 文件毁成
+    # 一个 JSON 字符串(2026-11-18 实测:测试副本 state 被毁、全站 500)。
+    st = update_state(lambda x: x.setdefault("ws_ticket_secret", cand) or x)
     return st.get("ws_ticket_secret") or cand
 
 
@@ -8940,6 +8943,13 @@ def update_state(mutator):
     with state_lock():
         st = read_state()
         out = mutator(st) or st
+        # 防呆(2026-11-18):mutator 返回真值但不是 dict(如误写 x.setdefault(...)
+        # 返回了字符串)时,整个 state 文件会被一个标量毁掉、全站 500。宁可丢弃
+        # 本次改动保住 state,也绝不允许非 dict 落盘。
+        if not isinstance(out, dict):
+            print("[警告] update_state mutator 返回了 %s 而不是 dict,已丢弃本次改动保住 state"
+                  % type(out).__name__, flush=True)
+            out = st
         _write_json_file_atomic(STATE, json.dumps(out, ensure_ascii=False, indent=2))
         harden_file_perms(STATE)
     return out
