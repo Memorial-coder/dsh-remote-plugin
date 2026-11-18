@@ -2832,6 +2832,17 @@ def _load_devices():
                 cur["last_seen"] = max(cur.get("last_seen") or 0, r.get("last_seen") or 0)
                 continue
             _devices[key] = r
+        # kb/06 第 40 条(2026-11-19)防降级不变量自愈清扫:ECDSA 档案与对称
+        # dev_key 不共存。合并路径只补缺失字段,会把旧 HMAC 钥补进已有
+        # dev_pubkey 的档案;历史脏数据同理。凡有 dev_pubkey 的档案,残留
+        # dev_key 一律清除并落盘(幂等;验签 pk 优先,清掉不改变任何行为)。
+        swept = 0
+        for cur in _devices.values():
+            if cur.get("dev_pubkey") and cur.pop("dev_key", None):
+                swept += 1
+        if swept:
+            migrated = True
+            print("[gate] 防降级清扫:清除 %d 台 ECDSA 设备残留的对称 dev_key" % swept, flush=True)
     if migrated:
         try:
             _dump_devices()
@@ -6741,6 +6752,13 @@ color:#fff;text-decoration:none;font-size:14px}
                 os.replace(tmp, DEVICES_FILE)
             except Exception:
                 pass
+        # kb/06 第 40 条(2026-11-19):验签走内存 _devices,上面只清文件当场
+        # 无效,且任何一次 housekeeping 落盘都会把旧密钥写回复活。必须同步清
+        # 内存,后续落盘交给 housekeeping 统一做(与内存态一致,不会互相覆盖)。
+        with _devices_lock:
+            for d in _devices.values():
+                d.pop("dev_key", None)
+                d.pop("dev_pubkey", None)
         n_grant = 0
         try:
             if GRANTS_FILE.exists():
