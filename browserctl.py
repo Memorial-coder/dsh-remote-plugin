@@ -147,8 +147,9 @@ def _select_fwd_port():
     # 监听者是本副本(_gate_is_ours 管理令牌探测)。否则绑定竞态输给另一份插件的闸机后,
     # state 会一直指着别人的闸机——隧道照常,配对/踢人却全打到别人那里,插件 QR 恒报
     # 「配对创建仅限本机管理员调用」(2026-11-08 实测,点多少次「开始控制」都好不了)。
-    if (cur and _port_open(cur) and (not pid or _pid_alive(pid))
-            and (pid or _gate_is_ours(cur))):
+    # 端口开着也必须验明是本副本闸机:pid 活着不代表监听者是我们(可能是另一份
+    # 副本/别的程序);认错会让配对、踢人、二维码全打到别人闸机上。
+    if cur and _port_open(cur) and _gate_is_ours(cur):
         FWD_PORT = cur
         os.environ["BC_FWD_PORT"] = str(cur)
         return cur
@@ -2265,13 +2266,19 @@ _devices_lock = threading.Lock()
 DEVICE_IDLE_SECONDS = 600
 
 def _device_key(info):
-    """稳定设备标识:App 用客户端持久 devid,浏览器用 dev(cookie 复用后稳定);
-    兼容旧调用方传字符串/None——判空与登记路径曾因直传 str 炸 AttributeError 500。"""
+    """统一设备档案键 = 会话/cookie 的 dev。
+
+    历史坑(2026-11-18 审计 P0):这里曾优先返回 devid,而 bc-gate cookie 的 dev
+    对 App 是 md5(devid)[:16]。结果长期配对把档案建在 devid 下,session 却在
+    md5(devid) 下;dev-bind 按 cookie dev 查 _devices 必然 400「设备档案不存在」,
+    enforce_dev_sig 一开 App 全变引导页。档案键必须与 cookie/session 同一口径。
+    旧档案在 _load_devices 里按 session.devid→dev 自动迁移。
+    """
     if isinstance(info, str):
         return info
     if not isinstance(info, dict):
         return ""
-    return info.get("devid") or info.get("dev") or ""
+    return info.get("dev") or info.get("devid") or ""
 
 
 def _device_known(key):
@@ -2301,8 +2308,8 @@ def _device_ensure(key, info, online=True, last_seen=None):
                 "first_seen": seen, "last_seen": seen,
                 "online": bool(online), "online_since": now if online else 0,
                 "total_online": 0, "times": 1,
-                # L1 设备密钥:256-bit,只存闸机档案 + 设备本地,从不经过服务器
-                "dev_key": _secrets.token_hex(32),
+                # 不在建档时预生成 dev_key:新设备统一走 ECDSA(dev-bind POST)。
+                # 旧 HMAC 设备只在 enforce OFF 的 /dev-bind GET 时按需补发。
             }
         else:
             d["name"] = info.get("name") or d.get("name", "")
@@ -2385,8 +2392,6 @@ def _static_cacheable_path(path):
     if p.rstrip("/") == "/plugins" and "rev=" in path:
         return True
     return False
-
-
 _sig_nonce_lock = threading.Lock()
 _sig_nonces = {}  # dev -> {nonce: 过期时刻}
 _sig_missing_last = [0.0]  # 宽容期缺签名事件节流(60s 一条,防刷屏)
@@ -2501,6 +2506,69 @@ def _sig_enforced():
     return bool((read_state().get("settings") or {}).get("enforce_dev_sig"))
 
 
+# ---- WebSocket 握手票据(2026-11-18 审计 P0) ----
+# 浏览器 WebSocket API 不能加自定义签名头,所以 WS 握手不能走 L1 验签。
+# 但原实现直接豁免后只认 bc-gate cookie,而 link_secret 就在服务器 nginx 里:
+# 服务器沦陷即可伪造 cookie 开 WS,绕过所有设备签名。这里加一张闸机本地的
+# 短时票据:secret 只存在用户电脑,服务器拿不到;页面加载时由闸机种 Cookie,
+# WS Upgrade 必须同时带有效 bc-gate + bc-ws,伪造 cookie 不再够用。
+_WS_COOKIE = "bc-ws"
+_WS_TICKET_TTL = 180
+
+
+def _ws_secret():
+    st = read_state()
+    s = st.get("ws_ticket_secret")
+    if s:
+        return s
+    cand = _secrets.token_hex(32)
+    st = update_state(lambda x: x.setdefault("ws_ticket_secret", cand))
+    return st.get("ws_ticket_secret") or cand
+
+
+def _ws_ticket_mint(dev):
+    if not dev:
+        return ""
+    exp = int(time.time()) + _WS_TICKET_TTL
+    body = "%s.%d" % (dev, exp)
+    sig = hmac.new(_ws_secret().encode(), body.encode(), hashlib.sha256).hexdigest()
+    return "%s.%s" % (body, sig)
+
+
+def _cookie_value(handler, name):
+    for seg in (handler.headers.get("Cookie") or "").split(";"):
+        seg = seg.strip()
+        if seg.startswith(name + "="):
+            return seg[len(name) + 1:]
+    return ""
+
+
+def _ws_ticket_ok(handler):
+    """校验 bc-ws 票据:签名 + 180s 有效 + 与 bc-gate 的 dev 绑定。"""
+    raw = _cookie_value(handler, _WS_COOKIE)
+    if not raw:
+        return False
+    parts = raw.rsplit(".", 2)
+    if len(parts) != 3:
+        return False
+    dev, exp_s, sig = parts
+    try:
+        exp = int(exp_s)
+    except Exception:
+        return False
+    if exp <= int(time.time()) or exp > int(time.time()) + _WS_TICKET_TTL + 30:
+        return False
+    body = "%s.%d" % (dev, exp)
+    want = hmac.new(_ws_secret().encode(), body.encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(sig, want):
+        return False
+    try:
+        gate_dev = handler._gate_active_dev()
+    except Exception:
+        gate_dev = None
+    return bool(gate_dev) and hmac.compare_digest(dev, gate_dev)
+
+
 def _device_devkey(dev):
     """取设备 dev_key;老设备档案缺 key 时兜底生成并落盘。
     落盘必须在锁外:_dump_devices 自持 _devices_lock,锁内调 = 自死锁
@@ -2511,6 +2579,10 @@ def _device_devkey(dev):
     with _devices_lock:
         d = _devices.get(dev)
         if d is None:
+            return None
+        # 已登记 ECDSA 公钥的设备绝不再补发对称 key:否则每次请求都会凭空多一把
+        # dev_key,既让「踢出=撤密钥」/设备列表失真,也给旧 HMAC 通道留下降级面。
+        if d.get("dev_pubkey"):
             return None
         k = d.get("dev_key")
         if not k:
@@ -2587,8 +2659,9 @@ def _dev_sig_verify(handler, path):
         return None
     if p.endswith(_SIG_EXEMPT):
         return None
-    # WebSocket 握手无法加自定义头(fetch 不覆盖 ws://),签名层暂豁免,
-    # 防护仍由 bc-gate cookie 承担(握手自动带 cookie);记录待改进项。
+    # WebSocket 握手无法加自定义头(fetch 不覆盖 ws://),签名层豁免;
+    # _dispatch 在 _relay_ws 前会强制校验 bc-ws 短时票据(闸机本地 secret 签,
+    # 不是 link_secret),伪造 bc-gate cookie 单独开不了 WS。
     if (handler.headers.get("Upgrade") or "").lower() == "websocket":
         return None
     # 内容寻址静态资源豁免(2026-11-16):GET + 哈希文件名/rev 指纹,URL 即内容,
@@ -2623,8 +2696,10 @@ def _dev_sig_verify(handler, path):
                               % (p[-50:], handler._client_ip()))
             return None
         return (401, _sig_boot_html())
-    key = _device_devkey(dev)
+    # 先查公钥:ECDSA 设备绝不能再走 _device_devkey——旧顺序会先补一把对称
+    # key,导致每台 ECDSA 设备档案都多出 dev_key(审计 P1:凭证列表失真/降级面)。
     pk_hex = _device_pubkey(dev)
+    key = None if pk_hex else _device_devkey(dev)
     if not key and not pk_hex:
         if not _sig_enforced():
             return None
@@ -2642,8 +2717,6 @@ def _dev_sig_verify(handler, path):
     now = time.time()
     if abs(now - ts_i) > _SIG_WINDOW:
         return (401, {"ok": False, "error": "签名时间窗失效,请刷新页面重试"})
-    if not _sig_nonce_take(dev, nonce, now):
-        return (401, {"ok": False, "error": "签名重放被拒绝"})
     msg = ("%s\n%s\n%d\n%s" % ((handler.command or "GET").upper(), p, ts_i, nonce)).encode()
     if pk_hex:
         # L2 ECDSA:设备用私钥签名(raw 64B r||s hex),闸机用档案公钥验证。
@@ -2653,11 +2726,17 @@ def _dev_sig_verify(handler, path):
             ok_sig = False
         if not ok_sig:
             return (401, {"ok": False, "error": "设备签名校验失败"})
-        return None
-    # 存量双轨:SW 1.1.0 的对称 HMAC(dev_key 只在两端,兼容至 SW 1.2.0 铺开)
-    good = hmac.new(bytes.fromhex(key), msg, hashlib.sha256).hexdigest()
-    if not hmac.compare_digest(good, sig.lower()):
-        return (401, {"ok": False, "error": "设备签名校验失败"})
+    else:
+        # 存量双轨:SW 1.1.0 的对称 HMAC(dev_key 只在两端,兼容至 SW 1.2.0 铺开)
+        try:
+            good = hmac.new(bytes.fromhex(key or ""), msg, hashlib.sha256).hexdigest()
+        except Exception:
+            good = ""
+        if not good or not hmac.compare_digest(good, sig.lower()):
+            return (401, {"ok": False, "error": "设备签名校验失败"})
+    # 验签成功后才消费 nonce:不能再让未认证请求预烧 nonce(审计 P1)。
+    if not _sig_nonce_take(dev, nonce, now):
+        return (401, {"ok": False, "error": "签名重放被拒绝"})
     return None
 
 
@@ -2675,6 +2754,7 @@ def _load_devices():
     # 与磁盘会话对账:会话的 ts 才是真实最后活跃时间(心跳/验证都会更新它),
     # 用它把历史上被"启动即刷新 last_seen"污染的值修回来(取较小值,只会更准不会更假)。
     ts_by_key = {}
+    alias = {}          # 旧档案键(devid) → 新统一键(dev)
     try:
         sess_rows = json.loads(SESSIONS_FILE.read_text(encoding="utf-8"))
     except Exception:
@@ -2682,15 +2762,27 @@ def _load_devices():
     for s in (sess_rows if isinstance(sess_rows, list) else []):
         if not isinstance(s, dict):
             continue
-        k = s.get("devid") or s.get("dev") or ""
+        dev = s.get("dev") or ""
+        did = s.get("devid") or ""
+        k = did or dev
         if k:
             ts_by_key[k] = max(ts_by_key.get(k, 0.0),
                                float(s.get("ts") or s.get("since") or 0))
+        if dev and did and dev != did:
+            alias[did] = dev
+            ts_by_key[dev] = max(ts_by_key.get(dev, 0.0),
+                                 float(s.get("ts") or s.get("since") or 0))
+    migrated = False
     with _devices_lock:
         for r in rows:
             if not isinstance(r, dict) or not r.get("key"):
                 continue
-            real = ts_by_key.get(r["key"])
+            key = r["key"]
+            if key in alias:
+                key = alias[key]
+                r["key"] = key
+                migrated = True
+            real = ts_by_key.get(key)
             if real and (not r.get("last_seen") or real < r["last_seen"]):
                 r["last_seen"] = real
             if r.get("online"):
@@ -2700,7 +2792,20 @@ def _load_devices():
                     r["total_online"] = (r.get("total_online") or 0) + (end - start)
             r["online"] = False
             r["online_since"] = 0
-            _devices[r["key"]] = r
+            if key in _devices:
+                # 迁移后与已有 dev 档案合并:只补缺失的密钥/身份字段,不覆盖较新的元数据
+                cur = _devices[key]
+                for f in ("dev_pubkey", "dev_key", "devid"):
+                    if not cur.get(f) and r.get(f):
+                        cur[f] = r[f]
+                cur["last_seen"] = max(cur.get("last_seen") or 0, r.get("last_seen") or 0)
+                continue
+            _devices[key] = r
+    if migrated:
+        try:
+            _dump_devices()
+        except Exception as e:
+            print("[gate] 设备档案键迁移落盘失败: %r" % (e,), flush=True)
     return len(_devices)
 
 _last_sessions_payload = None
@@ -2721,7 +2826,9 @@ def _dump_devices():
         payload = json.dumps(rows, ensure_ascii=False, indent=1)
         if payload != _last_devices_payload:
             _last_devices_payload = payload
-            DEVICES_FILE.write_text(payload, encoding="utf-8")
+            # 原子替换:并发/崩溃时不能让插件读到半截 JSON(设备档案截断=全部
+            # App dev-bind 400,且重启后档案丢失)。与 _dump_sessions 同口径。
+            _atomic_write_file(DEVICES_FILE, payload)
     except Exception:
         pass
 
@@ -3288,6 +3395,13 @@ def _process_kicks():
     if kicked_extra:
         st["gate_kicked_devs"] = _cap_kicked([*(st.get("gate_kicked_devs") or []), *kicked_extra])
         changed = True
+    # 定向踢同样必须撤密钥(契约:踢出=密钥作废)。在锁外做:_device_revoke_key
+    # 会 _dump_devices → ip_location 再取 _gate_lock,锁内调用会自锁。
+    for d in dict.fromkeys(kicked_extra):
+        try:
+            _device_revoke_key(d)
+        except Exception:
+            pass
     # SSH 反注册全部放到 _gate_lock 外执行:失败只继续,不影响本地踢出
     for d in ssh_pending:
         try:
@@ -3470,7 +3584,7 @@ for(var i=0;i<segs.length-1;i++){if(segs[i]==='p'&&segs[i+1]){root=segs.slice(0,
 gate=root+'browserctl-gate/';
 var gi=-1;for(var k=0;k<segs.length-1;k++){if(segs[k]==='browserctl-gate'){gi=k;break;}}
 if(gi>0){gate=segs.slice(0,gi+1).join('/')+'/';root=segs.slice(0,gi).join('/')+'/';}
-var D={boot:'1.3.0',url:location.href,root:root,gate:gate,sw:'(未注册)',cred:'?',tries:0,
+var D={boot:'1.3.1',url:location.href,root:root,gate:gate,sw:'(未注册)',cred:'?',tries:0,
        dev:'(无)',err:'',ua:navigator.userAgent,at:new Date().toISOString()};
 function rd(k,d){try{return sessionStorage.getItem(k)||d}catch(e){return d}}
 function wr(k,v){try{sessionStorage.setItem(k,v)}catch(e){}}
@@ -3506,6 +3620,16 @@ function genkeys(){return new Promise(function(res,rej){var ch=new MessageChanne
     if(d.ok)res(d.pub);else rej(new Error(d.error||'genkeys 失败'))};
   try{navigator.serviceWorker.controller.postMessage({type:'genkeys'},[ch.port2])}
   catch(e){clearTimeout(to);rej(new Error('SW 通信失败: '+e))}});}
+function bindSign(pub){return new Promise(function(res,rej){var ch=new MessageChannel();
+  var to=setTimeout(function(){rej(new Error('设备密钥自证超时（请刷新页面重试）'))},8000);
+  ch.port1.onmessage=function(m){clearTimeout(to);var d=m.data||{};
+    if(d.ok)res(d);else rej(new Error(d.error||'设备密钥自证失败'))};
+  try{navigator.serviceWorker.controller.postMessage({type:'signbind',pub:pub},[ch.port2])}
+  catch(e){clearTimeout(to);rej(new Error('SW 通信失败: '+e))}});}
+function postBind(pub){return bindSign(pub).then(function(s){
+  return fetch(gate+'dev-bind?pubkey='+pub,{method:'POST',cache:'no-store',
+    headers:{'X-BC-Bind-Self-Ts':s.ts,'X-BC-Bind-Self':s.sig}});
+});}
 
 function showRecover(firstErr){
   if(document.getElementById('bc-rec'))return;
@@ -3532,7 +3656,7 @@ function showRecover(firstErr){
       D.dev=(j.dev?String(j.dev).slice(0,10)+'…':'(无)');render();
       try{navigator.serviceWorker.controller&&navigator.serviceWorker.controller.postMessage({type:'setdev',dev:j.dev})}catch(e){}
       return genkeys().then(function(pub){
-        return fetch(gate+'dev-bind?pubkey='+pub,{method:'POST',cache:'no-store'})
+        return postBind(pub)
           .then(function(r){return r.json()}).then(function(j2){
             if(!j2||!j2.ok)throw new Error((j2&&j2.error)||'公钥登记失败');
             return idbPut('dev',j.dev);});
@@ -3581,7 +3705,7 @@ navigator.serviceWorker.register(root+'sw.js',{scope:root,updateViaCache:'none'}
      D.dev=(j.dev?String(j.dev).slice(0,10)+'…':'(无)');render();
      try{navigator.serviceWorker.controller&&navigator.serviceWorker.controller.postMessage({type:'setdev',dev:j.dev})}catch(e){}
      return genkeys().then(function(pub){
-       return fetch(gate+'dev-bind?pubkey='+pub,{method:'POST',cache:'no-store'})
+       return postBind(pub)
          .then(function(r){return r.json()}).then(function(j2){
            if(!j2||!j2.ok)throw new Error((j2&&j2.error)||'公钥登记失败');
            return idbPut('dev',j.dev);});
@@ -4098,6 +4222,21 @@ class GateHandler(BaseHTTPRequestHandler):
             return fwd_last
         return peer or "local"
 
+    def _stage_ws_cookie(self, dev):
+        """给本次响应挂一张 bc-ws 短时票据(仅当已识别 dev)。"""
+        if not dev:
+            return
+        try:
+            val = _ws_ticket_mint(dev)
+            if not val:
+                return
+            self._pending_set_cookies = getattr(self, "_pending_set_cookies", [])
+            self._pending_set_cookies.append(
+                "%s=%s; Max-Age=%d; Path=/; HttpOnly; SameSite=Lax%s"
+                % (_WS_COOKIE, val, _WS_TICKET_TTL, self._cookie_secure()))
+        except Exception:
+            pass
+
     def send_response(self, code, message=None):
         """去掉默认 Server 指纹头(只发状态行 + Date)。"""
         self._resp_status = int(code)  # 逐请求日志记录状态码
@@ -4117,6 +4256,8 @@ class GateHandler(BaseHTTPRequestHandler):
             self.send_header("Cache-Control", "no-store")
         for k, v in (headers or []):
             self.send_header(k, v)
+        for _c in getattr(self, "_pending_set_cookies", []):
+            self.send_header("Set-Cookie", _c)
         self.end_headers()
         try:
             self.wfile.write(data)
@@ -4173,6 +4314,19 @@ class GateHandler(BaseHTTPRequestHandler):
         secret = st.get("link_secret")
         if len(vals) == 1 or not secret:
             return vals[-1]
+        # 第一优先:签名有效且会话仍在册(真正能过 gate_check_cookie 的那个)。
+        # 旧实现只看签名,最新值属于已踢/已过期会话时会把活着的老值一起拖死
+        # (审计 P1:App 重配对后间歇「设备授权已失效」)。
+        with _gate_lock:
+            live = set(_sessions.keys())
+        for v in reversed(vals):
+            try:
+                dev = gate_cookie_dev_only(v, secret)
+                if dev and dev in live:
+                    return v
+            except Exception:
+                continue
+        # 兜底:签名有效即可(2FA 关闭/首次恢复时可能还没有会话)
         for v in reversed(vals):
             try:
                 if gate_cookie_dev_only(v, secret):
@@ -4193,6 +4347,17 @@ class GateHandler(BaseHTTPRequestHandler):
         if not vals:
             return None
         return gate_cookie_dev_only(vals[-1], secret)
+
+    def _gate_active_dev(self):
+        """当前请求真正有效的设备:优先「会话仍在册」的 bc-gate 值,而不是盲取
+        最后一个。App WebView 重配对后可能同时带旧/新两个同名 cookie;旧值在
+        最后会把新设备身份盖掉(审计 P1 多值 cookie 选错)。"""
+        raw = self._gate_cookie_raw()
+        st = gate_state()
+        secret = st.get("link_secret")
+        if not raw or not secret:
+            return None
+        return gate_cookie_dev_only(raw, secret)
 
     def _has_dsh_cookie(self):
         """请求是否带"已配对"的 DSH 授权 Cookie(仅由配对 claim / 引导 bootstrap 发放)。
@@ -4274,7 +4439,9 @@ class GateHandler(BaseHTTPRequestHandler):
                             _sessions[dev]["loc"] = _loc
             except Exception:
                 pass
-        _device_ensure(dev_key, _sessions[dev])
+        with _gate_lock:
+            _sess_snapshot = dict(_sessions.get(dev) or {})
+        _device_ensure(dev_key, _sess_snapshot)
         _dump_sessions()
         # 2026-11-16 新设备/新 IP 通知:档案里没见过 → 新设备;见过但 IP 变了 → 新 IP。
         # known 且同 IP 的重新登记属正常会话恢复,静默。通知失败绝不影响放行。
@@ -4286,8 +4453,8 @@ class GateHandler(BaseHTTPRequestHandler):
         except Exception:
             pass
         cookie = gate_mint_cookie(secret, dev, ip, ua)
-        header = "%s=%s; Max-Age=%d; Path=/; HttpOnly; SameSite=Lax; Secure" % (
-            GATE_COOKIE, cookie, _gate_max_age())
+        header = "%s=%s; Max-Age=%d; Path=/; HttpOnly; SameSite=Lax%s" % (
+            GATE_COOKIE, cookie, _gate_max_age(), self._cookie_secure())
         return dev, header
 
     def _read_json_body(self, max_bytes=MAX_JSON_BODY_BYTES):
@@ -4314,7 +4481,7 @@ class GateHandler(BaseHTTPRequestHandler):
         xdev = self.headers.get("X-Device-Id")
         if xdev is None:
             return True  # 无此 header = 非 nginx 代理路径(本地直连),放行
-        cookie_dev = self._gate_cookie_dev()
+        cookie_dev = self._gate_active_dev()
         if cookie_dev is None or cookie_dev != xdev:
             print("[gate] 设备 ID 不匹配:X-Device-Id=%s cookie_dev=%s" % (xdev, cookie_dev), flush=True)
             return False
@@ -4329,7 +4496,7 @@ class GateHandler(BaseHTTPRequestHandler):
             # 且必须"已配对"——带 bc-gate cookie 或带配对/引导发放的 DSH 授权 cookie,
             # 裸 URL(无任何凭证)一律不放行,避免 2FA 关闭时把整个面板公开给陌生人。
             ip = self._client_ip()
-            dev = self._gate_cookie_dev()
+            dev = self._gate_active_dev()
             if dev and dev in _gate_kicked_set():
                 return False
             ban = _blacklist_check(ip, dev)
@@ -5076,6 +5243,8 @@ class GateHandler(BaseHTTPRequestHandler):
             self.send_header(k, v)
         if extra_set_cookie:
             self.send_header("Set-Cookie", extra_set_cookie)
+        for _c in getattr(self, "_pending_set_cookies", []):
+            self.send_header("Set-Cookie", _c)
         self.end_headers()
         try:
             if streaming:
@@ -5302,6 +5471,38 @@ color:#fff;text-decoration:none;font-size:14px}
         st = update_state(lambda s: s.update({"cookie_name": name, "cookie_value": value}))
         headers = [("Set-Cookie", cookie),
                    ("Referrer-Policy", "no-referrer")]
+        # 配对 claim / 引导链接同时种 bc-gate 会话:否则 enforce_dev_sig 开启时,
+        # 第一次面板请求就被引导页拦下,而引导页没有 bc-gate cookie,
+        # /dev-bind 必然 400「无法识别设备身份」→ 扫码后永远循环(2026-11-18 审计)。
+        try:
+            secret = st.get("link_secret")
+            if secret:
+                old_dev = self._gate_active_dev()
+                dev = old_dev if (old_dev and old_dev not in _gate_kicked_set()) else _secrets.token_hex(8)
+                ip = self._client_ip()
+                ua = self.headers.get("User-Agent", "")[:120]
+                now = time.time()
+                with _gate_lock:
+                    _sessions[dev] = {
+                        "ip": ip, "ua": ua,
+                        "name": _friendly_device_name(ua),
+                        "kind": "app" if self._is_app_ua() else "web",
+                        # 配对 grant 是管理员当面生成的一次性授权,允许首次登记公钥
+                        "_fresh_pair": True,
+                        "since": now, "ts": now}
+                with _gate_lock:
+                    _sess_snapshot = dict(_sessions.get(dev) or {})
+                _device_ensure(dev, _sess_snapshot)
+                _dump_sessions()
+                bc = gate_mint_cookie(secret, dev, ip, ua)
+                max_age = (TEMP_APP_COOKIE_HOURS * 3600 if session_only
+                           else _gate_max_age())
+                headers.append(("Set-Cookie",
+                                "%s=%s; Max-Age=%d; Path=/; HttpOnly; SameSite=Lax%s"
+                                % (GATE_COOKIE, bc, max_age, self._cookie_secure())))
+        except Exception as e:
+            # 配对主流程不能被设备登记失败拖死:至少 DSH cookie 已下发,便于排查
+            print("[gate] claim 种 bc-gate 会话失败: %r" % (e,), flush=True)
         if not st.get("totp_enabled"):
             # 2FA 关闭:免动态码直接进面板;相对 ../.. 回到面板根(保留 /p/17901 前缀)
             self._send(302, "redirecting…", "text/html; charset=utf-8",
@@ -5385,6 +5586,9 @@ color:#fff;text-decoration:none;font-size:14px}
             _sessions[dev] = {"ip": ip, "ua": ua,
                               "name": name, "kind": "app",
                               "devid": devid_q,
+                              # 本次会话来自管理员当面扫码授权:只允许这种会话做
+                              # 「首次登记公钥」;服务端伪造 cookie 恢复的会话没有此标记。
+                              "_fresh_pair": True,
                               "since": now, "ts": now}
         # 2026-11-15(第 35 条):显式重扫配对 = 管理员当面重新授权,把该设备移出
         # "已踢名单"。否则确定性 dev 映射(同一 devid 永远映射同一个 dev)会让被踢
@@ -5415,8 +5619,8 @@ color:#fff;text-decoration:none;font-size:14px}
         # 任何一步失败都不允许影响下发的 302+Cookie(否则手机端就是
         # "配对已失效或未授权",而本地日志一片空白,极难排查)。
         try:
-            known = bool(_device_known(_device_key({"dev": dev, "devid": devid_q})))
-            _device_ensure(_device_key({"dev": dev, "devid": devid_q}), _sessions[dev])
+            known = bool(_device_known(dev))
+            _device_ensure(dev, _sessions[dev])
             _dump_sessions()
             _server_register_device(
                 dev, name + (" devid=" + devid_q if devid_q else ""), ip, ua)
@@ -5545,7 +5749,7 @@ color:#fff;text-decoration:none;font-size:14px}
         if path.endswith("/heartbeat"):
             # 设备心跳:刷新当前会话的最后活跃时间。
             # 浏览器关闭后心跳停止 -> stale 会话由 housekeeping 自动清理。
-            dev = self._gate_cookie_dev()
+            dev = self._gate_active_dev()
             if dev and dev in _sessions:
                 with _gate_lock:
                     if dev in _sessions:
@@ -5813,23 +6017,36 @@ color:#fff;text-decoration:none;font-size:14px}
                 code = str(body.get("code") or "").strip()
             except Exception:
                 code = ""
-        # ① 免动态码兜底(2026-11-17):Cookie 本身就是 HMAC 签名的 30 天设备信任凭证。
-        #    只要它有效、且设备档案在册(曾被配对/验证过),就直接重建会话并重铸密钥。
-        #    这样「全部踢下线」/开关 2FA 只会让设备掉线重连,不会把手机和电脑一起锁死。
+        # ① 免动态码兜底**仅限 2FA 关闭**。2FA 开启时 bc-gate cookie 只证明
+        #    「某个持有 link_secret 的服务器签过它」,而 link_secret 就在服务器
+        #    nginx 里:若这里认 cookie 就重建会话,服务器沦陷即可绕过 TOTP,再配合
+        #    dev-bind 覆盖公钥完成设备 takeover(2026-11-18 审计 P0)。2FA 开启
+        #    必须走下面的动态码;2FA 关闭本来就是低安全模式,保留自愈。
         ip = self._client_ip()
-        cookie_dev = self._gate_cookie_dev()
-        if cookie_dev and cookie_dev not in _gate_kicked_set() \
-                and _device_known(cookie_dev) and not code:
-            ua = self.headers.get("User-Agent", "")[:120]
-            name = _friendly_device_name(ua)
-            kind = "app" if self._is_app_ua() else "web"
-            with _gate_lock:
-                _sessions[cookie_dev] = {"ip": ip, "ua": ua, "name": name, "kind": kind,
-                                         "since": time.time(), "ts": time.time()}
-            _device_ensure(cookie_dev, _sessions[cookie_dev])
-            _dump_sessions()
-            _append_event("recover", "Cookie 信任自动恢复 dev=%s IP=%s" % (cookie_dev[:8], ip))
-            return True
+        cookie_dev = self._gate_active_dev()
+        if not code:
+            if (cookie_dev and cookie_dev not in _gate_kicked_set()
+                    and _device_known(cookie_dev) and not st.get("totp_enabled")):
+                ua = self.headers.get("User-Agent", "")[:120]
+                name = _friendly_device_name(ua)
+                kind = "app" if self._is_app_ua() else "web"
+                with _gate_lock:
+                    _sessions[cookie_dev] = {
+                        "ip": ip, "ua": ua, "name": name, "kind": kind,
+                        # 非管理员当面扫码:只有 enforce 关闭时才允许首次登记公钥
+                        "_fresh_pair": not _sig_enforced(),
+                        "since": time.time(), "ts": time.time()}
+                _device_ensure(cookie_dev, _sessions[cookie_dev])
+                _dump_sessions()
+                _append_event("recover", "Cookie 信任自动恢复(2FA 关闭) dev=%s IP=%s"
+                              % (cookie_dev[:8], ip))
+                return True
+            # 2FA 开启:统一提示重新扫码,绝不凭 cookie 建会话
+            self._send_json(401, {"ok": False,
+                                  "error": "设备会话已失效,请重新扫码配对",
+                                  "need_pair": True,
+                                  "need_code": bool(st.get("totp_enabled") and secret)})
+            return False
         if not (st.get("totp_enabled") and secret):
             self._send_json(401, {"ok": False, "error": "未通过验证,请先完成动态码校验",
                                   "need_code": True})
@@ -5850,16 +6067,25 @@ color:#fff;text-decoration:none;font-size:14px}
             self._send_json(401, {"ok": False, "error": "动态码错误", "need_code": True})
             return False
         brute_clear(ip)
-        dev = self._gate_cookie_dev()
-        if dev and dev in _gate_kicked_set():
-            dev = None  # 已踢设备不给旧身份:换新设备号,与 /verify 行为对齐
+        # 动态码恢复是用户显式重新授权:保留原 dev 并移出已踢名单,不能换新
+        # dev——这里不像 /verify 会重发 bc-gate cookie,换了身份会让旧 cookie
+        # 永远对不上,表现为「输完动态码还是 401」。
+        dev = self._gate_active_dev()
         if not dev:
             dev = (self.headers.get("X-BC-Dev") or "").strip() or _secrets.token_hex(8)
+        if dev in _gate_kicked_set():
+            try:
+                update_state(lambda s: {**s, "gate_kicked_devs":
+                                        [d for d in (s.get("gate_kicked_devs") or []) if d != dev]})
+            except Exception:
+                pass
         ua = self.headers.get("User-Agent", "")[:120]
         name = _friendly_device_name(ua)
         kind = "app" if self._is_app_ua() else "web"
         with _gate_lock:
             _sessions[dev] = {"ip": ip, "ua": ua, "name": name, "kind": kind,
+                              # 动态码=第二因子,等同管理员当面授权,允许首次登记公钥
+                              "_fresh_pair": True,
                               "since": time.time(), "ts": time.time()}
         _device_ensure(dev, _sessions[dev])
         _dump_sessions()
@@ -5870,24 +6096,89 @@ color:#fff;text-decoration:none;font-size:14px}
             pass
         return True
 
+    def _bind_proof_ok(self, dev, pk_hex, old_pk):
+        """公钥**换绑**必须证明持有旧私钥:签名串 bind\\n<dev>\\n<new_pk>\\n<ts>。
+        正常重连用同一把 Keystore key(幂等),不需要证明;只有换 key 才要。
+        这样即使服务器伪造 cookie,也不能把已绑定设备的公钥换成自己的。"""
+        proof = (self.headers.get("X-BC-Bind-Sig") or "").strip().lower()
+        ts = (self.headers.get("X-BC-Bind-Ts") or "").strip()
+        if not proof or not ts:
+            try:
+                from urllib.parse import urlsplit, parse_qs
+                q = parse_qs(urlsplit(self.path).query)
+                proof = (q.get("bind_sig") or [""])[0].strip().lower()
+                ts = (q.get("bind_ts") or [""])[0].strip()
+            except Exception:
+                pass
+        try:
+            ts_i = int(float(ts))
+        except Exception:
+            return False
+        if abs(time.time() - ts_i) > _SIG_WINDOW:
+            return False
+        msg = ("bind\n%s\n%s\n%d" % (dev, pk_hex, ts_i)).encode()
+        try:
+            return _p256_verify(bytes.fromhex(old_pk), msg, bytes.fromhex(proof))
+        except Exception:
+            return False
+
+    def _bind_self_ok(self, pk_hex):
+        """首次登记公钥时,用**新私钥**对公钥自证:bind-new\\n<pk>\\n<ts>。
+        服务器能改 dev-bind 请求的 query(路径签名不覆盖 query),不拦就能把
+        用户刚生成的公钥换成服务器自己的公钥(审计 P0)。老客户端可用
+        settings.require_bind_self=false 临时兼容,默认强制。"""
+        try:
+            st = gate_state()
+            if (st.get("settings") or {}).get("require_bind_self") is False:
+                return True
+        except Exception:
+            pass
+        proof = (self.headers.get("X-BC-Bind-Self") or "").strip().lower()
+        ts = (self.headers.get("X-BC-Bind-Self-Ts") or "").strip()
+        if not proof or not ts:
+            try:
+                from urllib.parse import urlsplit, parse_qs
+                q = parse_qs(urlsplit(self.path).query)
+                proof = (q.get("bind_self") or [""])[0].strip().lower()
+                ts = (q.get("bind_self_ts") or [""])[0].strip()
+            except Exception:
+                pass
+        try:
+            ts_i = int(float(ts))
+        except Exception:
+            return False
+        if abs(time.time() - ts_i) > _SIG_WINDOW:
+            return False
+        msg = ("bind-new\n%s\n%d" % (pk_hex, ts_i)).encode()
+        try:
+            return _p256_verify(bytes.fromhex(pk_hex), msg, bytes.fromhex(proof))
+        except Exception:
+            return False
+
     def _gate_dev_bind(self):
         """L1/L2 密钥分发:已验证会话(bc-gate cookie)换本设备签名凭证。
-        - GET(存量 SW 1.1.0 兼容):下发对称 dev_key;
-          已登记 ECDSA 公钥的设备不再下发(防降级——公钥在档=该设备已升级)。
-        - POST(L2):设备上送 ECDSA P-256 公钥(私钥在设备端生成且不出设备),
-          服务器/TLS 沦陷也截不到可伪造签名的材料。反代会排空请求体 → 兼容 ?pubkey=。"""
+        - GET:已登记 ECDSA 公钥 → 只回 mode=ecdsa;未登记且 enforce ON → 也不下发
+          对称 dev_key(否则服务器伪造 cookie 就能领走 HMAC key,绕过 L2)。
+          只有 enforce OFF 的兼容模式才下发旧 dev_key。
+        - POST(L2):设备上送 ECDSA P-256 公钥(私钥在设备端生成且不出设备)。
+          已绑定公钥的设备只允许「同一把公钥」幂等重登;换绑必须旧私钥签名,
+          防止服务器沦陷后覆盖公钥做设备 takeover。"""
         if not self._gate_ok():
             # 免二维码恢复(2026-11-17):「全部踢下线」/2FA 开关会清会话,设备密钥也可能已被撤销,
             # 此时旧链路只剩「重新扫码配对」一条路,手机端等于彻底进不去。这里允许用一次动态码
             # (第二因子)恢复:校验通过就为当前 Cookie 设备重建会话,再照常下发/登记密钥。
             if not self._gate_bind_recover_code():
                 return
-        dev = self._gate_cookie_dev()
+        dev = self._gate_active_dev()
         if not dev:
             self._send_json(400, {"ok": False,
                                   "error": "无法识别设备身份,请用配对链接重新打开",
                                   "need_code": True})
             return
+        with _gate_lock:
+            sess = dict(_sessions.get(dev) or {})
+        fresh = bool(sess.get("_fresh_pair"))
+        admin = self._is_admin_call()
         if self.command == "POST":
             pk_hex = ""
             try:
@@ -5910,13 +6201,31 @@ color:#fff;text-decoration:none;font-size:14px}
             if not _p256_pubkey_valid(bytes.fromhex(pk_hex)):
                 self._send_json(400, {"ok": False, "error": "公钥不在 P-256 曲线上"})
                 return
+            reject = None
             with _devices_lock:
                 d = _devices.get(dev)
                 if d is None:
                     self._send_json(400, {"ok": False, "error": "设备档案不存在,请重新配对"})
                     return
-                d["dev_pubkey"] = pk_hex
-                d.pop("dev_key", None)  # 升级 ECDSA 后对称密钥立即作废(防降级)
+                old_pk = (d.get("dev_pubkey") or "").strip().lower()
+                if old_pk and old_pk != pk_hex:
+                    if not admin and not self._bind_proof_ok(dev, pk_hex, old_pk):
+                        reject = "该设备已绑定其他密钥,需旧设备签名或重新扫码配对"
+                elif not old_pk and not fresh and not admin:
+                    # 首次绑定只允许「刚扫码/刚输动态码」的会话;服务器伪造的
+                    # cookie 恢复会话没有 _fresh_pair,不能抢先登记公钥。
+                    reject = "配对授权已失效,请重新扫码后再登记设备密钥"
+                if reject is None and not old_pk and not admin \
+                        and not self._bind_self_ok(pk_hex):
+                    # 新公钥必须自证持有对应私钥:防服务器在配对请求里换 pubkey。
+                    reject = "公钥自证失败,请更新客户端后重新扫码配对"
+                if reject is None:
+                    d["dev_pubkey"] = pk_hex
+                    d.pop("dev_key", None)  # 升级 ECDSA 后对称密钥立即作废(防降级)
+            if reject:
+                self._send_json(409, {"ok": False, "error": reject,
+                                      "need_pair": True})
+                return
             _dump_devices()
             _append_event("devbind", "登记设备公钥 dev=%s…(ECDSA,私钥不出设备)" % dev[:8])
             self._send_json(200, {"ok": True, "dev": dev, "mode": "ecdsa"})
@@ -5925,11 +6234,17 @@ color:#fff;text-decoration:none;font-size:14px}
         if pk:
             self._send_json(200, {"ok": True, "dev": dev, "mode": "ecdsa"})
             return
+        if _sig_enforced():
+            # enforce ON 时绝不下发 HMAC key:它一旦被服务器拿走,设备签名即被伪造。
+            # 新版引导页拿到 mode=ecdsa 会直接生成 ECDSA key 并 POST 公钥。
+            self._send_json(200, {"ok": True, "dev": dev, "mode": "ecdsa",
+                                  "need_bind": True})
+            return
         key = _device_devkey(dev)
         if not key:
             self._send_json(400, {"ok": False, "error": "设备档案不存在,请重新配对"})
             return
-        _append_event("devbind", "下发设备密钥 dev=%s…" % dev[:8])
+        _append_event("devbind", "下发设备密钥 dev=%s…(兼容模式)" % dev[:8])
         self._send_json(200, {"ok": True, "dev": dev, "key": key})
 
     def _gate_sig_toggle(self):
@@ -5953,10 +6268,16 @@ color:#fff;text-decoration:none;font-size:14px}
         if not (self._gate_ok() or self._is_admin_call()):
             self._send_json(401, {"ok": False, "error": "未通过验证"})
             return
+        # 设备明细(IP/名称/最后在线)只给本机管理员;普通已配对设备只拿计数,
+        # 否则任一被授权的手机都能枚举这台电脑的全部配对设备(审计 P1 信息泄露)。
+        _admin_view = self._is_admin_call()
+        _self_dev = self._gate_active_dev()
         with _devices_lock:
             n = sum(1 for d in _devices.values() if d.get("dev_key"))
             npk = sum(1 for d in _devices.values() if d.get("dev_pubkey"))
-            rows = sorted(_devices.values(), key=lambda d: -(d.get("last_seen") or 0))[:100]
+            _all_rows = sorted(_devices.values(), key=lambda d: -(d.get("last_seen") or 0))[:100]
+            rows = (_all_rows if _admin_view
+                    else [d for d in _all_rows if d.get("key") == _self_dev])
             device_list = [{
                 "dev": d.get("key") or "",
                 "name": d.get("name") or "",
@@ -6231,7 +6552,7 @@ color:#fff;text-decoration:none;font-size:14px}
                                   "error": "时长用尽，请前往 remote.ymzcc.com 个人中心签到获取更多时长"})
             return
         # 复用已有设备标识(退出后重新扫码仍是同一台设备)
-        dev = self._gate_cookie_dev()
+        dev = self._gate_active_dev()
         if dev and dev in _gate_kicked_set():
             dev = None
         if not dev:
@@ -6240,12 +6561,17 @@ color:#fff;text-decoration:none;font-size:14px}
         name = _friendly_device_name(ua)
         kind = "app" if self._is_app_ua() else "web"
         # 新设备/新 IP 通知(2026-11-16):known 判定要在 _device_ensure 之前取
-        known = bool(_device_known(_device_key(dev)))
+        dev_key = _device_key({"dev": dev})
+        known = bool(_device_known(dev_key))
         with _gate_lock:
             _sessions[dev] = {"ip": ip, "ua": ua,
                               "name": name, "kind": kind,
+                              # 动态码验证=管理员当面授权,允许首次登记公钥
+                              "_fresh_pair": True,
                               "since": time.time(), "ts": time.time()}
-        _device_ensure(dev, _sessions[dev])
+        with _gate_lock:
+            _sess_snapshot = dict(_sessions.get(dev) or {})
+        _device_ensure(dev_key, _sess_snapshot)
         _dump_sessions()
         _append_event("verify", "设备验证通过 IP=%s UA=%s" % (ip, ua[:40]))
         if not known:
@@ -6300,11 +6626,12 @@ color:#fff;text-decoration:none;font-size:14px}
             # 正等锁的并发请求,见 _gate_ensure_device 锁内复查)都会被拦下
             st = gate_state()
             st["gate_kicked_devs"] = _cap_kicked([*(st.get("gate_kicked_devs") or []), dev])
-        if dev_info:
-            k = _device_key({"dev": dev, **dev_info})
-            _device_close(k)
-            _device_revoke_key(k)  # L1:踢出=密钥作废,须重新配对才能拿到新密钥
-            _append_event("kick", "踢出设备 %s (IP=%s)" % (dev, dev_info.get("ip", "?")))
+        # 无论设备当前是否在线都要撤密钥:旧实现只在 dev_info 存在时撤,
+        # 离线设备的公钥会一直留着,面板显示「已踢」但手机仍能签名(审计 P1)。
+        _device_close(dev)
+        _device_revoke_key(dev)  # L1:踢出=密钥作废,须重新配对才能拿到新密钥
+        _append_event("kick", "踢出设备 %s (IP=%s)"
+                      % (dev, (dev_info or {}).get("ip", "离线")))
         _dump_sessions()
         # 兜底:pop 与写盘之间若仍有已过闸的并发请求把设备挤回 _sessions,再清一次
         with _gate_lock:
@@ -6329,7 +6656,7 @@ color:#fff;text-decoration:none;font-size:14px}
         st = gate_state()
         st["gate_kick_seq"] = (st.get("gate_kick_seq") or 0) + 1
         global _kick_seq_seen
-        admin_dev = self._gate_cookie_dev()
+        admin_dev = self._gate_active_dev()
         ssh_pending = []
         with _gate_lock:
             admin_info = _sessions.pop(admin_dev, None) if admin_dev else None
@@ -6344,8 +6671,14 @@ color:#fff;text-decoration:none;font-size:14px}
             if admin_info:
                 _sessions[admin_dev] = admin_info
             _kick_seq_seen = st["gate_kick_seq"]  # 标记已消费,管理员本人不被 seq 清除
-        if not st.get("totp_enabled"):
-            st["gate_kicked_devs"] = _cap_kicked([*(st.get("gate_kicked_devs") or []), *kicked_devs])
+        # 撤密钥必须在 _gate_lock 外:_device_revoke_key 会 _dump_devices,
+        # 后者补 IP 归属地时要拿 _gate_lock,锁内调用=同线程自死锁。
+        for d in kicked_devs:
+            _device_revoke_key(d)
+        # 2FA 开启/关闭都必须写已踢名单:否则旧 cookie 在 2FA 开启时虽过不了
+        # gate_check_cookie,但 dev-bind 的 Cookie 自动恢复(已收紧)仍可能把它带回来;
+        # 名单是最后一道兜底(2026-11-18 审计 P0「全部踢下线无效」)。
+        st["gate_kicked_devs"] = _cap_kicked([*(st.get("gate_kicked_devs") or []), *kicked_devs])
         # 服务器注册表反注册(SSH)挪到锁外:失败只记日志,不影响本地踢出
         for d in ssh_pending:
             try:
@@ -6578,6 +6911,7 @@ color:#fff;text-decoration:none;font-size:14px}
                     pass
 
     def _dispatch(self):
+        self._pending_set_cookies = []
         # 面板 PWA 静态资源:公网路径已由 nginx 做过 Cookie 门禁,直接返回
         if self.command in ("GET", "HEAD") and self._serve_pwa():
             return
@@ -6616,7 +6950,13 @@ color:#fff;text-decoration:none;font-size:14px}
                 # 已被踢下线：App 拿到 403 会提示重新配对，浏览器仍只看到纯黑页
                 self._deny_unauthorized()
                 return
+            self._stage_ws_cookie(_dev)
             if "upgrade" in self.headers.get("Connection", "").lower():
+                if not _ws_ticket_ok(self):
+                    self._stage_ws_cookie(_dev)
+                    self._send(403, "WebSocket 握手缺少有效设备票据,请刷新页面重试。",
+                               "text/plain; charset=utf-8")
+                    return
                 self._relay_ws()
             else:
                 self._proxy(extra_set_cookie=extra_cookie)
@@ -6625,7 +6965,14 @@ color:#fff;text-decoration:none;font-size:14px}
             if not self._gate_verify_device():
                 self._deny_unauthorized()
                 return
+            _dev = self._gate_active_dev()
+            self._stage_ws_cookie(_dev)
             if "upgrade" in self.headers.get("Connection", "").lower():
+                if not _ws_ticket_ok(self):
+                    self._stage_ws_cookie(_dev)
+                    self._send(403, "WebSocket 握手缺少有效设备票据,请刷新页面重试。",
+                               "text/plain; charset=utf-8")
+                    return
                 self._relay_ws()
             else:
                 self._proxy()
@@ -6651,6 +6998,17 @@ def _bc_apply_fwd_port():
             globals()["FWD_PORT"] = int(p)
         except ValueError:
             pass
+
+
+def _cli_gate_port():
+    """CLI 探活/调用用的闸机端口:以 state.fwd_port 为准(自动避让后不是 3080)。"""
+    try:
+        p = int(read_state().get("fwd_port") or 0)
+        if p > 0:
+            return p
+    except Exception:
+        pass
+    return int(os.environ.get("BC_FWD_PORT") or FWD_PORT)
 
 
 def gate_serve():
@@ -7181,7 +7539,7 @@ def _reqlog_record(self, t0, is_ws=False):
         port = int(st.get("remote_port") or 0)
         if port <= 0:
             return
-        dev = self._gate_cookie_dev() or ""
+        dev = self._gate_active_dev() or ""
         info = None
         if dev:
             with _gate_lock:
@@ -7292,7 +7650,10 @@ def cmd_watch():
         try:
             st = read_state()
             need = []
-            if not _port_open(FWD_PORT):
+            # 不能只看端口有没有人听:另一份副本/DSH/随便一个程序占着 3080 时,
+            # 看门狗会误以为闸机活着,永远不拉起自己的 → 插件全断(审计 P2)。
+            # 端口关着或监听者不是本副本,都算 fwd 需要重建。
+            if not _port_open(FWD_PORT) or not _gate_is_ours(FWD_PORT):
                 need.append("fwd")
             pid = st.get("frpc_pid")
             if not (pid and _pid_alive(pid)):
@@ -7326,20 +7687,46 @@ def cmd_watch():
                 continue
             failures += 1
             if "fwd" in need:
-                p = spawn_detached([sys.executable, str(Path(__file__).resolve()), "fwd"], FWD_LOG)
-                # 只改 fwd_pid:上面读到的 st 可能已是几秒前的快照,直接 write_state(st)
-                # 会把别的进程刚写好的 frpc_pid / tunnel_ok / tunnel_error 覆盖回旧值
-                # → 插件又报「frpc 进程未运行」(这是 state 抖动的另一个来源)。
+                # 与 start 串行化:否则 start 刚拉起、闸机还没监听时,看门狗会再拉一份。
+                lock = None
                 try:
-                    update_state(lambda s: {**s, "fwd_pid": p.pid})
-                except Exception as e:
-                    # 兜底:update_state 失败(锁异常)时改为"重读最新 state + 字段级写",
-                    # 绝不回写旧快照 st(会把 frpc_pid/tunnel_ok 覆盖回过期值);再失败只记日志
-                    try:
-                        write_state({**read_state(), "fwd_pid": p.pid})
-                    except Exception:
-                        print("看门狗: fwd_pid 写入失败: %r" % (e,), flush=True)
-                print("[%s] 看门狗: 重拉闸机(pid=%d)" % (time.strftime("%H:%M:%S"), p.pid), flush=True)
+                    lock = _ctl_lock(timeout=20)
+                except SystemExit:
+                    lock = None
+                if lock:
+                    with _ctl_release(lock):
+                        fwd_port_before = int(st.get("fwd_port") or 0)
+                        # 锁内重选端口:原端口可能被别的副本占着,必须顺延到本副本
+                        # 能 bind 的空闲端口,否则新 fwd 启动即退出/占错身份。
+                        _select_fwd_port()
+                        if not _port_open(FWD_PORT) or not _gate_is_ours(FWD_PORT):
+                            p = spawn_detached([sys.executable, str(Path(__file__).resolve()), "fwd"], FWD_LOG)
+                            # 只改 fwd_pid:上面读到的 st 可能已是几秒前的快照,直接 write_state(st)
+                            # 会把别的进程刚写好的 frpc_pid / tunnel_ok / tunnel_error 覆盖回旧值
+                            # → 插件又报「frpc 进程未运行」(这是 state 抖动的另一个来源)。
+                            try:
+                                update_state(lambda s: {**s, "fwd_pid": p.pid})
+                            except Exception as e:
+                                # 兜底:update_state 失败(锁异常)时改为"重读最新 state + 字段级写",
+                                # 绝不回写旧快照 st(会把 frpc_pid/tunnel_ok 覆盖回过期值);再失败只记日志
+                                try:
+                                    write_state({**read_state(), "fwd_pid": p.pid})
+                                except Exception:
+                                    print("看门狗: fwd_pid 写入失败: %r" % (e,), flush=True)
+                            print("[%s] 看门狗: 重拉闸机(pid=%d, port=%d)"
+                                  % (time.strftime("%H:%M:%S"), p.pid, FWD_PORT), flush=True)
+                        else:
+                            failures = 0
+                        # 闸机换端口后,旧 frpc 的 localPort 仍指向旧端口(可能已被
+                        # 别的副本占用)→ 公网流量会送到别人面板。必须按新 FWD_PORT
+                        # 重建 frpc 配置并重启,不能只管拉起新闸机。
+                        if FWD_PORT != fwd_port_before:
+                            try:
+                                ensure_tunnel(int(read_state().get("remote_port") or REMOTE_PORT))
+                            except SystemExit as e:
+                                first = (str(e) or "frpc 重建失败").splitlines()[0][:240]
+                                print("[%s] 看门狗: 闸机换端口后重建隧道失败: %s"
+                                      % (time.strftime("%H:%M:%S"), first), flush=True)
             if "frpc" in need:
                 # 与 cmd_start 串行化:start 刚拉起 frpc 的头一两秒里,state 里可能还是
                 # 旧(已死)pid;看门狗若同时再拉一份,两份 frpc 抢同一个 proxy,后一份
@@ -7707,6 +8094,18 @@ def ensure_tunnel(remote_port=REMOTE_PORT):
     # 自建用户自填 token 若含 " 或 \,不转义会生成非法 toml(frpc 直接解析失败)。
     _toml_token = str(server_token).replace("\\", "\\\\").replace('"', '\\"')
     toml = frpc_toml_path()
+    # 升级/端口自愈判据:旧配置里的 localPort 才是「当前 frpc 实际转发到哪」。
+    # 必须在覆写配置前读出来,否则闸机换端口后旧 frpc 仍把公网流量送到旧端口
+    # (可能落到另一份副本的闸机上);只比 remotePort 的旧逻辑发现不了。
+    old_local = 0
+    try:
+        if toml.exists():
+            m = re.search(r"(?m)^\s*localPort\s*=\s*(\d+)\s*$",
+                          toml.read_text(encoding="utf-8", errors="replace"))
+            if m:
+                old_local = int(m.group(1))
+    except Exception:
+        old_local = 0
     toml.write_text(
         'serverAddr = "%s"\n'
         'serverPort = %d\n'
@@ -7752,12 +8151,17 @@ def ensure_tunnel(remote_port=REMOTE_PORT):
         # 已在运行:回读日志确认它真的注册成功过(进程活着不代表隧道可用)
         recent = _frpc_log_tail(max(0, _frpc_log_size() - 65536))
         running_port = _last_success_port(recent)
-        if running_port and int(remote_port) > 0 and running_port != int(remote_port):
-            # 端口对不上比"没起来"更隐蔽:claim-port 换了端口(服务器注册表已更新),而这条
-            # frpc 注册的还是旧端口 → 公网按新端口转发到 frps 上不存在的 proxy → 502。
-            # 唯一正确做法是杀掉旧 frpc,按新配置重新拉起。
-            print("[提示] 正在运行的 frpc 隧道端口是 %d,与期望端口 %d 不一致,重启 frpc"
-                  % (running_port, int(remote_port)), flush=True)
+        running_local = int(state.get("frpc_local_port") or old_local or 0)
+        local_changed = bool(running_local and running_local != FWD_PORT)
+        remote_changed = bool(running_port and int(remote_port) > 0
+                              and running_port != int(remote_port))
+        if remote_changed or local_changed:
+            # 端口对不上比"没起来"更隐蔽:claim-port 换端口 / 闸机自愈换本地端口后,
+            # 旧 frpc 仍注册旧端口或仍转发到旧 localPort → 公网 502,甚至落到别的
+            # 副本闸机上。唯一正确做法是杀掉旧 frpc,按新配置重新拉起。
+            print("[提示] 运行中的 frpc 端口不一致(remote=%s 期望 %s,local=%s 期望 %d),重启 frpc"
+                  % (running_port or "?", int(remote_port), running_local or "?", FWD_PORT),
+                  flush=True)
             try:
                 _run_hidden(["taskkill", "/PID", str(pid), "/T", "/F"],
                             capture_output=True, text=True, errors="replace", timeout=15)
@@ -7767,11 +8171,16 @@ def ensure_tunnel(remote_port=REMOTE_PORT):
                 if not _pid_alive(pid):
                     break
                 time.sleep(0.15)
-            _mark_tunnel(False, "隧道端口已变更(%d → %d),正在按新端口重启 frpc"
-                         % (running_port, int(remote_port)), int(remote_port))
+            _mark_tunnel(False, "隧道端口已变更(remote %s → %d,local %s → %d),正在重启 frpc"
+                         % (running_port or "?", int(remote_port),
+                            running_local or "?", FWD_PORT), int(remote_port))
             pid = 0
         elif _tunnel_log_ready(recent):
             _mark_tunnel(True, "", remote_port)
+            try:
+                update_state(lambda s: {**s, "frpc_local_port": FWD_PORT})
+            except Exception:
+                pass
             print("frpc 已在运行(pid=%d) → 远端端口 %d" % (pid, remote_port))
             return remote_port
         else:
@@ -7792,7 +8201,8 @@ def ensure_tunnel(remote_port=REMOTE_PORT):
     # 用 update_state 而不是 write_state(state):避免把几秒前的旧快照整体写回,覆盖掉
     # 闸机/看门狗/插件刚写进去的字段。
     try:
-        update_state(lambda s: {**s, "frpc_pid": p.pid, "remote_port": int(remote_port)})
+        update_state(lambda s: {**s, "frpc_pid": p.pid, "remote_port": int(remote_port),
+                                "frpc_local_port": FWD_PORT})
     except Exception as e:
         print("[警告] state 写入失败(隧道本身不受影响): %r" % e, flush=True)
     time.sleep(1.0)
@@ -7828,7 +8238,8 @@ def ensure_tunnel(remote_port=REMOTE_PORT):
                 except Exception:
                     pass
                 try:
-                    update_state(lambda s: {**s, "frpc_pid": keep, "remote_port": want})
+                    update_state(lambda s: {**s, "frpc_pid": keep, "remote_port": want,
+                                            "frpc_local_port": FWD_PORT})
                 except Exception:
                     pass
                 print("frpc 已在运行(pid=%d) → 远端端口 %d(已清理重复进程 pid=%d)"
@@ -8538,9 +8949,11 @@ def cmd_pair():
     """生成一次性配对链接(60 秒/仅一次)。grant 存于闸机进程内存,
     通过 loopback 端点向闸机申请——闸机不在就提示先启动。"""
     try:
+        _port = _cli_gate_port()
+        _tok = admin_token(create=False) or ""
         req = urllib.request.Request(
-            "http://127.0.0.1:%d/browserctl-gate/pair" % FWD_PORT,
-            method="POST", data=b"")
+            "http://127.0.0.1:%d/browserctl-gate/pair" % _port,
+            method="POST", data=b"", headers={"X-BC-Admin": _tok})
         r = urllib.request.urlopen(req, timeout=5)
         info = json.loads(r.read())
     except Exception as e:
@@ -8558,13 +8971,14 @@ def cmd_status():
     except SystemExit as e:
         print("未探测到(%s)" % e)
     fwd_alive = False
+    _port = _cli_gate_port()
     try:
-        s = socket.create_connection(("127.0.0.1", FWD_PORT), timeout=1)
+        s = socket.create_connection(("127.0.0.1", _port), timeout=1)
         s.close()
         fwd_alive = True
     except OSError:
         pass
-    print("本地转发器 3080:", "运行中" if fwd_alive else "未运行",
+    print("本地转发器 %d:" % _port, "运行中" if fwd_alive else "未运行",
           "(pid=%s)" % st.get("fwd_pid"))
     frpc_alive = bool(st.get("frpc_pid") and _pid_alive(st["frpc_pid"]))
     assigned = st.get("remote_port")
@@ -8708,8 +9122,11 @@ def cmd_link(ttl=86400, uses=1):
     """打印带过期时间与使用次数的引导链接(默认 24h / 1 次)。"""
     uses = max(0, min(int(uses), 99))
     try:
+        _tok = admin_token(create=False) or ""
         req = urllib.request.Request(
-            "http://127.0.0.1:%d/browserctl-gate/link?ttl=%d&uses=%d" % (FWD_PORT, int(ttl), uses))
+            "http://127.0.0.1:%d/browserctl-gate/link?ttl=%d&uses=%d"
+            % (_cli_gate_port(), int(ttl), uses),
+            headers={"X-BC-Admin": _tok})
         r = urllib.request.urlopen(req, timeout=5)
         info = json.loads(r.read())
     except Exception:
@@ -8759,6 +9176,16 @@ def cmd_rotate():
     with _bootstrap_lock:
         _bootstrap.clear()
     _dump_bootstrap()
+    # 一次性/长期配对 grant 也必须一起作废:它们不依赖 link_secret 签名,
+    # 只靠本地随机串;rotate 后旧长期码仍能 claim(审计 P1)。会话同时清空。
+    with _gate_lock:
+        _grants.clear()
+        _sessions.clear()
+    try:
+        _dump_grants()
+        _dump_sessions()
+    except Exception:
+        pass
     print("已轮换链接密钥:旧引导链接全部失效,闸机会话全部踢下线。")
     print("正在把新密钥同步到服务器 nginx …")
     try:

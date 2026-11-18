@@ -860,6 +860,13 @@ function totpUri(secret) {
   return 'otpauth://totp/DshRemote:DeepSeekPanel?secret=' + secret +
     '&issuer=DshRemote&algorithm=SHA1&digits=6&period=30'}
 
+/** 闸机实际端口(自动避让后可能不是 3080):从 state 读,读不到退回 3080。
+ *  2026-11-18:正式版此前只有 SigEnforceCard 调用 gatePort() 却没有定义,
+ *  点「强制设备签名」必 ReferenceError;其余路由又写死 3080,自动避让后全断。 */
+function gatePort() {
+  try { return Number(readState().fwd_port) || 3080 } catch { return 3080 }
+}
+
 function portOpen(port) {
   return new Promise((resolve) => {
     const s = net.connect({ port, host: '127.0.0.1', timeout: 1500 })
@@ -902,7 +909,7 @@ async function buildTunnel() {
   if (!ROOT) return { ok: false, started: false, forwarder: false, error: coreNotFoundError() }
   const startedAt = Date.now()
   if (sessionTunnel) {
-    const fwd = await portOpen(3080)
+    const fwd = await portOpen(gatePort())
     if (fwd) {
       const ready = tunnelReady()
       // 闸机在跑但隧道掉了(例如 frpc 被安全软件杀掉):不在这里回 ok,继续走重建流程自愈
@@ -967,7 +974,7 @@ async function buildTunnel() {
   let fwd = false
   const deadline = Date.now() + fwdDeadlineMs
   while (Date.now() < deadline) {
-    fwd = await portOpen(3080)
+    fwd = await portOpen(gatePort())
     if (fwd) break
     await new Promise(r => setTimeout(r, 400))
   }
@@ -979,7 +986,7 @@ async function buildTunnel() {
       ok: false,
       started: true,
       forwarder: false,
-      error: '本机闸机(127.0.0.1:3080)启动失败。\n'
+      error: '本机闸机(127.0.0.1:' + gatePort() + ')启动失败。\n'
         + '最常见原因:Windows Defender / 安全软件把 frpc.exe 判为 PUA 拒绝执行(WinError 5 拒绝访问)。\n'
         + '处理:在 kit 目录双击 fix-antivirus.bat(推荐;或右键 fix-antivirus.ps1 →「使用 PowerShell 运行」),详见 INSTALL.md「常见问题」第 1 条。\n'
         + '详见 browserctl_start.log 与 browserctl_fwd.log。'
@@ -1366,7 +1373,7 @@ export function apply(ctx, config = {}) {
           // 幂等启动(逻辑见 buildTunnel):本会话隧道在跑 → 直接返回,不拆隧道不换端口;
           // 只有隧道没在跑 / DSH 刚启动首次 ensure 才重建。关插件面板绝不会重启隧道。
           if (ensureRunning) {
-            sendJson(res, 200, { ok: true, pending: true, forwarder: await portOpen(3080),
+            sendJson(res, 200, { ok: true, pending: true, forwarder: await portOpen(gatePort()),
                                  link: secretLink(), tunnel: tunnelReady().tunnel })
             return
           }
@@ -1390,7 +1397,7 @@ export function apply(ctx, config = {}) {
           return
         }
         if (route === '/browserctl/api/status') {
-          const fwd = await portOpen(3080)
+          const fwd = await portOpen(gatePort())
           // 闸机没起来时把上次 ensure 的失败原因一并给出,前端才能显示真正的原因
           // tunnel:二维码可用性(frpc 是否连通),前端据此决定是否显示"隧道未建立"而不是空二维码
           const ready = tunnelReady()
@@ -1437,7 +1444,7 @@ export function apply(ctx, config = {}) {
           sendJson(res, r.ok ? 200 : (r.canceled ? 409 : 500), {
             ...r,
             action,
-            forwarder: await portOpen(3080),
+            forwarder: await portOpen(gatePort()),
             tunnel: tunnelReady().tunnel,
           })
           return
@@ -1447,7 +1454,7 @@ export function apply(ctx, config = {}) {
           // 门禁:frp 隧道未连通时直接 503,绝不把扫了会 502 的二维码发给用户。
           if (!tunnelGuard(res)) return
           try {
-            const r = await fetch('http://127.0.0.1:3080/browserctl-gate/link?ttl=86400', {
+            const r = await fetch('http://127.0.0.1:' + gatePort() + '/browserctl-gate/link?ttl=86400', {
               method: 'GET',
               headers: adminHeaders(),
               signal: AbortSignal.timeout(4000),
@@ -1476,7 +1483,7 @@ export function apply(ctx, config = {}) {
           const rawUses = parseInt(url.searchParams.get('uses') || '', 10)
           if (!Number.isNaN(rawUses)) uses = Math.max(0, Math.min(99, rawUses))
           try {
-            const r = await fetch('http://127.0.0.1:3080/browserctl-gate/link?ttl=' + ttl + '&uses=' + uses, {
+            const r = await fetch('http://127.0.0.1:' + gatePort() + '/browserctl-gate/link?ttl=' + ttl + '&uses=' + uses, {
               method: 'GET',
               headers: adminHeaders(),
               signal: AbortSignal.timeout(4000),
@@ -1503,7 +1510,7 @@ export function apply(ctx, config = {}) {
           if (!tunnelGuard(res)) return
           try {
             const uses = Math.max(1, Math.min(50, parseInt(url.searchParams.get('uses') || '1', 10) || 1))
-            const r = await fetch('http://127.0.0.1:3080/browserctl-gate/pair?uses=' + uses, {
+            const r = await fetch('http://127.0.0.1:' + gatePort() + '/browserctl-gate/pair?uses=' + uses, {
               method: 'POST',
               headers: adminHeaders(),
               signal: AbortSignal.timeout(4000),
@@ -1530,7 +1537,7 @@ export function apply(ctx, config = {}) {
           const grant = (url.searchParams.get('g') || '').trim()
           if (!grant) { sendJson(res, 400, { ok: false, error: '缺少 g 参数' }); return }
           try {
-            const r = await fetch('http://127.0.0.1:3080/browserctl-gate/pair/status?g=' + encodeURIComponent(grant), {
+            const r = await fetch('http://127.0.0.1:' + gatePort() + '/browserctl-gate/pair/status?g=' + encodeURIComponent(grant), {
               headers: adminHeaders(),
               signal: AbortSignal.timeout(4000),
             })
@@ -1548,7 +1555,7 @@ export function apply(ctx, config = {}) {
           // 之后打开 App 免扫码直连。与 60s 一次性配对互补,同样复用闸机认证/踢下线机制。
           if (!tunnelGuard(res)) return
           try {
-            const r = await fetch('http://127.0.0.1:3080/browserctl-gate/pair?ttl=long', {
+            const r = await fetch('http://127.0.0.1:' + gatePort() + '/browserctl-gate/pair?ttl=long', {
               method: 'POST',
               headers: adminHeaders(),
               signal: AbortSignal.timeout(6000),
@@ -1610,8 +1617,8 @@ export function apply(ctx, config = {}) {
           if (isLocalCall) {
             try {
               const target = dev
-                ? 'http://127.0.0.1:3080/browserctl-gate/kick?dev=' + encodeURIComponent(dev)
-                : 'http://127.0.0.1:3080/browserctl-gate/kick-all'
+                ? 'http://127.0.0.1:' + gatePort() + '/browserctl-gate/kick?dev=' + encodeURIComponent(dev)
+                : 'http://127.0.0.1:' + gatePort() + '/browserctl-gate/kick-all'
               const r = await fetch(target, {
                 method: 'POST',
                 headers: adminHeaders(),
@@ -1687,7 +1694,7 @@ export function apply(ctx, config = {}) {
         if (route === '/browserctl/api/session-days') {
           const isPost = req.method === 'POST'
           try {
-            const target = 'http://127.0.0.1:3080'
+            const target = 'http://127.0.0.1:' + gatePort()
               + '/browserctl-gate/session-days'
               + (isPost ? '?days=' + encodeURIComponent(url.searchParams.get('days') || '') : '')
             const r = await fetch(target, {
@@ -1705,7 +1712,7 @@ export function apply(ctx, config = {}) {
         if (route === '/browserctl/api/sysinfo') {
           // 遥测:闸机要求会话验证,host 代理带管理令牌;闸机侧自带 10s 缓存
           try {
-            const r = await fetch('http://127.0.0.1:3080' + '/browserctl-gate/sysinfo', {
+            const r = await fetch('http://127.0.0.1:' + gatePort() + '/browserctl-gate/sysinfo', {
               headers: adminHeaders(),
               signal: AbortSignal.timeout(20000),
             })
@@ -2280,7 +2287,7 @@ export function apply(ctx, config = {}) {
       const isLocalCall = !req.headers['x-real-ip'] && !req.headers['x-forwarded-for']
       let upstream
       try {
-        upstream = await fetch('http://127.0.0.1:3080' + url.pathname + url.search, {
+        upstream = await fetch('http://127.0.0.1:' + gatePort() + url.pathname + url.search, {
           method: req.method || 'GET',
           headers: {
             'content-type': req.headers['content-type'] || 'application/json',

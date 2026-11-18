@@ -18,7 +18,7 @@
  *   「凭证已就绪→直接进面板 / 否则重装」判定,消除「凭证已安装过」死循环。
  * 更新方式:修改本文件任意内容,浏览器下次访问会自动比对并激活新 SW。
  */
-const SW_VERSION = '1.2.6'
+const SW_VERSION = '1.2.7'
 var KV = { dev: '', key: '', priv: null, privjwk: '', pub: '' }
 
 function idb() {
@@ -133,6 +133,19 @@ function sign(method, path) {
     .then(function (k) { return crypto.subtle.sign('HMAC', k, msg) })
     .then(function (mac) { return { ts: ts, nonce: n, sig: hex(mac) } })
 }
+/* 原样签名(用于首次 dev-bind 的 bind-new 自证:防止服务器在请求里换公钥)。 */
+function signText(msg) {
+  var b = new TextEncoder().encode(msg)
+  if (KV.priv || KV.privjwk) {
+    var kp = KV.priv
+      ? Promise.resolve(KV.priv)
+      : crypto.subtle.importKey('jwk', JSON.parse(KV.privjwk), { name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign'])
+    return kp.then(function (k) {
+      return crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, k, b)
+    }).then(function (sig) { return hex(sig) })
+  }
+  return Promise.reject(new Error('no-ecdsa-key'))
+}
 /* 签名路径口径:剥掉 /p/<port>/ 前缀 + 去尾斜杠,与闸机 _dev_sig_verify 同一规范。 */
 function normPath(url) {
   var p = new URL(url).pathname.replace(/\/+$/, '')
@@ -231,6 +244,20 @@ self.addEventListener('message', function (e) {
   if (d.type === 'setdev' && d.dev) {
     KV.dev = d.dev
     idbPut('dev', d.dev)
+  }
+  // L2:首次 dev-bind 的公钥自证(新私钥签 bind-new\n<pub>\n<ts>)
+  if (d.type === 'signbind') {
+    var port = e.ports && e.ports[0]
+    if (!port) return
+    var ts = Math.floor(Date.now() / 1000).toString()
+    var pub = d.pub || KV.pub || ''
+    ensureCred().then(function () {
+      return signText('bind-new\n' + pub + '\n' + ts)
+    }).then(function (sig) {
+      port.postMessage({ ok: true, sig: sig, ts: ts })
+    }).catch(function (err) {
+      port.postMessage({ ok: false, error: String(err && err.message || err) })
+    })
   }
   // L2:引导页通过 MessageChannel 请求生成密钥对并回传公钥 hex(65B 非压缩点)
   if (d.type === 'genkeys') {
