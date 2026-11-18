@@ -32,7 +32,7 @@ var import_dsh_client_store = require("@deepseek-ai/dsh-client-store");
 var import_jsx_runtime = require("react/jsx-runtime");
 var NS = "browserctl";
 var STYLE_ID = "browserctl/styles";
-var VERSION = true ? "1.0.74" : "dev";
+var VERSION = true ? "1.0.75" : "dev";
 var ABOUT_LINKS = {
   website: "https://remote.ymzcc.com/dsh-remote/",
   github: "https://github.com/Memorial-coder/dsh-remote-plugin",
@@ -2852,7 +2852,7 @@ function SigEnforceCard({ t, reloadToken }) {
   }
   async function loadHealth() {
     try {
-      const r = await fetch(API_P + "/browserctl/api/sig-health", { cache: "no-store" });
+      const r = await fetch(API_P + "/browserctl-gate/sig-health", { cache: "no-store" });
       const j = await r.json().catch(() => ({}));
       setHealth(j && j.ok ? j : { ok: false });
     } catch (e) {
@@ -2866,7 +2866,7 @@ function SigEnforceCard({ t, reloadToken }) {
     if (restarting) return;
     setRestarting(true);
     try {
-      await fetch(API_P + "/browserctl/api/gate-restart", { method: "POST", cache: "no-store" });
+      await fetch(API_P + "/browserctl-gate/gate-restart", { method: "POST", cache: "no-store" });
     } catch (e) {
     }
     let n = 0;
@@ -2884,7 +2884,7 @@ function SigEnforceCard({ t, reloadToken }) {
     setActing("all");
     setAllMsg("");
     try {
-      const r = await fetch(API_P + "/browserctl/api/revoke-all", { method: "POST", cache: "no-store" });
+      const r = await fetch(API_P + "/browserctl-gate/revoke-all", { method: "POST", cache: "no-store" });
       const j = await r.json().catch(() => ({}));
       if (j && j.ok) {
         setAllMsg("\u5DF2\u6E05\u9664:" + (j.sessions || 0) + " \u53F0\u5728\u7EBF\u4F1A\u8BDD\u3001" + (j.devices || 0) + " \u53F0\u8BBE\u5907\u5BC6\u94A5\u3001" + (j.grants || 0) + " \u4E2A\u672A\u7528\u914D\u5BF9\u7801");

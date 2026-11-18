@@ -2922,7 +2922,7 @@ function SigEnforceCard({ t, reloadToken }) {
   }
   async function loadHealth() {
     try {
-      const r = await fetch(API_P + '/browserctl/api/sig-health', { cache: 'no-store' })
+      const r = await fetch(API_P + '/browserctl-gate/sig-health', { cache: 'no-store' })
       const j = await r.json().catch(() => ({}))
       setHealth(j && j.ok ? j : { ok: false })
     } catch (e) { setHealth({ ok: false }) }
@@ -2931,7 +2931,7 @@ function SigEnforceCard({ t, reloadToken }) {
   async function restartGate() {
     if (restarting) return
     setRestarting(true)
-    try { await fetch(API_P + '/browserctl/api/gate-restart', { method: 'POST', cache: 'no-store' }) } catch (e) {}
+    try { await fetch(API_P + '/browserctl-gate/gate-restart', { method: 'POST', cache: 'no-store' }) } catch (e) {}
     let n = 0
     const timer = setInterval(async () => {
       n += 1; await loadHealth()
@@ -2942,7 +2942,7 @@ function SigEnforceCard({ t, reloadToken }) {
     if (acting) return
     setActing('all'); setAllMsg('')
     try {
-      const r = await fetch(API_P + '/browserctl/api/revoke-all', { method: 'POST', cache: 'no-store' })
+      const r = await fetch(API_P + '/browserctl-gate/revoke-all', { method: 'POST', cache: 'no-store' })
       const j = await r.json().catch(() => ({}))
       if (j && j.ok) {
         setAllMsg('已清除:' + (j.sessions || 0) + ' 台在线会话、' + (j.devices || 0) + ' 台设备密钥、' + (j.grants || 0) + ' 个未用配对码')
