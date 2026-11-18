@@ -52,6 +52,18 @@ from pathlib import Path
 
 import socketserver  # noqa: F401  (保留给历史兼容)
 
+# kb/06 第 39 条(2026-11-18):Windows 控制台/管道默认 GBK,print 含 U+FFFD
+# (解码替换符,常见于畸形请求行/UA 的 errors=replace 产物)的内容会抛
+# UnicodeEncodeError 直接打死闸机进程——当晚连环重启、公网端口漂移、手机端
+# 「设备签名校验失败→配对已失效」的元凶之一。启动即把标准流改成
+# errors=replace:编码不了的字符降级为 ? 而不是崩进程。
+for _std_stream in (sys.stdout, sys.stderr):
+    try:
+        _std_stream.reconfigure(errors="replace")
+    except Exception:
+        pass
+del _std_stream
+
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 FRPC = HERE / "frpc.exe"
