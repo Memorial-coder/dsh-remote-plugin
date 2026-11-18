@@ -965,8 +965,10 @@ function setBtn(txt,cls){ if(!rfBtn) return; rfBtn.textContent=txt; rfBtn.classN
 function closeP(){ opened=false; if(mask) mask.classList.remove('open');
   if(timer){ clearInterval(timer); timer=null; } }
 function openP(){ ensure(); opened=true; mask.classList.add('open');
-  loadSys(); if(timer) clearInterval(timer);
-  timer=setInterval(function(){ if(opened) loadSys(); },1000); }
+  loadSys(true); if(timer) clearInterval(timer);
+  /* 自动同步静默化(2026-11-18 用户反馈:右下角按钮每秒闪,难看但又要刷新):
+     定时器不带 manual 标记 → 按钮文字/颜色完全不动,数据照常每秒更新 */
+  timer=setInterval(function(){ if(opened) loadSys(false); },1000); }
 
 function renderSys(d,lat){
   var g=d||{}; var memP=(g.memTotal&&g.memFree!=null)?share(g.memTotal-g.memFree,g.memTotal):null;
@@ -1009,8 +1011,12 @@ function renderSys(d,lat){
   if (dsk.length){
     var s3='';
     dsk.forEach(function(k){ if(!k) return;
-      var pp=share(k.used,k.total);
-      s3+=barRow((k.name||'盘')+' '+esc(fmtBytes(k.used))+' / '+esc(fmtBytes(k.total)),
+      /* 兼容两种采集形状:旧 {name,used,total} / 常驻采样 {drive,size,free} */
+      var nm=k.drive||k.name||'盘';
+      var tot=(k.total!=null)?k.total:k.size;
+      var used=(k.used!=null)?k.used:(tot!=null&&k.free!=null?(tot-k.free):null);
+      var pp=share(used,tot);
+      s3+=barRow(nm+' '+esc(fmtBytes(used))+' / '+esc(fmtBytes(tot)),
         (pp==null?'—':pp.toFixed(0)+'%'),pp);
     });
     html+=section('磁盘容量',s3);
@@ -1026,11 +1032,16 @@ function renderSys(d,lat){
    +kv('闸机运行时长',esc(fmtUptime(lnk.gateUptime)))
    +kv('活跃会话（10 秒内）',lnk.activeSessions==null?'—':Math.round(lnk.activeSessions));
   html+=section('系统 / 链路',s4);
+  /* 数据没变就不重建 DOM(2026-11-18 用户反馈"一秒一清空"的闪):内容一致时
+     只更新延迟角标,整层重绘只发生在数值真的变化的那一秒 */
+  if (html===renderSys._last){ if (lat!=null&&latEl) latEl.textContent='延迟 '+lat+' ms'; return; }
+  renderSys._last=html;
   bodyEl.innerHTML=html;
   if (lat!=null&&latEl) latEl.textContent='延迟 '+lat+' ms';
 }
-function loadSys(){
-  if (busy) return; busy=true; setBtn('刷新中…','on');
+function loadSys(manual){
+  if (busy) return; busy=true;
+  if (manual) setBtn('刷新中…','on'); /* 只有手点才变状态,自动同步不闪 */
   var t0=performance.now();
   fetch('browserctl-gate/sysinfo',{cache:'no-store'})
    .then(function(r){ var lat=Math.round(performance.now()-t0); return r.json().then(function(j){ return {j:j,lat:lat}; }); })
@@ -1038,11 +1049,12 @@ function loadSys(){
      var j=o.j||{};
      if (!j.ok) throw new Error(j.error||'闸机返回失败');
      renderSys(j.sysinfo,o.lat);
-     setBtn('已更新','ok'); setTimeout(function(){ if(!busy) setBtn('刷新',''); },1200);
+     if (manual) { setBtn('已更新','ok'); setTimeout(function(){ if(!busy) setBtn('刷新',''); },1200); }
    })
    .catch(function(e){
      if (bodyEl) bodyEl.innerHTML='<div class="kv"><b class="bad">读取失败：'+esc(e&&e.message||e)+'</b></div>';
-     setBtn('刷新','');
+     renderSys._last=null; /* 错误提示占着 bodyEl,恢复后必须真重建 */
+     if (manual) setBtn('刷新','');
    })
    .then(function(){ busy=false; });
 }
@@ -4199,10 +4211,14 @@ class GateHandler(BaseHTTPRequestHandler):
         pass
 
     def setup(self):
-        # 远程链路字节统计(见 _CountingSock 注释):先包客户端 socket,
-        # 再让父类从包好的对象创建 rfile/wfile(HTTP 与 WS 两条路都入账)。
+        # 远程链路字节统计(见 _CountingSock 注释):包在 self.request 上。
+        # ⚠️ 不能包 self.connection——父类 StreamRequestHandler.setup() 第一行
+        # 就是 self.connection = self.request,会把包好的壳用裸 socket 冲掉,
+        # rfile/wfile 全从裸 socket 建 → 计数恒 0(2026-11-18 用户截图实锤)。
+        # 包 request 则父类随后自动把 connection 指向包好的对象,HTTP(rfile/wfile)
+        # 与 WS 泵(self.connection)两条路都入账。
         try:
-            self.connection = _CountingSock(self.connection)
+            self.request = _CountingSock(self.request)
         except Exception:
             pass
         super().setup()
