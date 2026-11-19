@@ -592,6 +592,8 @@ export function diagRedact(input) {
   s = s.replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]{8,}/gi, '$1***')
   // 敏感键值:token=xxx / password: xxx / sig=xxx ...
   s = s.replace(/\b(token|secret|password|passwd|pwd|sig|signature|apikey|api_key|access_key|auth_key|privkey)\s*([=:])\s*("[^"]*"|'[^']*'|[^\s,;&"'}]+)/gi, '$1$2***')
+  // 引导/管理令牌查询参数:?k=... / ?at=...（browserctl_start.log 里的 dsh-auth 引导链接）
+  s = s.replace(/([?&])(k|at)=[^&\s"'<>]+/gi, '$1$2=***')
   // Cookie / Authorization 头(日志行常带时间戳/模块前缀,所以不能按行首锚定)
   s = s.replace(/(^|[\s\[])(cookie|set-cookie|authorization)[ \t]*:[ \t]*[^\r\n]+/gim, '$1$2: ***')
   // 长十六进制串 / 长 base64url 串(会话令牌、签名片段)
