@@ -398,7 +398,7 @@ jobs:
         continue-on-error: true
         run: |
           npm install -g npm@latest
-          if npm publish --provenance; then
+          if npm publish --provenance --loglevel verbose; then
             echo "✅ npm 已发布 dsh-plugin-browserctl@${VERSION}" >> "$GITHUB_STEP_SUMMARY"
           else
             echo "⚠️ npm 发布失败——常见原因:npmjs.com 的 Trusted publisher 还没登记(Memorial-coder/dsh-remote-plugin / release.yml),或该版本 npm 已存在。GitHub Release 不受影响。" >> "$GITHUB_STEP_SUMMARY"
