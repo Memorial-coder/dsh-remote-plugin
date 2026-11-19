@@ -63,6 +63,10 @@ on:
         description: '只构建不发布(试跑)'
         type: boolean
         default: false
+      npm_only:
+        description: '只补发 npm(用仓库当前版本),不建 Release 不打标签——Trusted Publisher 失效断链期间的补发通道'
+        type: boolean
+        default: false
 
 concurrency:
   group: release-${{ github.ref }}
@@ -153,6 +157,17 @@ jobs:
              && git rev-parse -q --verify "refs/tags/v${VERSION}" >/dev/null 2>&1; then
             echo "v${VERSION} 已有标签,本次跳过"
             MODE=skip
+          fi
+
+          # npm 补发模式:GitHub Release 已存在的版本只补 npm publish;
+          # npm 上已有同版本则停,防重复发布报错
+          if [ "${{ inputs.npm_only }}" = "true" ]; then
+            if npm view "dsh-plugin-browserctl@${VERSION}" version >/dev/null 2>&1; then
+              echo "::error::npm 上已存在 dsh-plugin-browserctl@${VERSION},无需补发"
+              MODE=skip
+            else
+              MODE=npm_only
+            fi
           fi
 
           {
@@ -301,7 +316,7 @@ jobs:
 
       # ---------- 4. 生成更新介绍(从提交记录) ----------
       - name: 生成更新介绍
-        if: steps.decide.outputs.mode != 'skip'
+        if: steps.decide.outputs.mode != 'skip' && inputs.npm_only != true
         run: |
           set -euo pipefail
           PREV="${{ steps.decide.outputs.last_tag }}"
@@ -347,7 +362,7 @@ jobs:
       # ---------- 5. 发布:推回 main + 打标签 + 建 Release ----------
       - name: 发布
         id: publish
-        if: steps.decide.outputs.mode != 'skip' && inputs.dry_run != true
+        if: steps.decide.outputs.mode != 'skip' && inputs.dry_run != true && inputs.npm_only != true
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
