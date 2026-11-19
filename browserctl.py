@@ -79,6 +79,9 @@ def _run_hidden(cmd, **kw):
 FWD_LOG = HERE / "browserctl_fwd.log"
 FRPC_LOG = HERE / "browserctl_frpc.log"
 WATCH_LOG = HERE / "browserctl_watch.log"
+# 插件把 start 的 stdout/stderr 落到这份日志里。它含启动横幅（含 dsh-auth 引导链接），
+# 必须与其它运行态日志一样收紧 ACL——见 harden_credential_files()。
+START_LOG = HERE / "browserctl_start.log"
 # win_push.py(Windows 通知驻留)的推送水位文件:含设备/会话指纹,一并纳入 ACL 硬化
 PUSHWIN_STATE = HERE / "pushwin_state.json"
 
@@ -348,7 +351,7 @@ def harden_credential_files():
               DEVICES_FILE, NOTIFS_FILE, BOOTSTRAP_FILE, ADMIN_TOKEN_FILE, KNOWN_HOSTS,
               GRANTS_FILE,
               # 日志/frpc 配置/pushwin 水位(2026-11-08 补齐,均 HERE 相对路径)
-              FWD_LOG, FRPC_LOG, WATCH_LOG, HERE / "browserctl_frpc.toml",
+              FWD_LOG, FRPC_LOG, WATCH_LOG, START_LOG, HERE / "browserctl_frpc.toml",
               PUSHWIN_STATE):
         try:
             if p.exists():
@@ -7183,6 +7186,22 @@ def _cli_gate_port():
     return int(os.environ.get("BC_FWD_PORT") or FWD_PORT)
 
 
+class _GateHTTPServer(ThreadingHTTPServer):
+    """闸机 HTTP 服务：客户端断连类异常不打完整 traceback。
+
+    BaseHTTPRequestHandler 在读取请求行阶段遇到 RST/中止时，会把异常交给
+    socketserver.handle_error() 打印整段堆栈。本机 fwd.log 实测 6% 的行都是这种
+    噪声（ConnectionReset/Aborted），真异常会被淹没。这里只静默连接类异常，
+    其它异常仍走默认的完整堆栈。
+    """
+
+    def handle_error(self, request, client_address):
+        exc = sys.exc_info()[1]
+        if isinstance(exc, (ConnectionError, TimeoutError)):
+            return
+        super().handle_error(request, client_address)
+
+
 def gate_serve():
     _bc_apply_fwd_port()
     """127.0.0.1:FWD_PORT 闸机:TOTP 2FA → 反代 DSH(支持 WS/SSE 长连接)。
@@ -7271,7 +7290,7 @@ def gate_serve():
     ThreadingHTTPServer.request_queue_size = 128  # 默认 backlog 只有 5,页面并发一冲就拒绝连接
     while True:
         try:
-            server = ThreadingHTTPServer(("127.0.0.1", FWD_PORT), GateHandler)
+            server = _GateHTTPServer(("127.0.0.1", FWD_PORT), GateHandler)
             if os.name == "nt":
                 server.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
         except OSError as e:
@@ -8990,6 +9009,22 @@ def bootstrap_url(ttl=86400, uses=1):
     return url
 
 
+def log_safe_link(url):
+    """写日志/管道时用的引导链接。
+
+    引导 token(?k=)是 24 小时单次有效、可直接换取 30 天会话的凭据；插件把 start
+    的输出重定向到 browserctl_start.log，工单诊断还会读这份日志。所以：
+      - 交互终端(isatty)照常打完整链接，用户要扫码/点开；
+      - 被重定向到文件/管道时只打 p=<port>，token 用 *** 代替。
+    """
+    try:
+        if sys.stdout.isatty():
+            return url
+    except Exception:
+        pass
+    return re.sub(r'([?&])k=[^&\s]+', r'\1k=***', url)
+
+
 def upload_bootstrap(remote_port=REMOTE_PORT):
     """更新引导占位页(不含任何凭据)。
 
@@ -9218,7 +9253,7 @@ def cmd_start():
     print("=" * 62)
     if st.get("link_secret"):
         print("手机/外网浏览器访问(扫码或直接打开,无需密码):")
-        print("  %s" % bootstrap_url())
+        print("  %s" % log_safe_link(bootstrap_url()))
         print("    → 自动种 Cookie 并跳转到面板")
     else:
         print("(链接密钥未生成;执行 python browserctl.py nginx 后输出扫码链接)")
@@ -9377,7 +9412,7 @@ def cmd_rotate():
         print("   请重跑:python browserctl.py nginx")
     print("新的引导链接(用它重新配对手机):")
     try:
-        print("  %s" % bootstrap_url())
+        print("  %s" % log_safe_link(bootstrap_url()))
     except SystemExit as e:
         print("  (%s)" % e)
 
