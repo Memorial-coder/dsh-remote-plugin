@@ -19,6 +19,9 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: dsh-plugin-browserctl/package-lock.json
+      # 防「bump 后漏 rebuild」(实锤 1.0.62/1.0.64/1.0.78→1.0.80):
+      # 已提交的 lib 必须与 package.json 同版本;放在 build 之前,查的是仓库里的产物。
+      - run: node scripts/check-lib-version.mjs
       - run: npm ci
         working-directory: dsh-plugin-browserctl
       - run: node build.mjs
