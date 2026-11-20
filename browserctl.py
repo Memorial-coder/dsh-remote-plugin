@@ -894,7 +894,7 @@ var css='#dshSysMask{position:fixed;inset:0;z-index:2147483000;background:rgba(0
  +'opacity:0;pointer-events:none;transition:opacity .22s;'
  +'font-family:system-ui,-apple-system,"Segoe UI","PingFang SC",sans-serif}'
  +'#dshSysMask.open{opacity:1;pointer-events:auto}'
- +'#dshSysMask .sheet{position:fixed;left:0;right:0;bottom:0;max-height:84vh;overflow-y:auto;'
+ +'#dshSysMask .sheet{position:fixed;left:0;right:0;bottom:0;max-height:84vh;overflow-y:auto;overscroll-behavior:contain;'
  +'-webkit-overflow-scrolling:touch;box-sizing:border-box;padding:14px 16px calc(16px + env(safe-area-inset-bottom,0px));'
  +'border-radius:20px 20px 0 0;background:#1b1d22;color:#fff;'
  +'transform:translateY(100%);transition:transform .26s cubic-bezier(.2,.7,.3,1);'
@@ -932,7 +932,25 @@ var css='#dshSysMask{position:fixed;inset:0;z-index:2147483000;background:rgba(0
  +'#dshSysMask .rf{flex:0 0 auto;height:36px;padding:0 16px;border:0;border-radius:10px;'
  +'background:#4a9eff;color:#fff;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit}'
  +'#dshSysMask .rf.on{opacity:.55}'
- +'#dshSysMask .rf.ok{background:#34C759}';
+ +'#dshSysMask .rf.ok{background:#34C759}'
+ /* 横屏(2026-11-20 用户反馈「可以再优化优化」):全宽贴底改为居中卡片+内容双栏——
+    宽屏下 kv 行不再被拉到整屏两端,同屏可见内容翻倍;竖屏样式完全不变 */
+ +'@media (orientation:landscape) and (min-width:640px){'
+ +'#dshSysMask .sheet{left:50%;right:auto;width:min(760px,calc(100vw - 20px - env(safe-area-inset-left,0px) - env(safe-area-inset-right,0px)));'
+ +'bottom:max(12px,env(safe-area-inset-bottom,0px));max-height:calc(100vh - 24px);border-radius:20px;'
+ +'padding:12px 18px 14px;transform:translate(-50%,calc(100% + 48px))}'
+ +'#dshSysMask.open .sheet{transform:translate(-50%,0)}'
+ +'#dshSysMask .bd{display:grid;grid-template-columns:1fr 1fr;column-gap:28px;align-items:start}'
+ +'#dshSysMask .bd .w{min-width:0}'
+ +'#dshSysMask .bd .m{grid-column:1/-1}'
+ +'#dshSysMask .cell{padding:8px 6px}'
+ +'#dshSysMask .kv{min-height:29px;font-size:12.5px}'
+ +'#dshSysMask .sec{margin-top:9px}'
+ +'#dshSysMask .br{margin:3px 0 6px}'
+ +'#dshSysMask .mini{padding:6px 10px}'
+ +'#dshSysMask .foot{margin-top:10px}'
+ +'#dshSysMask .hint{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
+ +'}';
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){
   return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
 function fmtRate(n){ if(n==null||!isFinite(n)) return '—';
@@ -952,6 +970,7 @@ function barRow(label,val,cls){
 function kv(k,v,cls){ return '<div class="kv"><em>'+esc(k)+'</em><b'+(cls?' class="'+cls+'"':'')+'>'+v+'</b></div>'; }
 function mini(l1,l2){ return '<div class="mini"><b>'+esc(l1)+'</b> · '+l2+'</div>'; }
 function section(t,inner){ return '<div class="sec">'+esc(t)+'</div>'+inner; }
+function wrap(c,inner){ return '<div class="w '+c+'">'+inner+'</div>'; }
 
 var mask=null, bodyEl=null, latEl=null, rfBtn=null;
 function ensure(){
@@ -992,20 +1011,19 @@ function renderSys(d,lat){
    +'<div class="cell"><b>'+(memP==null?'—':Math.round(memP)+'%')+'</b><span>内存</span></div>'
    +'<div class="cell"><b>'+(g.gpu==null?'—':Math.round(g.gpu)+'%')+'</b><span>显卡</span></div>'
    +'<div class="cell"><b>'+(pdA==null?'—':Math.round(pdA)+'%')+'</b><span>磁盘</span></div>';
-  var html='<div class="grid">'+cells+'</div>';
   var ds=(g.pdisks||[]);
+  var wD='';
   if (ds.length){
     var s1='';
     ds.forEach(function(p){ if(!p) return;
       var lab='磁盘 '+(p.name||'');
       s1+=barRow(lab+' 活动时间',(p.active==null?'待采样':Math.round(p.active)+'%'),p.active);
     });
-    html+=section('磁盘活动（任务管理器同口径，非容量）',s1);
     var s1b='';
     ds.forEach(function(p){ if(!p) return;
       s1b+=mini('磁盘 '+(p.name||''),'读 '+esc(fmtRate(p.read))+' · 写 '+esc(fmtRate(p.write)));
     });
-    html+=s1b;
+    wD=section('磁盘活动（任务管理器同口径，非容量）',s1)+s1b;
   }
   var lk=g.link||{};
   var nowT=Date.now(), rateDown=null, rateUp=null;
@@ -1021,8 +1039,9 @@ function renderSys(d,lat){
    +kv('上行速率（手机→电脑）',esc(fmtRate(rateUp)))
    +(lk.txBytes!=null?kv('远程累计下行',esc(fmtBytes(lk.txBytes))):'')
    +(lk.rxBytes!=null?kv('远程累计上行',esc(fmtBytes(lk.rxBytes))):'');
-  html+=section('远程链路流量（只算经闸机的远程消耗）',s2);
+  var wL=section('远程链路流量（只算经闸机的远程消耗）',s2);
   var dsk=(g.disks||[]);
+  var wC='';
   if (dsk.length){
     var s3='';
     dsk.forEach(function(k){ if(!k) return;
@@ -1034,7 +1053,7 @@ function renderSys(d,lat){
       s3+=barRow(nm+' '+esc(fmtBytes(used))+' / '+esc(fmtBytes(tot)),
         (pp==null?'—':pp.toFixed(0)+'%'),pp);
     });
-    html+=section('磁盘容量',s3);
+    wC=section('磁盘容量',s3);
   }
   var lnk=(g.link||{});
   var tun=lnk.tunnelOk?('<span class="good">正常'+(lnk.remotePort?(' · 公网端口 '+esc(lnk.remotePort)):'')+'</span>')
@@ -1046,7 +1065,11 @@ function renderSys(d,lat){
    +kv('隧道',tun)
    +kv('闸机运行时长',esc(fmtUptime(lnk.gateUptime)))
    +kv('活跃会话（10 秒内）',lnk.activeSessions==null?'—':Math.round(lnk.activeSessions));
-  html+=section('系统 / 链路',s4);
+  var wS=section('系统 / 链路',s4);
+  /* 每段包一层 .w:竖屏照旧纵向堆叠;横屏 .bd 变双栏网格,左栏=磁盘(活动/容量),
+     右栏=链路(流量/系统),段落归属一眼可读 */
+  var html=wrap('m','<div class="grid">'+cells+'</div>')
+   +wrap('d',wD)+wrap('l',wL)+wrap('c',wC)+wrap('s',wS);
   /* 数据没变就不重建 DOM(2026-11-18 用户反馈"一秒一清空"的闪):内容一致时
      只更新延迟角标,整层重绘只发生在数值真的变化的那一秒 */
   if (html===renderSys._last){ if (lat!=null&&latEl) latEl.textContent='延迟 '+lat+' ms'; return; }
@@ -1067,7 +1090,7 @@ function loadSys(manual){
      if (manual) { setBtn('已更新','ok'); setTimeout(function(){ if(!busy) setBtn('刷新',''); },1200); }
    })
    .catch(function(e){
-     if (bodyEl) bodyEl.innerHTML='<div class="kv"><b class="bad">读取失败：'+esc(e&&e.message||e)+'</b></div>';
+     if (bodyEl) bodyEl.innerHTML='<div class="w m"><div class="kv"><b class="bad">读取失败：'+esc(e&&e.message||e)+'</b></div></div>';
      renderSys._last=null; /* 错误提示占着 bodyEl,恢复后必须真重建 */
      if (manual) setBtn('刷新','');
    })
@@ -2892,6 +2915,12 @@ def _notifs_load():
         _notifs_seq = 0
 
 
+# C7(2026-11-20):notify 深链载荷白名单——只放 ASCII 可见字符里"URL 安全"的一段
+# (字母数字 + -._~:/?#[]@!$&'()*+,;=% 空白一律拒),长度 ≤200;App/面板端各自再做
+# 第二层校验(设备 id 白名单 / hash 参数解析),闸机只负责不让怪字符进通知流。
+_LINK_SAFE_RE = re.compile(r"[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%]{1,200}")
+
+
 def _notifs_persist():
     """把最近 N 条通知落盘(重启后可补拉)。失败静默。"""
     try:
@@ -2902,11 +2931,14 @@ def _notifs_persist():
         pass
 
 
-def _push_notify(kind, title, body, cat=NOTIF_CAT_SECURITY):
+def _push_notify(kind, title, body, cat=NOTIF_CAT_SECURITY, link=""):
     """入队一条推送通知,返回新 id;推送总开关(push_enabled)关闭时丢弃并返回 None。
     kind: system / task_done / need_input / test / error 等。
     cat: official=官方消息(公告/客服) / security=本机安全动态(设备连入/配对/踢出/黑名单)。
-    App/PC 通知中心按 cat 分渠道展示;缺省 security(闸机通知绝大多数是本机安全事件)。"""
+    App/PC 通知中心按 cat 分渠道展示;缺省 security(闸机通知绝大多数是本机安全事件)。
+    link: 可选深链载荷(2026-11-20 C7),只透传不解释——App 点通知时带到面板页做
+    会话级直达。仅接受短小的可见 ASCII 安全字符集(见 _LINK_SAFE_RE),存进通知行
+    的 "link" 字段;push-poll 原样下发,不匹配的值静默丢弃(闸机不为它负责语义)。"""
     global _notifs_seq
     try:
         st = gate_state()
@@ -2916,12 +2948,17 @@ def _push_notify(kind, title, body, cat=NOTIF_CAT_SECURITY):
         body = (body or "").strip()[:500]
         if not title and not body:
             return None
+        link = (link or "").strip()[:200]
+        if link and not _LINK_SAFE_RE.fullmatch(link):
+            link = ""
         with _notifs_lock:
             _notifs_seq += 1
             row = {"id": _notifs_seq, "t": int(time.time()),
                    "kind": str(kind or "system")[:20],
                    "cat": cat if cat in (NOTIF_CAT_OFFICIAL, NOTIF_CAT_SECURITY) else NOTIF_CAT_SECURITY,
                    "title": title, "body": body}
+            if link:
+                row["link"] = link
             _notifs.append(row)
             del _notifs[:-PUSH_NOTIFS_MAX]
         _notifs_persist()
@@ -6026,10 +6063,14 @@ color:#fff;text-decoration:none;font-size:14px}
             title = (q.get("title") or [""])[0]
             body = (q.get("body") or [""])[0]
             kind = (q.get("kind") or [""])[0] or "system"
+            # C7(2026-11-20):可选深链载荷,原样进通知行(白名单校验在 _push_notify)。
+            # 面板端约定:面板页 hash 里的 dshremote-open 参数,App 点通知后拼回面板 URL。
+            link = (q.get("link") or [""])[0]
         except Exception:
             title = body = ""
             kind = "system"
-        nid = _push_notify(kind, title, body)
+            link = ""
+        nid = _push_notify(kind, title, body, link=link)
         self._send_json(200, {"ok": True, "id": nid, "pushed": nid is not None})
 
     def _gate_sysinfo(self):
