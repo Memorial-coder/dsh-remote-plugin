@@ -5930,6 +5930,11 @@ color:#fff;text-decoration:none;font-size:14px}
         if path.endswith("/push-poll"):
             self._gate_push_poll()
             return
+        if path.endswith("/push-history"):
+            # 推送历史(只读,2026-11-21):App 消息中心把闸机历史推送并进消息列表。
+            # 不受 push_enabled 影响——历史是既成事实,开关只管"弹不弹"。
+            self._gate_push_history()
+            return
         if path.endswith("/notify"):
             self._gate_push_notify()
             return
@@ -6068,6 +6073,27 @@ color:#fff;text-decoration:none;font-size:14px}
             since = _notifs_seq
         self._send_json(200, {"ok": True, "enabled": enabled,
                               "since": since, "items": items})
+
+    def _gate_push_history(self):
+        """最近推送历史(只读,2026-11-21)。App 消息中心「电脑推送」数据源:
+        鉴权与 push-poll 同口径(bc-gate Cookie 或本机管理令牌);响应不受
+        push_enabled 影响——历史已发生,总开关只决定"要不要弹"。
+        ?limit=N(1-200,默认 100),按 id 新→旧返回,App 直接按时间倒序并表。"""
+        if not (self._is_admin_call() or self._gate_ok()):
+            self._send_json(401, {"ok": False, "error": "未通过验证"})
+            return
+        from urllib.parse import urlsplit, parse_qs
+        try:
+            q = parse_qs(urlsplit(self.path).query)
+            limit = int((q.get("limit") or ["100"])[0])
+        except Exception:
+            limit = 100
+        limit = max(1, min(200, limit))
+        with _notifs_lock:
+            items = list(_notifs)[-limit:]
+            since = _notifs_seq
+        items.reverse()
+        self._send_json(200, {"ok": True, "since": since, "items": items})
 
     def _gate_push_notify(self):
         """入队一条推送。本机 loopback(智能体/CLI)或已通过 bc-gate 验证的设备
