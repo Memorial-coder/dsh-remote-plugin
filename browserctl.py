@@ -4073,15 +4073,16 @@ var __BC_P=(function(){
 # 480KB/s 要 12-18s 独占链路 —— 这就是手机端「切换会话/重连后转圈」的主因。
 # 方案:闸机对客户端宣称协商成功(在透传 DSH 的 101 时注入
 # Sec-WebSocket-Extensions),对 DSH 保持裸帧(闸机=WS 客户端角色,帧必须掩码);
-# 泵逐帧处理:DSH→客户端方向对 ≥ 阈值的 text/binary 完整帧现场压缩(逐帧复位,
-# = server_no_context_takeover);客户端→DSH 方向解压客户端的压缩帧再重新掩码
+# 泵逐帧处理:DSH→客户端方向对 ≥ 阈值的 text/binary 完整帧用连接级压缩器压缩
+# (2026-11-21 改 context takeover:跨帧共享字典,聊天记录/状态同步这类重复 JSON
+# 的压缩比显著提升;不可压帧也发压缩块——共享器状态已推进,丢输出改发原文会与
+# 客户端解压器失步);客户端→DSH 方向解压客户端的压缩帧再重新掩码
 # 发给 DSH。控制帧(0x8/0x9/0xA)与分片帧原样透传 —— 不压缩任何消息在
 # permessage-deflate 里永远合法,所以最坏情况只是「白转发」,不会破坏协议。
 # 注意:_ws_pong_for_dsh 的代答 PONG 不受影响(RFC 7692 控制帧永不压缩)。
 WS_PMD_MIN_BYTES = 256          # 小于该值的帧压缩无收益,直接透传
 WS_PMD_INFLATE_CAP = 16 * 1024 * 1024  # 单条解压上限(内存护栏)
-_WS_EXT_PMD = ("permessage-deflate; client_no_context_takeover; "
-               "server_no_context_takeover")
+_WS_EXT_PMD = "permessage-deflate; client_no_context_takeover"
 _WS_DEFLATE_TAIL = b"\x00\x00\xff\xff"  # permessage-deflate 会剥掉的块尾
 
 
@@ -4118,6 +4119,21 @@ def _ws_compress_body(payload):
     if len(data) >= len(payload):
         return None
     return data
+
+
+def _ws_compress_body_co(co, payload):
+    """context takeover 版:用连接级压缩器压一帧(跨帧共享字典,重复结构收益大)。
+    Z_SYNC_FLUSH + 剥块尾同上。⚠️ 共享压缩器下没有「压了不赚就原样透传」——
+    co.compress 已推进压缩器状态,丢弃输出改发原文会让客户端解压器(只对 RSV1 帧
+    推进)与闸机失步,后续帧全成乱码。故恒发压缩块:不可压帧多付 ~5B stored 块开销。
+    zlib 异常返回 None,调用方必须断链(fail-closed,上下文同步已不可保证)。"""
+    try:
+        data = co.compress(payload) + co.flush(zlib.Z_SYNC_FLUSH)
+    except Exception:
+        return None
+    if not data.endswith(_WS_DEFLATE_TAIL):
+        return None
+    return data[:-4]
 
 
 def _ws_frame_head(buf):
@@ -4738,6 +4754,7 @@ class GateHandler(BaseHTTPRequestHandler):
             return headb + key + masked
 
         def _pump_upstream_to_client(src, dst):
+            pmd_co = zlib.compressobj(6, zlib.DEFLATED, -15)  # context takeover:连接级压缩器
             # DSH→客户端方向。DSH 的 mux 心跳很苛刻:2s 一次 ping,漏 2 次直接 terminate
             # (MAX_MISSED_HEARTBEATS=2)。大流量同步(实测首连 ~5MB)把 KCP 上行灌满时,
             # 真实客户端的 pong 会被排队延迟数秒 → 服务端误杀 → 面板「重新连接中」死循环。
@@ -4808,9 +4825,11 @@ class GateHandler(BaseHTTPRequestHandler):
                         fw = frame
                         if _pmd_active[0] and opcode in (0x1, 0x2) and fin \
                                 and not rsv1 and ln >= WS_PMD_MIN_BYTES:
-                            body = _ws_compress_body(frame[off:off + ln])
-                            if body is not None:
-                                fw = _ws_build_frame(opcode, body, rsv1=True)
+                            # context takeover:共享压缩器;异常=上下文同步不可保,断链
+                            body = _ws_compress_body_co(pmd_co, frame[off:off + ln])
+                            if body is None:
+                                raise OSError("ws pmd compress failed")
+                            fw = _ws_build_frame(opcode, body, rsv1=True)
                         dst.sendall(fw)
                         self._resp_bytes += len(fw)  # 逐请求日志字节数(实际下行字节)
             except OSError:
