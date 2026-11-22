@@ -590,6 +590,19 @@ const css = `
 .dshBrowserCtlCardBodyTall[data-open='true'] {
   max-height: 2400px;
 }
+/* 「设备凭证」列表:内部独立滚动(同 DevBody 惯例,kb/10 #4 设备区独立滚动)。
+   默认 body 展开态 max-height 450px + overflow hidden,35 台设备 ~2000px 内容
+   会被裁死且外层无处可滚(2026-11-22 用户实测"无法正常下滑")。
+   flex 列滚动容器必须禁子元素收缩,否则行被压扁/裁切。 */
+.dshBrowserCtlSigDevs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 320px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.dshBrowserCtlSigDevs > * { flex: 0 0 auto; }
 .dshBrowserCtlCardBodyRow {
   display: flex;
   align-items: center;
@@ -3008,7 +3021,7 @@ function SigEnforceCard({ t, reloadToken }) {
           color: data ? (enforce ? 'var(--dsw-alias-state-success-primary,#34b371)' : 'var(--dsw-alias-label-tertiary,#8b8f98)') : 'inherit',
         }}>{data ? (enforce ? t('sigOn') : t('sigOff')) : t('sigLoading')}</span>
       </div>
-      <div className="dshBrowserCtlCardBody" data-open="true">
+      <div className="dshBrowserCtlCardBody dshBrowserCtlCardBodyTall" data-open="true">
         {data && (
           <p style={{ margin: 0, fontSize: 12, lineHeight: '17px', color: 'var(--dsw-alias-label-tertiary,#8b8f98)' }}>
             {t('sigCounts').replace('{d}', String(data.devices ?? 0)).replace('{k}', String(data.devices_with_key ?? 0)).replace('{p}', String(data.devices_with_pubkey ?? 0))}
@@ -3061,7 +3074,7 @@ function SigEnforceCard({ t, reloadToken }) {
               <span aria-hidden="true" style={{ fontSize: 10, color: 'var(--dsw-alias-label-tertiary,#8b8f98)' }}>{devsOpen ? '▲' : '▼'}</span>
             </button>
             {devsOpen && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <div className="dshBrowserCtlSigDevs">
                 {data.device_list.map(d => (
                   <div key={d.dev} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', border: '1px solid var(--dsw-alias-separator,#2a2c33)', borderRadius: 8 }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
@@ -4169,7 +4182,11 @@ function MsgCenter({ t, loggedInHint, onClose }) {
         if (!j || j.ok === false) { setErr((j && j.error) || t('msgLoadFail')); setMsgs([]); return }
         setErr('')
         setLoggedIn(!!j.loggedIn)
-        setMsgs(Array.isArray(j.messages) ? j.messages : [])
+        // 最新在最上:服务器按入库序返回(旧→新),渲染前统一按 createdAt 倒序——
+        // 与 App 消息中心(msgMerge 按 ts 倒序)和推送页签「最近推送」同一口径(kb/16.7)。
+        setMsgs(Array.isArray(j.messages)
+          ? j.messages.slice().sort((a, b) => (Number(b && b.createdAt) || 0) - (Number(a && a.createdAt) || 0))
+          : [])
       })
       .catch(e => { if (alive) { setErr(String((e && e.message) || e)); setMsgs([]) } })
     return () => { alive = false }

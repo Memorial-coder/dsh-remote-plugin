@@ -32,7 +32,7 @@ var import_dsh_client_store = require("@deepseek-ai/dsh-client-store");
 var import_jsx_runtime = require("react/jsx-runtime");
 var NS = "browserctl";
 var STYLE_ID = "browserctl/styles";
-var VERSION = true ? "1.0.80" : "dev";
+var VERSION = true ? "1.0.82" : "dev";
 var ABOUT_LINKS = {
   website: "https://remote.ymzcc.com/dsh-remote/",
   github: "https://github.com/Memorial-coder/dsh-remote-plugin",
@@ -613,6 +613,19 @@ var css = `
 .dshBrowserCtlCardBodyTall[data-open='true'] {
   max-height: 2400px;
 }
+/* \u300C\u8BBE\u5907\u51ED\u8BC1\u300D\u5217\u8868:\u5185\u90E8\u72EC\u7ACB\u6EDA\u52A8(\u540C DevBody \u60EF\u4F8B,kb/10 #4 \u8BBE\u5907\u533A\u72EC\u7ACB\u6EDA\u52A8)\u3002
+   \u9ED8\u8BA4 body \u5C55\u5F00\u6001 max-height 450px + overflow hidden,35 \u53F0\u8BBE\u5907 ~2000px \u5185\u5BB9
+   \u4F1A\u88AB\u88C1\u6B7B\u4E14\u5916\u5C42\u65E0\u5904\u53EF\u6EDA(2026-11-22 \u7528\u6237\u5B9E\u6D4B"\u65E0\u6CD5\u6B63\u5E38\u4E0B\u6ED1")\u3002
+   flex \u5217\u6EDA\u52A8\u5BB9\u5668\u5FC5\u987B\u7981\u5B50\u5143\u7D20\u6536\u7F29,\u5426\u5219\u884C\u88AB\u538B\u6241/\u88C1\u5207\u3002 */
+.dshBrowserCtlSigDevs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 320px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.dshBrowserCtlSigDevs > * { flex: 0 0 auto; }
 .dshBrowserCtlCardBodyRow {
   display: flex;
   align-items: center;
@@ -2987,7 +3000,7 @@ function SigEnforceCard({ t, reloadToken }) {
         color: data ? enforce ? "var(--dsw-alias-state-success-primary,#34b371)" : "var(--dsw-alias-label-tertiary,#8b8f98)" : "inherit"
       }, children: data ? enforce ? t("sigOn") : t("sigOff") : t("sigLoading") })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlCardBody", "data-open": "true", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlCardBody dshBrowserCtlCardBodyTall", "data-open": "true", children: [
       data && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { style: { margin: 0, fontSize: 12, lineHeight: "17px", color: "var(--dsw-alias-label-tertiary,#8b8f98)" }, children: t("sigCounts").replace("{d}", String(data.devices ?? 0)).replace("{k}", String(data.devices_with_key ?? 0)).replace("{p}", String(data.devices_with_pubkey ?? 0)) }),
       /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlSwitchRow", children: [
         /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { className: "dshBrowserCtlSwitchLabel", children: [
@@ -3040,7 +3053,7 @@ function SigEnforceCard({ t, reloadToken }) {
           /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: { flex: 1 } }),
           /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { "aria-hidden": "true", style: { fontSize: 10, color: "var(--dsw-alias-label-tertiary,#8b8f98)" }, children: devsOpen ? "\u25B2" : "\u25BC" })
         ] }),
-        devsOpen && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { style: { display: "flex", flexDirection: "column", gap: 6 }, children: [
+        devsOpen && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlSigDevs", children: [
           data.device_list.map((d) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { style: { display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", border: "1px solid var(--dsw-alias-separator,#2a2c33)", borderRadius: 8 }, children: [
             /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { style: { flex: 1, minWidth: 0 }, children: [
               /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { style: { fontSize: 12, color: "var(--dsw-alias-label-primary,#e7e9ee)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }, children: [
@@ -3996,7 +4009,7 @@ function MsgCenter({ t, loggedInHint, onClose }) {
       }
       setErr("");
       setLoggedIn(!!j.loggedIn);
-      setMsgs(Array.isArray(j.messages) ? j.messages : []);
+      setMsgs(Array.isArray(j.messages) ? j.messages.slice().sort((a, b) => (Number(b && b.createdAt) || 0) - (Number(a && a.createdAt) || 0)) : []);
     }).catch((e) => {
       if (alive) {
         setErr(String(e && e.message || e));

@@ -4627,7 +4627,7 @@ function adminHeaders() {
   }
   return {};
 }
-var VERSION = true ? "1.0.80" : "dev";
+var VERSION = true ? "1.0.82" : "dev";
 var sessionTunnel = false;
 var ensureRunning = null;
 var lastEnsureError = "";
@@ -5024,6 +5024,7 @@ function diagRedact(input) {
   s = s.replace(/\beyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\b/g, "***");
   s = s.replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]{8,}/gi, "$1***");
   s = s.replace(/\b(token|secret|password|passwd|pwd|sig|signature|apikey|api_key|access_key|auth_key|privkey)\s*([=:])\s*("[^"]*"|'[^']*'|[^\s,;&"'}]+)/gi, "$1$2***");
+  s = s.replace(/([?&])(k|at)=[^&\s"'<>]+/gi, "$1$2=***");
   s = s.replace(/(^|[\s\[])(cookie|set-cookie|authorization)[ \t]*:[ \t]*[^\r\n]+/gim, "$1$2: ***");
   s = s.replace(/\b[0-9a-f]{32,}\b/gi, "***");
   s = s.replace(/\b[A-Za-z0-9_-]{40,}\b/g, "***");
