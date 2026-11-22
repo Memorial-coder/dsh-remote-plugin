@@ -2418,6 +2418,11 @@ _SIG_EXEMPT = ("/dev-bind", "/dev-boot", "/pair/claim", "/bootstrap", "/verify",
 _STATIC_HASHED_NAME = re.compile(
     r"-[A-Za-z0-9_-]{6,}\.(?:js|mjs|css|map|json|woff2?|ttf|otf|svg|png|webp|jpe?g|gif|avif)$")
 
+# L2 ECDSA raw 签名 = 64 字节 r||s 的 hex(恒 128 字符);旧 HMAC(SHA256 hexdigest)恒 64 字符。
+# 据此判别「设备已升级 L2 但档案没有公钥」——这种签名对任何对称 key 都不可能验过,
+# 必须直接落重绑路径,不能送进 HMAC 分支制造「设备签名校验失败」假象(2026-11-22)。
+_ECDSA_SIG_SHAPE = re.compile(r"^[0-9a-f]{128}$", re.IGNORECASE)
+
 
 def _wants_html(handler):
     """这个请求是不是「浏览器导航/整页加载」?是的话失败时要给 HTML 引导页而不是 JSON。"""
@@ -2755,17 +2760,35 @@ def _dev_sig_verify(handler, path):
         return (401, _sig_boot_html())
     # 先查公钥:ECDSA 设备绝不能再走 _device_devkey——旧顺序会先补一把对称
     # key,导致每台 ECDSA 设备档案都多出 dev_key(审计 P1:凭证列表失真/降级面)。
+    # ⚠️ 2026-11-22:验签路径**绝不为验签现铸对称 key**(旧逻辑 _device_devkey 会现铸):
+    # 现铸出来的 key 设备端永远拿不到,只会把「被踢/被清的设备」伪装成「签名校验失败」
+    # ——设备握着的是 ECDSA 私钥,拿 HMAC key 验必败,又因「带了签名」永远落不到下面的
+    # 引导页分支,用户只见一条 50B 裸 JSON 死路(实测:测试副本 11-18「一键清除所有授权」
+    # 清掉 53 把密钥后,PC 浏览器「打开面板」恒 401「设备签名校验失败」无法自愈)。
+    # 这里只认档案里**已存在**的 dev_key;铸 key 的唯一入口是 dev-bind GET(兼容模式)。
     pk_hex = _device_pubkey(dev)
-    key = None if pk_hex else _device_devkey(dev)
+    key = None
+    if not pk_hex:
+        with _devices_lock:
+            key = (_devices.get(dev) or {}).get("dev_key")
     if not key and not pk_hex:
         if not _sig_enforced():
             return None
-        # 设备档案没有密钥 = 被踢下线撤销过(或档案被清)。此时**浏览器导航**必须落引导页,
+        # 设备档案没有任何密钥 = 被踢下线撤销过(或档案被清)。此时**浏览器导航**必须落引导页,
         # 让 SW/引导页走 dev-bind 自动重绑;只回一段裸 JSON 会让用户以为「配对已失效」且
         # 完全无法自愈(2026-11-17 用户实测:正式版短期/长期链接全卡在这段 JSON)。
         if _wants_html(handler):
             return (401, _sig_boot_html())
         return (401, {"ok": False, "error": "未知设备,请重新配对",
+                      "boot": "dev-boot", "rebind": True})
+    if not pk_hex and _ECDSA_SIG_SHAPE.match(sig or ""):
+        # L2 设备(128-hex ECDSA 签名)但档案没有公钥(只有旧对称 key/被清过):
+        # 对任何对称 key 都不可能验过,直接落重绑路径,别进 HMAC 分支制造假象。
+        # 引导页 → dev-bind POST 幂等登记同一把公钥后自愈;宽容期下 bootstrap 会话
+        # 也允许首次登记(_fresh_pair=not enforce),闭环成立(2026-11-22)。
+        if _wants_html(handler):
+            return (401, _sig_boot_html())
+        return (401, {"ok": False, "error": "设备密钥未登记,请重新配对",
                       "boot": "dev-boot", "rebind": True})
     try:
         ts_i = int(float(ts))
@@ -8424,6 +8447,13 @@ def ensure_tunnel(remote_port=REMOTE_PORT):
     harden_file_perms(toml)  # 含认证 token,仅当前用户可读
     state = read_state()
     pid = state.get("frpc_pid")
+    if pid and _pid_alive(pid) and not _frpc_is_ours(pid):
+        # 双副本并存:state 里的 pid 是别人的 frpc(CommandLine 指向别的副本目录)。
+        # 竞态自愈曾把正式版 frpc 写进测试副本 state → 本副本隧道假活。按「没在跑」
+        # 处理:绝不复用、也绝不动它(stop 除外,stop 本来就只杀自己 state 记的)。
+        print("[提示] state 记录的 frpc(pid=%d) 属于其他副本,忽略并重新拉起本副本 frpc"
+              % pid, flush=True)
+        pid = 0
     if pid and _pid_alive(pid):
         # 已在运行:回读日志确认它真的注册成功过(进程活着不代表隧道可用)
         recent = _frpc_log_tail(max(0, _frpc_log_size() - 65536))
@@ -8504,7 +8534,9 @@ def ensure_tunnel(remote_port=REMOTE_PORT):
                 keep = 0
             if not keep:
                 for cand in _live_frpc_pids():
-                    if cand != p.pid:
+                    # 归属必须核验:读得到 CommandLine 且不是本副本的 frpc → 绝不认领
+                    # (2026-11-22 实测:曾把正式版 frpc 认领成测试副本的,双隧道互坑)。
+                    if cand != p.pid and _frpc_is_ours(cand):
                         keep = cand
                         break
             if keep:
@@ -8553,6 +8585,8 @@ def _live_frpc_pids():
     只在「竞态里起了重复 frpc」的自愈路径用:需要找出真正在服务的那一份。
     只按进程名筛(不看命令行)—— 提权进程的 CommandLine 常读不到,但 Name 能看到。
     取不到就返回空列表,调用方必须有兜底(绝不因为这里失败而阻断隧道)。
+    ⚠️ 调用方认领前必须再用 _frpc_is_ours() 验归属(2026-11-22 实测:不验会把
+    另一副本的 frpc 认领成自己的,本副本隧道假活、还可能误杀别人的隧道)。
     """
     if os.name != "nt":
         return []
@@ -8564,6 +8598,31 @@ def _live_frpc_pids():
         return [int(x) for x in (out or "").split() if x.strip().isdigit()]
     except Exception:
         return []
+
+
+def _frpc_cmdline_of(pid):
+    """读指定 pid 的 CommandLine;读不到(提权/已退出)返回 None。"""
+    if os.name != "nt" or not pid:
+        return None
+    try:
+        ps = ("Get-CimInstance Win32_Process -Filter \"ProcessId=%d\" "
+              "| ForEach-Object { $_.CommandLine }" % int(pid))
+        out = _run_hidden(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
+                          capture_output=True, text=True, errors="replace", timeout=20).stdout
+        return (out or "").strip() or None
+    except Exception:
+        return None
+
+
+def _frpc_is_ours(pid):
+    """frpc 进程是否属于本副本。CommandLine 读得到但不带本副本目录 → 明确是别人的
+    (双副本并存绝不能把正式版 frpc 认领成自己的:2026-11-22 实测,测试副本
+    ensure_tunnel 竞态自愈把正式版 frpc 写进自己的 state → 16959 假活);
+    读不到(提权进程)按旧口径视为未知 → 当本副本处理(与 _live_frpc_pids 注释一致)。"""
+    cl = _frpc_cmdline_of(pid)
+    if cl is None:
+        return True
+    return str(HERE).lower() in cl.lower()
 
 
 def _fwd_move_port(reason):
