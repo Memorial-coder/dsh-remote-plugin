@@ -32,6 +32,7 @@ var import_dsh_client_store = require("@deepseek-ai/dsh-client-store");
 var import_jsx_runtime = require("react/jsx-runtime");
 var NS = "browserctl";
 var STYLE_ID = "browserctl/styles";
+var IS_TEST = /-test$/.test(NS);
 var VERSION = true ? "1.0.85" : "dev";
 var ABOUT_LINKS = {
   website: "https://remote.ymzcc.com/dsh-remote/",
@@ -40,6 +41,7 @@ var ABOUT_LINKS = {
   qq: "https://qm.qq.com/q/K6RXqOKLAu"
 };
 var MS_AUTHENTICATOR_URL = "https://www.microsoft.com/zh-cn/security/authenticator/mobile-app";
+var PLUGIN_ADD_CMD = "dsh plugin add github:Memorial-coder/dsh-remote-plugin";
 function lsGet(k) {
   try {
     return window.localStorage.getItem(k) || "";
@@ -1124,6 +1126,23 @@ div[data-slot='sidebar.footer.action'] > * {
   font-size: 12px;
   line-height: 17px;
   color: var(--dsw-alias-label-secondary, #a6aab2);
+}
+.dshBrowserCtlAboutUpdateGuide {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-secondary, #a6aab2);
+  word-break: break-all;
+}
+.dshBrowserCtlUpdNotes {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--dsw-alias-label-secondary, #cfd3d6);
 }
 .dshBrowserCtlAboutUpdateErr {
   margin: 0;
@@ -3606,9 +3625,53 @@ function PushCard({ t, reloadToken }) {
     ] })
   ] });
 }
-function AboutPanel({ t, onClose }) {
-  const [checkState, setCheckState] = (0, import_react.useState)("idle");
-  const [checkResult, setCheckResult] = (0, import_react.useState)(null);
+function UpdateApplyButton({ t, latest, variant, onApplied }) {
+  const [state, setState] = (0, import_react.useState)("idle");
+  const [errMsg, setErrMsg] = (0, import_react.useState)("");
+  async function apply2() {
+    if (state === "loading") return;
+    setState("loading");
+    setErrMsg("");
+    try {
+      const r = await fetch(API_P + "/browserctl/api/update-apply", { method: "POST", cache: "no-store" });
+      const j = await r.json().catch(() => ({}));
+      if (j && j.ok) {
+        setState("done");
+        if (onApplied) onApplied(j);
+      } else {
+        setState("error");
+        setErrMsg(j && j.error || "HTTP " + r.status);
+      }
+    } catch (e) {
+      setState("error");
+      setErrMsg(String(e && e.message || e));
+    }
+  }
+  const btn = /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Tooltip, { label: state === "done" ? t("updateApplyDone").replace("{v}", latest) : t("updateApplyTip"), children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+    import_dsh_client_ui_primitives.Button,
+    {
+      variant: variant || "primary",
+      size: "sm",
+      disabled: state === "loading" || state === "done",
+      onClick: apply2,
+      children: state === "loading" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlSpinner", "aria-hidden": "true" }),
+        " ",
+        t("updateApplying")
+      ] }) : state === "done" ? t("updateApplyDone").replace("{v}", latest) : t("updateApplyBtn").replace("{v}", latest)
+    }
+  ) });
+  if (state === "error" && errMsg) {
+    return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { style: { display: "inline-flex", flexDirection: "column", gap: 4, alignItems: "flex-start" }, children: [
+      btn,
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlAboutUpdateErr", children: errMsg })
+    ] });
+  }
+  return btn;
+}
+function AboutPanel({ t, onClose, initialResult, onDismissUpdate, onCheckResult }) {
+  const [checkState, setCheckState] = (0, import_react.useState)(initialResult ? "done" : "idle");
+  const [checkResult, setCheckResult] = (0, import_react.useState)(initialResult || null);
   const [legalDoc, setLegalDoc] = (0, import_react.useState)(null);
   const links = [
     { key: "website", href: ABOUT_LINKS.website, icon: "globe", label: t("aboutWebsite") },
@@ -3624,6 +3687,7 @@ function AboutPanel({ t, onClose }) {
       const r = await fetch(API_P + "/browserctl/api/update-check", { cache: "no-store" });
       const j = await r.json().catch(() => ({}));
       setCheckResult(j);
+      if (onCheckResult && j && j.ok) onCheckResult(j);
     } catch (e) {
       setCheckResult({ ok: false, error: String(e && e.message || e) });
     } finally {
@@ -3635,6 +3699,7 @@ function AboutPanel({ t, onClose }) {
   const upToDate = !!(checkResult && checkResult.ok && !checkResult.hasUpdate);
   const notes = hasUpdate && Array.isArray(checkResult.notes) ? checkResult.notes : [];
   const downloadUrl = hasUpdate ? checkResult.downloadUrl || ABOUT_LINKS.app : ABOUT_LINKS.app;
+  const canApplyOneClick = !!(hasUpdate && checkResult.install && checkResult.install.form === "local" && !IS_TEST);
   return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlOverlay", role: "dialog", "aria-modal": "true", "aria-label": t("about"), children: [
     /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { className: "dshBrowserCtlOverlayMask", type: "button", "aria-label": t("close"), onClick: onClose }),
     /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", { className: "dshBrowserCtlPanel dshBrowserCtlPanelNested", children: [
@@ -3690,14 +3755,21 @@ function AboutPanel({ t, onClose }) {
           ] }),
           hasUpdate && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
             /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dshBrowserCtlAboutUpdateFound", children: t("updateFound").replace("{v}", checkResult.latest) }),
+            checkResult.install && checkResult.install.form === "local" && !IS_TEST && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(UpdateApplyButton, { t, latest: String(checkResult.latest) }),
             /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlUrlRow", children: [
               /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlUrl", title: downloadUrl, children: downloadUrl }),
-              /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "secondary", size: "sm", onClick: () => window.open(downloadUrl, "_blank"), children: t("updateDownload") })
+              /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Tooltip, { label: t("updateDownloadTip"), children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: canApplyOneClick ? "secondary" : "primary", size: "sm", onClick: () => window.open(downloadUrl, "_blank"), children: t("updateDownload") }) })
             ] }),
+            checkResult.install && checkResult.install.form === "local" && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", { className: "dshBrowserCtlAboutUpdateGuide", children: [
+              t("updateGuideLocal").replace("{dir}", checkResult.install && checkResult.install.dir || ""),
+              IS_TEST ? t("updateGuideTestNote") : ""
+            ] }),
+            checkResult.install && checkResult.install.form === "package" && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dshBrowserCtlAboutUpdateGuide", children: t("updateGuidePackage").replace("{cmd}", PLUGIN_ADD_CMD) }),
             notes.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
               /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dshBrowserCtlCardDesc", children: t("updateNotesTitle") }),
               /* @__PURE__ */ (0, import_jsx_runtime.jsx)("ul", { className: "dshBrowserCtlAboutUpdateNotes", children: notes.map((n, i) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)("li", { children: n }, i)) })
-            ] })
+            ] }),
+            onDismissUpdate && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlAboutUpdateIgnoreRow", children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Tooltip, { label: t("updateIgnoreTip"), children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "secondary", size: "sm", onClick: onDismissUpdate, children: t("updateIgnore") }) }) })
           ] }),
           upToDate && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dshBrowserCtlAboutUpdateLatest", children: t("updateUpToDate") }),
           err && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dshBrowserCtlAboutUpdateErr", children: err })
@@ -4594,6 +4666,40 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
   const [msgData, setMsgData] = (0, import_react.useState)({ messages: [], loggedIn: false, unread: 0 });
   const [msgPopOpen, setMsgPopOpen] = (0, import_react.useState)(false);
   const [cfgMode, setCfgMode] = (0, import_react.useState)("official");
+  const [updateInfo, setUpdateInfo] = (0, import_react.useState)(null);
+  const [updTick, setUpdTick] = (0, import_react.useState)(0);
+  const pluginUpdatePending = !!(updateInfo && updateInfo.hasUpdate && updateInfo.latest && lsGet("dsh_plugin_upd_dismiss_" + updateInfo.latest) !== "1");
+  const [updPromptClosed, setUpdPromptClosed] = (0, import_react.useState)("");
+  const pluginUpdPrompt = !!(pluginUpdatePending && open && !IS_TEST && (!updateInfo || updPromptClosed !== String(updateInfo.latest)));
+  const pluginUpdNotes = (updateInfo && Array.isArray(updateInfo.notes) ? updateInfo.notes : []).slice(0, 3);
+  const pluginUpdUrl = updateInfo && updateInfo.downloadUrl || "";
+  const dismissPluginUpdate = () => {
+    if (updateInfo && updateInfo.latest) {
+      lsSet("dsh_plugin_upd_dismiss_" + updateInfo.latest, "1");
+      setUpdTick((x) => x + 1);
+    }
+  };
+  (0, import_react.useEffect)(() => {
+    let cancelled = false;
+    fetch(API_P + "/browserctl/api/update-check", { cache: "no-store" }).then((r) => r.json()).then((j) => {
+      if (!cancelled && j) setUpdateInfo(j);
+    }).catch(() => {
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  (0, import_react.useEffect)(() => {
+    if (!open) return;
+    let cancelled = false;
+    fetch(API_P + "/browserctl/api/update-check", { cache: "no-store" }).then((r) => r.json()).then((j) => {
+      if (!cancelled && j) setUpdateInfo(j);
+    }).catch(() => {
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
   const panel = (0, import_react.useRef)(null);
   const { data, error, expiresAt, status, retrying, refresh } = useQr(open, reloadToken, uses);
   const left = useCountdown(expiresAt);
@@ -4932,7 +5038,10 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
           msgShowDot && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlBadgeDot" }),
           msgPopOpen && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(MsgCenter, { t, loggedInHint: t("msgGuestHint"), onClose: closeMsgPop })
         ] }) }),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Tooltip, { label: t("about"), children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "ghost", size: "sm", "aria-label": t("about"), icon: Svg.info, onClick: () => setAboutOpen(true) }) }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Tooltip, { label: t("about"), children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { className: "dshBrowserCtlAboutBtn", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "ghost", size: "sm", "aria-label": t("about"), icon: Svg.info, onClick: () => setAboutOpen(true) }),
+          pluginUpdatePending && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlBadgeDot" })
+        ] }) }),
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Tooltip, { label: t("config"), children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "ghost", size: "sm", "aria-label": t("config"), icon: Svg.gear, onClick: () => setConfigOpen(true) }) }),
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Tooltip, { label: t("close"), children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
           import_dsh_client_ui_primitives.Button,
@@ -5133,7 +5242,47 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
         tab === "log" && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(LogCard, { t, reloadToken })
       ] })
     ] }),
-    aboutOpen && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(AboutPanel, { t, onClose: () => setAboutOpen(false) }),
+    aboutOpen && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(AboutPanel, { t, onClose: () => setAboutOpen(false), initialResult: updateInfo, onDismissUpdate: dismissPluginUpdate, onCheckResult: setUpdateInfo }),
+    pluginUpdPrompt && updateInfo && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlOverlay dshBrowserCtlLoginPrompt", role: "dialog", "aria-modal": "true", "aria-label": t("pluginUpdTitle").replace("{v}", String(updateInfo.latest)), children: [
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { className: "dshBrowserCtlOverlayMask", type: "button", "aria-label": t("close"), onClick: () => setUpdPromptClosed(String(updateInfo.latest)) }),
+      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", { className: "dshBrowserCtlPanel", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("header", { className: "dshBrowserCtlHeader", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("h1", { children: t("pluginUpdTitle").replace("{v}", String(updateInfo.latest)) }) }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Tooltip, { label: t("close"), children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "ghost", size: "sm", "aria-label": t("close"), icon: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.IconCloseOutlineRegular, {}), onClick: () => setUpdPromptClosed(String(updateInfo.latest)) }) })
+        ] }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlLoginPromptBody", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dshBrowserCtlLoginPromptText", children: t("pluginUpdDesc").replace("{cur}", String(updateInfo.current || "")).replace("{v}", String(updateInfo.latest)) }),
+          pluginUpdNotes.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("ul", { className: "dshBrowserCtlUpdNotes", children: pluginUpdNotes.map((n, i) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)("li", { children: n }, i)) }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlLoginPromptActions", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Tooltip, { label: t("updateIgnoreTip"), children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+              import_dsh_client_ui_primitives.Button,
+              {
+                variant: "secondary",
+                size: "sm",
+                onClick: () => {
+                  dismissPluginUpdate();
+                  setUpdPromptClosed(String(updateInfo.latest));
+                },
+                children: t("updateIgnore")
+              }
+            ) }),
+            updateInfo.install && updateInfo.install.form === "local" && !IS_TEST && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(UpdateApplyButton, { t, latest: String(updateInfo.latest), variant: "primary", onApplied: dismissPluginUpdate }),
+            /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Tooltip, { label: t("updateDownloadTip"), children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+              import_dsh_client_ui_primitives.Button,
+              {
+                variant: "secondary",
+                size: "sm",
+                onClick: () => {
+                  setUpdPromptClosed(String(updateInfo.latest));
+                  if (pluginUpdUrl) window.open(pluginUpdUrl, "_blank");
+                },
+                children: t("updateDownload")
+              }
+            ) })
+          ] })
+        ] })
+      ] })
+    ] }),
     configOpen && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(ConfigPanel, { t, onClose: () => setConfigOpen(false), onSaved: refreshAll }),
     accountOpen && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(AccountLoginModal, { t, onClose: () => setAccountOpen(false), onSaved: refreshAll }),
     ticketOpen && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(TicketModal, { t, onClose: () => setTicketOpen(false) }),
@@ -5234,6 +5383,19 @@ function apply(ctx) {
       updateNotesTitle: "\u66F4\u65B0\u8BF4\u660E",
       updateUpToDate: "\u5DF2\u662F\u6700\u65B0\u7248\u672C",
       updateFailed: "\u66F4\u65B0\u68C0\u67E5\u5931\u8D25",
+      updateIgnore: "\u5FFD\u7565\u6B64\u7248\u672C",
+      pluginUpdTitle: "\u53D1\u73B0\u63D2\u4EF6\u65B0\u7248\u672C v{v}",
+      pluginUpdDesc: "\u5F53\u524D\u7248\u672C v{cur},\u5B98\u7F51\u5DF2\u53D1\u5E03 v{v}\u3002\u66F4\u65B0\u540E\u53EF\u83B7\u5F97\u6700\u65B0\u4FEE\u590D\u4E0E\u65B0\u529F\u80FD\u3002",
+      updateGuideLocal: "\u66F4\u65B0\u65B9\u6CD5\uFF1A\u4E0B\u8F7D\u65B0 zip \u89E3\u538B\u540E\u8986\u76D6\u63D2\u4EF6\u76EE\u5F55\uFF08{dir}\uFF09\uFF0C\u91CD\u542F DSH \u751F\u6548\uFF1B\u82E5\u8986\u76D6\u540E\u96A7\u9053\u8D77\u4E0D\u6765\uFF0C\u5148\u53CC\u51FB\u76EE\u5F55\u91CC\u7684 fix-antivirus.bat \u89E3\u9664\u6740\u8F6F\u62E6\u622A",
+      updateGuidePackage: "\u66F4\u65B0\u65B9\u6CD5\uFF1A\u547D\u4EE4\u884C\u6267\u884C {cmd}\uFF0C\u91CD\u542F DSH \u751F\u6548",
+      updateApplyBtn: "\u4E00\u952E\u66F4\u65B0\u5230 v{v}",
+      updateApplying: "\u6B63\u5728\u66F4\u65B0\uFF08\u4E0B\u8F7D\u5E76\u8986\u76D6\uFF0C\u52FF\u5173\u95ED\u9762\u677F\uFF09\u2026",
+      updateApplyDone: "\u5DF2\u66F4\u65B0\u5230 v{v}\uFF0C\u91CD\u542F DSH \u540E\u751F\u6548",
+      updateApplyTip: "\u81EA\u52A8\u4E0B\u8F7D\u5B98\u65B9 zip \u8986\u76D6\u5F53\u524D\u63D2\u4EF6\u76EE\u5F55\uFF08\u4F1A\u5148\u505C\u6B62\u96A7\u9053\uFF09\uFF0C\u91CD\u542F DSH \u5373\u5B8C\u6210\u66F4\u65B0\uFF1B\u4EC5\u9002\u7528\u4E8E\u89E3\u538B\u76EE\u5F55\u5B89\u88C5",
+      updateRecheckTip: "\u91CD\u65B0\u5411\u5B98\u65B9\u66F4\u65B0\u6E90\u67E5\u8BE2\u6700\u65B0\u7248\u672C\uFF08\u6570\u636E\u6E90\uFF1AGitHub Release\uFF0C\u5B98\u7F51\u670D\u52A1\u5668\u6BCF\u5C0F\u65F6\u540C\u6B65\uFF0C\u56FD\u5185\u76F4\u8FDE\uFF09",
+      updateDownloadTip: "\u5728\u6D4F\u89C8\u5668\u6253\u5F00\u5B98\u65B9 zip \u76F4\u94FE\u624B\u52A8\u4E0B\u8F7D\uFF08\u7EA6 6.4 MB\uFF0C\u8D70\u5B98\u7F51\u670D\u52A1\u5668\uFF09\uFF1B\u4E00\u952E\u66F4\u65B0\u5931\u8D25\u65F6\u7684\u5907\u7528\u65B9\u5F0F",
+      updateIgnoreTip: "\u672C\u7248\u672C\u4E0D\u518D\u63D0\u9192\uFF1B\u5B98\u7F51\u53D1\u5E03\u66F4\u65B0\u7248\u672C\u540E\u4F1A\u91CD\u65B0\u63D0\u793A",
+      updateGuideTestNote: "\uFF08\u5F00\u53D1\u526F\u672C\uFF1A\u4E00\u952E\u66F4\u65B0\u5DF2\u7981\u7528\u2014\u2014\u8986\u76D6\u5DE5\u4F5C\u533A\u4F1A\u4E22\u5F00\u53D1\u6001\uFF0C\u8BF7\u7528\u53D1\u5E03\u5DE5\u5177\u540C\u6B65\u6B63\u5F0F\u7248\uFF09",
       legalTerms: "\u7528\u6237\u534F\u8BAE",
       legalPrivacy: "\u9690\u79C1\u653F\u7B56",
       legalMeta: "\u751F\u6548 {d} \xB7 \u7248\u672C {v}",
@@ -5537,6 +5699,19 @@ function apply(ctx) {
       updateNotesTitle: "Release notes",
       updateUpToDate: "You are up to date",
       updateFailed: "Update check failed",
+      updateIgnore: "Ignore this version",
+      pluginUpdTitle: "New plugin version v{v}",
+      pluginUpdDesc: "You are on v{cur}; v{v} has been released with the latest fixes and features.",
+      updateGuideLocal: "To update: download the new zip, extract it over the plugin folder ({dir}), then restart DSH. If the tunnel fails afterwards, run fix-antivirus.bat in the folder first",
+      updateGuidePackage: 'To update: run "{cmd}" in a terminal, then restart DSH',
+      updateApplyBtn: "Update to v{v}",
+      updateApplying: "Updating (downloading & overwriting)\u2026",
+      updateApplyDone: "Updated to v{v}; restart DSH to apply",
+      updateApplyTip: "Downloads the official zip and overwrites this plugin folder (the tunnel stops first). Restart DSH to finish; works for extracted-folder installs only",
+      updateRecheckTip: "Query the official update source again (GitHub Release, mirrored hourly by the website server)",
+      updateDownloadTip: "Open the official zip direct link in your browser (about 6.4 MB) as a manual fallback",
+      updateIgnoreTip: "Skip reminders for this version; newer releases will notify again",
+      updateGuideTestNote: " (dev copy: one-click update is disabled here \u2014 use the release tool to sync)",
       legalTerms: "User Agreement",
       legalPrivacy: "Privacy Policy",
       legalMeta: "Effective {d} \xB7 Version {v}",

@@ -10,7 +10,7 @@
 import { spawn, spawnSync } from 'node:child_process'
 import crypto from 'node:crypto'
 import net from 'node:net'
-import { existsSync, readdirSync, readFileSync, writeFileSync, renameSync, rmSync, openSync, closeSync, readSync, truncateSync, statSync, chmodSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, writeFileSync, renameSync, rmSync, openSync, closeSync, readSync, truncateSync, statSync, chmodSync, realpathSync, copyFileSync, mkdirSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -120,6 +120,18 @@ function cmpVersion(a, b) {
   return 0
 }
 
+// 安装形态探测:插件真实路径落在 node_modules 里 = 包安装(npm/github `dsh plugin add`),
+// 否则 = 本地目录(link:/「选择本地目录」,即用户解压的文件夹)。两类用户更新方式不同:
+// 本地目录 → 下载新 zip 覆盖该目录后重启 DSH;包安装 → 重新执行安装命令。探测失败按本地目录兜底。
+function detectInstallForm() {
+  try {
+    const real = realpathSync(PKG_ROOT)
+    return { form: /[\\/]node_modules[\\/]/.test(real) ? 'package' : 'local', dir: real }
+  } catch {
+    return { form: 'local', dir: PKG_ROOT }
+  }
+}
+
 // 官方多用户服务(注册/登录/端口分配):登录后 secrets 记 server_uid/server_token/
 // server_link_secret/frp_remote_port,闸机 state.link_secret 换成服务器签发的 per-user 密钥。
 const OFFICIAL_API_BASE = 'https://remote.ymzcc.com/dsh-remote'
@@ -136,8 +148,216 @@ const OAUTH_CLIENT_ID = 'dsh-plugin-desktop'
 const PAIR_ISSUE_URL = 'https://remote.ymzcc.com/pair/api/issue'
 const CONFIRM_BASE = 'https://remote.ymzcc.com/pair/confirm'
 
-// 更新清单:随官网 web/ 一起部署到 /dsh-remote/,「检查更新」从这里拉取最新版本/下载地址/更新说明
-const UPDATE_MANIFEST_URL = 'https://remote.ymzcc.com/dsh-remote/version.json'
+// 「检查更新」版本源(2026-11-21 定版,2026-11-23 同步至正式版:GitHub Release 为唯一版本源):
+// 主源 = 官网 /api/plugin/version —— 服务器脚本每小时从 GitHub releases/latest 同步
+// (下载 zip + sha256 双校验 + 原子写 plugin-config.json),国内直连可达;
+// 备源 = GitHub API releases/latest(官网接口失效时兜底;国内直连常失败,仅作兜底)。
+// 历史:此前接随官网 web/ 部署的静态 version.json,它不归发版流水线管、靠手动同步,
+// 实查长期滞后(停在 1.0.65 而真实最新 1.0.81),用户点「检查更新」会被旧版本号误导。
+const PLUGIN_VERSION_API = OFFICIAL_API_BASE + '/api/plugin/version'
+const GITHUB_RELEASE_API = 'https://api.github.com/repos/Memorial-coder/dsh-remote-plugin/releases/latest'
+const GITHUB_RELEASES_PAGE = 'https://github.com/Memorial-coder/dsh-remote-plugin/releases/latest'
+const PLUGIN_ZIP_RE = /^dsh-remote-plugin-\d+\.\d+\.\d+\.zip$/i
+// 检查结果 60s 内存缓存:面板每次打开自动查一次,官方接口不必每次真打
+let updateCheckCache = null
+
+// 带超时的 GET JSON;非 2xx/超时抛错,由调用方决定降级
+async function fetchJson(url, ms, headers) {
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), ms)
+  try {
+    const r = await fetch(url, { signal: ctrl.signal, cache: 'no-store', headers: headers || undefined })
+    if (!r.ok) throw new Error('HTTP ' + r.status)
+    return await r.json()
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+// 更新说明长文本(官网 release_notes / GitHub body)→ 条目数组:只留 '- '/'* ' 开头的行,
+// 去前缀去空行(标题行「dsh-remote-plugin vX.Y.Z(日期)」丢弃,面板已有「发现新版本 v…」),封顶 20 条
+function splitNotes(text) {
+  return String(text || '')
+    .split(/\r?\n/)
+    .map((s) => s.trim())
+    .filter((s) => /^[-*]\s+/.test(s))
+    .map((s) => s.replace(/^[-*]\s+/, '').trim())
+    .filter(Boolean)
+    .slice(0, 20)
+}
+
+// 拉最新插件版本:① 官网自动同步接口 → ② GitHub API。成功返回
+// { latest, downloadUrl, notes, source, zipSize },两条源都失败返回 null(调用方回 ok:false)。
+async function fetchLatestRelease() {
+  const siteOrigin = new URL(OFFICIAL_API_BASE).origin
+  // ① 官网自动同步接口:{version, download_url(相对), website_download_url, release_notes, zips[]}
+  try {
+    const j = await fetchJson(PLUGIN_VERSION_API, 5000)
+    const latest = String((j && j.version) || '').trim()
+    if (latest) {
+      let du = String((j && (j.website_download_url || j.download_url)) || '')
+      const zipSize = Array.isArray(j && j.zips) && j.zips[0] ? Number(j.zips[0].size) || 0 : 0
+      if (!du && zipSize) du = String(j.zips[0].url || '')
+      if (du && du.startsWith('/')) du = siteOrigin + du
+      return { latest, downloadUrl: du, notes: splitNotes(j && j.release_notes), source: 'official-api', zipSize }
+    }
+  } catch {}
+  // ② GitHub API:{tag_name, html_url, body, assets[]};优先取 zip 资产直链,退回 releases 页
+  try {
+    const j = await fetchJson(GITHUB_RELEASE_API, 6000, {
+      'user-agent': 'dsh-plugin-browserctl-update-check',
+      accept: 'application/vnd.github+json',
+    })
+    const latest = String((j && j.tag_name) || '').replace(/^v/i, '').trim()
+    if (latest) {
+      let du = ''
+      const assets = Array.isArray(j && j.assets) ? j.assets : []
+      const zip = assets.find((a) => PLUGIN_ZIP_RE.test(String((a && a.name) || '')))
+      if (zip) du = String(zip.browser_download_url || '')
+      if (!du) du = GITHUB_RELEASES_PAGE
+      return { latest, downloadUrl: du, notes: splitNotes(j && j.body), source: 'github', zipSize: zip ? Number(zip.size) || 0 : 0 }
+    }
+  } catch {}
+  return null
+}
+
+// ---- 一键自更新(2026-11-23):仅限「本地目录」(解压/link)安装形态 --------------------
+// 流程:停隧道(释放 frpc.exe/browserctl.py 文件锁)→ 下载官网 zip(大小校验)→
+// Python zipfile 安全解包(逐条目防 zip-slip)→ 校验包根(版本一致+关键文件在)→
+// 逐文件覆盖进插件目录(运行态文件绝不覆盖,先写临时名再原子改名)→ 清理 → 回 restartRequired。
+// 三类拒绝:开发工作区副本(覆盖工作区会丢开发态)、包安装(node_modules 用安装命令)、
+// git 仓库目录(自更新会弄脏 checkout,用 git pull / 发布工具)。
+// 注意:开发副本判据用 /-test$/ 后缀正则,与 client 侧 IS_TEST 同款,便于两份代码保持同构。
+const GITHUB_ADD_CMD = 'dsh plugin add github:Memorial-coder/dsh-remote-plugin'
+let updateApplying = false
+
+// 运行态文件白名单:除 browserctl.py 外,一切 browserctl_* 文件都是本机运行态/凭据/日志,
+// zip 里不该有;万一有(打包事故)也绝不覆盖,防止把用户状态/凭据冲掉
+function isRuntimeArtifact(basename) {
+  if (basename === 'browserctl.py') return false
+  if (/^browserctl_/i.test(basename)) return true
+  if (/^__pycache__$/i.test(basename)) return true
+  return false
+}
+
+// zip 内容安全解包脚本:写到临时目录用随包 Python 跑,逐条目校验不得逃出目标目录
+const EXTRACT_PY = [
+  'import os, sys, zipfile',
+  'zip_path, dest = sys.argv[1], sys.argv[2]',
+  'os.makedirs(dest, exist_ok=True)',
+  'dest_real = os.path.realpath(dest)',
+  'count = 0',
+  'with zipfile.ZipFile(zip_path) as z:',
+  '    for info in z.infolist():',
+  '        name = info.filename.replace("\\\\", "/")',
+  '        parts = [p for p in name.split("/") if p not in ("", ".")]',
+  '        if not parts or name.endswith("/") or ".." in parts:',
+  '            continue',
+  '        if os.path.splitdrive(parts[0])[0]:',
+  '            continue',
+  '        target = os.path.join(dest_real, *parts)',
+  '        target_real = os.path.realpath(target)',
+  '        try:',
+  '            if os.path.commonpath([dest_real, target_real]) != dest_real:',
+  '                continue',
+  '        except ValueError:',
+  '            continue',
+  '        os.makedirs(os.path.dirname(target_real), exist_ok=True)',
+  '        with z.open(info) as fsrc, open(target_real, "wb") as fdst:',
+  '            while True:',
+  '                chunk = fsrc.read(1 << 20)',
+  '                if not chunk:',
+  '                    break',
+  '                fdst.write(chunk)',
+  '        count += 1',
+  'print("EXTRACTED", count)',
+].join('\n')
+
+// 在解包目录里定位插件包根:同时有 package.json 与 browserctl.py 的目录(最多下探 3 层,
+// 兼容「zip 根直出」与「仓库根/子目录」两种打包形态)
+function findPackageRoot(dir, depth) {
+  if (depth > 3) return null
+  try {
+    if (existsSync(path.join(dir, 'package.json')) && existsSync(path.join(dir, 'browserctl.py'))) return dir
+  } catch {}
+  try {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      if (!e.isDirectory()) continue
+      const found = findPackageRoot(path.join(dir, e.name), depth + 1)
+      if (found) return found
+    }
+  } catch {}
+  return null
+}
+
+// 异步跑子进程并捕获输出(不阻塞 DSH 事件循环);超时 kill 并回 status -1
+function runProcessAsync(cmd, args, timeoutMs) {
+  return new Promise((resolve) => {
+    let done = false
+    let out = ''
+    const child = spawn(cmd, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
+    const timer = setTimeout(() => {
+      if (done) return
+      done = true
+      try { child.kill() } catch {}
+      resolve({ status: -1, out: out + '\n[执行超时]' })
+    }, timeoutMs)
+    child.stdout.on('data', (c) => { out += String(c) })
+    child.stderr.on('data', (c) => { out += String(c) })
+    child.on('error', (e) => {
+      if (done) return
+      done = true
+      clearTimeout(timer)
+      resolve({ status: -1, out: out + String((e && e.message) || e) })
+    })
+    child.on('exit', (code) => {
+      if (done) return
+      done = true
+      clearTimeout(timer)
+      resolve({ status: code, out })
+    })
+  })
+}
+
+// 把解包出的包根逐文件覆盖进当前插件目录。规则:
+//   - 运行态文件(isRuntimeArtifact)一律跳过,绝不覆盖;
+//   - 每个文件先写 <目标>.updating 再原子改名,避免被并发请求读到半截;
+//   - 被占用文件重试 3 次(每次隔 500ms),仍失败记入 errors(不中断其余文件)。
+async function copyTreeInto(srcDir, dstDir, result) {
+  let entries = []
+  try {
+    entries = readdirSync(srcDir, { withFileTypes: true })
+  } catch (e) {
+    result.errors.push({ file: srcDir, error: String((e && e.message) || e) })
+    return
+  }
+  for (const entry of entries) {
+    const s = path.join(srcDir, entry.name)
+    const d = path.join(dstDir, entry.name)
+    if (entry.isDirectory()) {
+      if (/^__pycache__$/i.test(entry.name)) continue
+      try { mkdirSync(d, { recursive: true }) } catch (e) { result.errors.push({ file: d, error: String((e && e.message) || e) }); continue }
+      await copyTreeInto(s, d, result)
+    } else if (entry.isFile()) {
+      if (isRuntimeArtifact(entry.name)) { result.skipped.push(entry.name); continue }
+      let ok = false
+      let lastErr = ''
+      for (let attempt = 0; attempt < 3 && !ok; attempt++) {
+        try {
+          copyFileSync(s, d + '.updating')
+          renameSync(d + '.updating', d)
+          ok = true
+        } catch (e) {
+          lastErr = String((e && e.message) || e)
+          try { rmSync(d + '.updating', { force: true }) } catch {}
+          await new Promise((r) => setTimeout(r, 500))
+        }
+      }
+      if (ok) result.copied++
+      else result.errors.push({ file: entry.name, error: lastErr })
+    }
+  }
+}
 
 // 原子写(tmp + rename):避免外部脚本/看门狗读到半截文件后把 state 覆盖成残缺 dict
 function atomicWrite(file, data) {
@@ -1329,6 +1549,7 @@ function csrfBlocked(req) {
 const CSRF_PROTECTED = new Set([
   '/browserctl/api/ensure',
   '/browserctl/api/stop',
+  '/browserctl/api/update-apply',
   '/browserctl/api/elevate',
   '/browserctl/api/link',
   '/browserctl/api/pair',
@@ -2072,39 +2293,180 @@ export function apply(ctx, config = {}) {
           return
         }
         if (route === '/browserctl/api/update-check') {
-          // 「检查更新」:拉官网部署的插件版本清单 version.json(UPDATE_MANIFEST_URL)。
-          // (2026-11-04 修复)此前误接 App 发布接口 /api/app/version,App 未配置发布时
-          // latest 为空串,面板会渲染出「最新版本 v」;现在改回插件自己的清单,
-          // 缺 version 字段时回退到当前版本,绝不会再显示光秃秃的 "v"。
-          let j = null
-          try {
-            const ctrl = new AbortController()
-            const timer = setTimeout(() => ctrl.abort(), 5000)
-            let r
-            try {
-              r = await fetch(UPDATE_MANIFEST_URL, { signal: ctrl.signal, cache: 'no-store' })
-            } finally {
-              clearTimeout(timer)
-            }
-            if (!r.ok) {
-              sendJson(res, 200, { ok: false, error: '更新服务器返回 HTTP ' + r.status })
-              return
-            }
-            j = await r.json()
-          } catch (e) {
-            sendJson(res, 200, { ok: false, error: '无法连接更新服务器:' + String((e && e.message) || e) })
+          // 「检查更新」(2026-11-21 重构,2026-11-23 同步至正式版):版本源 = 官网 /api/plugin/version
+          // (每小时自动跟 GitHub Release),官网接口失效兜底 GitHub API;旧静态 version.json 不再读取。
+          // (2026-11-04 修复保留)缺 version 字段时回退到当前版本,绝不会再显示光秃秃的 "v"。
+          let rel = null
+          if (updateCheckCache && Date.now() - updateCheckCache.at < 60000) {
+            rel = updateCheckCache.rel
+          } else {
+            rel = await fetchLatestRelease()
+            updateCheckCache = rel ? { at: Date.now(), rel } : null
+          }
+          if (!rel) {
+            sendJson(res, 200, { ok: false, error: '无法连接更新服务器(官网与 GitHub 均失败)' })
             return
           }
-          const latest = String((j && j.version) || '').trim() || VERSION
+          const latest = String(rel.latest || '').trim() || VERSION
+          // 顺带拉 App 发布信息(供面板「新版本提醒」与「关于」展示);失败不阻塞插件版本检查。
+          let app = null
+          try {
+            const origin = new URL(OFFICIAL_API_BASE).origin
+            const appUrl = OFFICIAL_API_BASE + '/api/app/version'
+            const aj = await fetchJson(appUrl, 5000)
+            let du = String(aj.download_url || '')
+            if (du && du.startsWith('/')) du = origin + du
+            app = {
+              enabled: !!aj.enabled,
+              latest: String(aj.latest_version_name || ''),
+              downloadUrl: du,
+              notes: String(aj.release_notes || ''),
+            }
+          } catch {}
           sendJson(res, 200, {
             ok: true,
             current: VERSION,
             latest,
             hasUpdate: cmpVersion(latest, VERSION) > 0,
-            downloadUrl: (j && j.downloadUrl) || '',
-            notes: Array.isArray(j && j.notes) ? j.notes : [],
+            downloadUrl: rel.downloadUrl || '',
+            notes: Array.isArray(rel.notes) ? rel.notes : [],
+            app,
+            // 安装形态(local=解压目录/link,package=npm/github)+ 本次结果来源,供前端分形态给更新指引
+            install: detectInstallForm(),
+            source: rel.source || '',
           })
           return
+        }
+        if (route === '/browserctl/api/update-apply') {
+          // 一键自更新(POST,CSRF 保护清单内):停隧道 → 下载官网 zip → 大小校验 → Python
+          // 安全解包 → 覆盖插件目录(运行态绝不覆盖) → 回 restartRequired。
+          // 仅「本地目录」安装形态;开发工作区副本/包安装/git 仓库目录一律拒绝(理由见各自文案)。
+          if (updateApplying) {
+            sendJson(res, 409, { ok: false, error: '已有一次更新在进行中,请稍候' })
+            return
+          }
+          if (/-test$/.test(name)) {
+            sendJson(res, 403, { ok: false, error: '开发工作区副本不支持一键自更新:覆盖工作区会丢开发态,请用发布工具同步正式版' })
+            return
+          }
+          const updForm = detectInstallForm()
+          if (updForm.form !== 'local') {
+            sendJson(res, 400, { ok: false, error: '当前是包安装(node_modules),请用命令行更新:' + GITHUB_ADD_CMD })
+            return
+          }
+          // 祖先链上任何一级是 git 仓库都拒:镜像 checkout 被覆盖会弄脏工作区,破坏同步/发版流程
+          let gitRoot = null
+          for (let d = updForm.dir, i = 0; d && i < 8; i++) {
+            if (existsSync(path.join(d, '.git'))) { gitRoot = d; break }
+            const parent = path.dirname(d)
+            if (parent === d) break
+            d = parent
+          }
+          if (gitRoot) {
+            sendJson(res, 403, { ok: false, error: '插件目录位于 git 仓库内,自更新会弄脏工作区;请在仓库 git pull,或把 zip 解压到独立目录安装' })
+            return
+          }
+          updateApplying = true
+          try {
+            const rel = await fetchLatestRelease()
+            if (!rel) {
+              sendJson(res, 200, { ok: false, error: '无法获取最新版本(官网与 GitHub 均失败)' })
+              return
+            }
+            if (cmpVersion(rel.latest, VERSION) <= 0) {
+              sendJson(res, 200, { ok: true, upToDate: true, current: VERSION, latest: rel.latest })
+              return
+            }
+            if (!rel.downloadUrl || !/\.zip(?:\?|$)/i.test(rel.downloadUrl)) {
+              sendJson(res, 200, { ok: false, error: '更新源没有可用的 zip 直链' })
+              return
+            }
+            // ① 停隧道:释放 frpc.exe / browserctl.py 的文件锁(不覆盖运行中的 exe)
+            await runBrowserctlAsync(['stop'], 30000)
+            await new Promise((r) => setTimeout(r, 1500)) // 等 fwd/frpc 进程完全退出
+            // ② 下载(内存缓冲 6~7MB;大小与官网登记值不符即弃)
+            const tmpDir = path.join(os.tmpdir(), 'dshremote-update-' + Date.now())
+            mkdirSync(tmpDir, { recursive: true })
+            const zipPath = path.join(tmpDir, 'update.zip')
+            let buf = null
+            try {
+              const ctrl = new AbortController()
+              const timer = setTimeout(() => ctrl.abort(), 90000)
+              try {
+                const r = await fetch(rel.downloadUrl, { signal: ctrl.signal, cache: 'no-store' })
+                if (!r.ok) throw new Error('HTTP ' + r.status)
+                buf = Buffer.from(await r.arrayBuffer())
+              } finally {
+                clearTimeout(timer)
+              }
+            } catch (e) {
+              sendJson(res, 200, { ok: false, error: '下载安装包失败:' + String((e && e.message) || e) })
+              return
+            }
+            if (rel.zipSize && buf.length !== rel.zipSize) {
+              sendJson(res, 200, { ok: false, error: '安装包大小校验不符(期望 ' + rel.zipSize + ' 字节,实得 ' + buf.length + ' 字节),已放弃' })
+              return
+            }
+            writeFileSync(zipPath, buf)
+            // ③ Python 安全解包(随包解释器,零 npm 依赖)
+            const py = resolvePython()
+            if (py.missing) {
+              sendJson(res, 200, { ok: false, error: PY_NOT_FOUND })
+              return
+            }
+            const extDir = path.join(tmpDir, 'pkg')
+            mkdirSync(extDir, { recursive: true })
+            const scriptPath = path.join(tmpDir, '_extract.py')
+            writeFileSync(scriptPath, EXTRACT_PY, 'utf8')
+            const xr = await runProcessAsync(py.cmd, [...py.pre, scriptPath, zipPath, extDir], 60000)
+            if (xr.status !== 0 || xr.out.indexOf('EXTRACTED') === -1) {
+              sendJson(res, 200, { ok: false, error: '解包失败,临时目录已保留供手动处理:' + tmpDir, detail: xr.out.slice(-400) })
+              return
+            }
+            // ④ 校验包根:版本必须与目标一致,关键文件必须在
+            const pkgRoot = findPackageRoot(extDir, 0)
+            if (!pkgRoot) {
+              sendJson(res, 200, { ok: false, error: '安装包里找不到插件包根(package.json + browserctl.py),已中止' })
+              return
+            }
+            let pkgVer = ''
+            try {
+              pkgVer = String(JSON.parse(readFileSync(path.join(pkgRoot, 'package.json'), 'utf8')).version || '')
+            } catch {}
+            if (pkgVer !== rel.latest) {
+              sendJson(res, 200, { ok: false, error: '包内版本(' + (pkgVer || '未知') + ')与目标版本(' + rel.latest + ')不一致,已中止' })
+              return
+            }
+            for (const f of ['lib/index.js', 'lib/client.js', 'browserctl.py', 'cordis.patch.yml']) {
+              if (!existsSync(path.join(pkgRoot, f))) {
+                sendJson(res, 200, { ok: false, error: '安装包缺关键文件 ' + f + ',已中止' })
+                return
+              }
+            }
+            // ⑤ 覆盖(运行态白名单绝不覆盖;锁定文件重试后仍失败则如实上报)
+            const result = { copied: 0, skipped: [], errors: [] }
+            await copyTreeInto(pkgRoot, PKG_ROOT, result)
+            const fatal = result.errors.filter((e) => !/^frpc\.exe$/i.test(e.file))
+            rmSync(tmpDir, { recursive: true, force: true })
+            if (fatal.length) {
+              sendJson(res, 200, {
+                ok: false,
+                error: '部分文件覆盖失败(被占用):' + fatal.map((e) => e.file).join(', ') + '。请关闭占用程序后重试',
+                copied: result.copied,
+              })
+              return
+            }
+            sendJson(res, 200, {
+              ok: true,
+              updatedVersion: rel.latest,
+              filesCopied: result.copied,
+              skippedRuntime: result.skipped.length,
+              ...(result.errors.length ? { warning: 'frpc.exe 被占用未更新(旧版可继续用,重启 DSH 后可再试)' } : {}),
+              restartRequired: true,
+            })
+          } finally {
+            updateApplying = false
+          }
         }
         // ---- 工单反馈:提交/附件走网页版,本机只保留「导出诊断日志」----
         if (route === '/browserctl/api/ticket/export-diag') {

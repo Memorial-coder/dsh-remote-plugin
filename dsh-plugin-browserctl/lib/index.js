@@ -4570,7 +4570,7 @@ var import_qrcode = __toESM(require_lib(), 1);
 import { spawn, spawnSync } from "node:child_process";
 import crypto from "node:crypto";
 import net from "node:net";
-import { existsSync, readdirSync, readFileSync, writeFileSync, renameSync, rmSync, openSync, closeSync, readSync, truncateSync, statSync, chmodSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync, renameSync, rmSync, openSync, closeSync, readSync, truncateSync, statSync, chmodSync, realpathSync, copyFileSync, mkdirSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -4641,9 +4641,202 @@ function cmpVersion(a, b) {
   }
   return 0;
 }
+function detectInstallForm() {
+  try {
+    const real = realpathSync(PKG_ROOT);
+    return { form: /[\\/]node_modules[\\/]/.test(real) ? "package" : "local", dir: real };
+  } catch {
+    return { form: "local", dir: PKG_ROOT };
+  }
+}
 var OFFICIAL_API_BASE = "https://remote.ymzcc.com/dsh-remote";
 var OAUTH_CLIENT_ID = "dsh-plugin-desktop";
-var UPDATE_MANIFEST_URL = "https://remote.ymzcc.com/dsh-remote/version.json";
+var PLUGIN_VERSION_API = OFFICIAL_API_BASE + "/api/plugin/version";
+var GITHUB_RELEASE_API = "https://api.github.com/repos/Memorial-coder/dsh-remote-plugin/releases/latest";
+var GITHUB_RELEASES_PAGE = "https://github.com/Memorial-coder/dsh-remote-plugin/releases/latest";
+var PLUGIN_ZIP_RE = /^dsh-remote-plugin-\d+\.\d+\.\d+\.zip$/i;
+var updateCheckCache = null;
+async function fetchJson(url, ms, headers) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), ms);
+  try {
+    const r = await fetch(url, { signal: ctrl.signal, cache: "no-store", headers: headers || void 0 });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    return await r.json();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+function splitNotes(text) {
+  return String(text || "").split(/\r?\n/).map((s) => s.trim()).filter((s) => /^[-*]\s+/.test(s)).map((s) => s.replace(/^[-*]\s+/, "").trim()).filter(Boolean).slice(0, 20);
+}
+async function fetchLatestRelease() {
+  const siteOrigin = new URL(OFFICIAL_API_BASE).origin;
+  try {
+    const j = await fetchJson(PLUGIN_VERSION_API, 5e3);
+    const latest = String(j && j.version || "").trim();
+    if (latest) {
+      let du = String(j && (j.website_download_url || j.download_url) || "");
+      const zipSize = Array.isArray(j && j.zips) && j.zips[0] ? Number(j.zips[0].size) || 0 : 0;
+      if (!du && zipSize) du = String(j.zips[0].url || "");
+      if (du && du.startsWith("/")) du = siteOrigin + du;
+      return { latest, downloadUrl: du, notes: splitNotes(j && j.release_notes), source: "official-api", zipSize };
+    }
+  } catch {
+  }
+  try {
+    const j = await fetchJson(GITHUB_RELEASE_API, 6e3, {
+      "user-agent": "dsh-plugin-browserctl-update-check",
+      accept: "application/vnd.github+json"
+    });
+    const latest = String(j && j.tag_name || "").replace(/^v/i, "").trim();
+    if (latest) {
+      let du = "";
+      const assets = Array.isArray(j && j.assets) ? j.assets : [];
+      const zip = assets.find((a) => PLUGIN_ZIP_RE.test(String(a && a.name || "")));
+      if (zip) du = String(zip.browser_download_url || "");
+      if (!du) du = GITHUB_RELEASES_PAGE;
+      return { latest, downloadUrl: du, notes: splitNotes(j && j.body), source: "github", zipSize: zip ? Number(zip.size) || 0 : 0 };
+    }
+  } catch {
+  }
+  return null;
+}
+var GITHUB_ADD_CMD = "dsh plugin add github:Memorial-coder/dsh-remote-plugin";
+var updateApplying = false;
+function isRuntimeArtifact(basename) {
+  if (basename === "browserctl.py") return false;
+  if (/^browserctl_/i.test(basename)) return true;
+  if (/^__pycache__$/i.test(basename)) return true;
+  return false;
+}
+var EXTRACT_PY = [
+  "import os, sys, zipfile",
+  "zip_path, dest = sys.argv[1], sys.argv[2]",
+  "os.makedirs(dest, exist_ok=True)",
+  "dest_real = os.path.realpath(dest)",
+  "count = 0",
+  "with zipfile.ZipFile(zip_path) as z:",
+  "    for info in z.infolist():",
+  '        name = info.filename.replace("\\\\", "/")',
+  '        parts = [p for p in name.split("/") if p not in ("", ".")]',
+  '        if not parts or name.endswith("/") or ".." in parts:',
+  "            continue",
+  "        if os.path.splitdrive(parts[0])[0]:",
+  "            continue",
+  "        target = os.path.join(dest_real, *parts)",
+  "        target_real = os.path.realpath(target)",
+  "        try:",
+  "            if os.path.commonpath([dest_real, target_real]) != dest_real:",
+  "                continue",
+  "        except ValueError:",
+  "            continue",
+  "        os.makedirs(os.path.dirname(target_real), exist_ok=True)",
+  '        with z.open(info) as fsrc, open(target_real, "wb") as fdst:',
+  "            while True:",
+  "                chunk = fsrc.read(1 << 20)",
+  "                if not chunk:",
+  "                    break",
+  "                fdst.write(chunk)",
+  "        count += 1",
+  'print("EXTRACTED", count)'
+].join("\n");
+function findPackageRoot(dir, depth) {
+  if (depth > 3) return null;
+  try {
+    if (existsSync(path.join(dir, "package.json")) && existsSync(path.join(dir, "browserctl.py"))) return dir;
+  } catch {
+  }
+  try {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      if (!e.isDirectory()) continue;
+      const found = findPackageRoot(path.join(dir, e.name), depth + 1);
+      if (found) return found;
+    }
+  } catch {
+  }
+  return null;
+}
+function runProcessAsync(cmd, args, timeoutMs) {
+  return new Promise((resolve) => {
+    let done = false;
+    let out = "";
+    const child = spawn(cmd, args, { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+    const timer = setTimeout(() => {
+      if (done) return;
+      done = true;
+      try {
+        child.kill();
+      } catch {
+      }
+      resolve({ status: -1, out: out + "\n[\u6267\u884C\u8D85\u65F6]" });
+    }, timeoutMs);
+    child.stdout.on("data", (c) => {
+      out += String(c);
+    });
+    child.stderr.on("data", (c) => {
+      out += String(c);
+    });
+    child.on("error", (e) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      resolve({ status: -1, out: out + String(e && e.message || e) });
+    });
+    child.on("exit", (code) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      resolve({ status: code, out });
+    });
+  });
+}
+async function copyTreeInto(srcDir, dstDir, result) {
+  let entries = [];
+  try {
+    entries = readdirSync(srcDir, { withFileTypes: true });
+  } catch (e) {
+    result.errors.push({ file: srcDir, error: String(e && e.message || e) });
+    return;
+  }
+  for (const entry of entries) {
+    const s = path.join(srcDir, entry.name);
+    const d = path.join(dstDir, entry.name);
+    if (entry.isDirectory()) {
+      if (/^__pycache__$/i.test(entry.name)) continue;
+      try {
+        mkdirSync(d, { recursive: true });
+      } catch (e) {
+        result.errors.push({ file: d, error: String(e && e.message || e) });
+        continue;
+      }
+      await copyTreeInto(s, d, result);
+    } else if (entry.isFile()) {
+      if (isRuntimeArtifact(entry.name)) {
+        result.skipped.push(entry.name);
+        continue;
+      }
+      let ok = false;
+      let lastErr = "";
+      for (let attempt = 0; attempt < 3 && !ok; attempt++) {
+        try {
+          copyFileSync(s, d + ".updating");
+          renameSync(d + ".updating", d);
+          ok = true;
+        } catch (e) {
+          lastErr = String(e && e.message || e);
+          try {
+            rmSync(d + ".updating", { force: true });
+          } catch {
+          }
+          await new Promise((r) => setTimeout(r, 500));
+        }
+      }
+      if (ok) result.copied++;
+      else result.errors.push({ file: entry.name, error: lastErr });
+    }
+  }
+}
 function atomicWrite(file, data) {
   const tmp = file + ".tmp";
   writeFileSync(tmp, data, "utf8");
@@ -5644,6 +5837,7 @@ function csrfBlocked(req) {
 var CSRF_PROTECTED = /* @__PURE__ */ new Set([
   "/browserctl/api/ensure",
   "/browserctl/api/stop",
+  "/browserctl/api/update-apply",
   "/browserctl/api/elevate",
   "/browserctl/api/link",
   "/browserctl/api/pair",
@@ -6404,35 +6598,172 @@ function apply(ctx, config = {}) {
         return;
       }
       if (route === "/browserctl/api/update-check") {
-        let j = null;
-        try {
-          const ctrl = new AbortController();
-          const timer = setTimeout(() => ctrl.abort(), 5e3);
-          let r;
-          try {
-            r = await fetch(UPDATE_MANIFEST_URL, { signal: ctrl.signal, cache: "no-store" });
-          } finally {
-            clearTimeout(timer);
-          }
-          if (!r.ok) {
-            sendJson(res, 200, { ok: false, error: "\u66F4\u65B0\u670D\u52A1\u5668\u8FD4\u56DE HTTP " + r.status });
-            return;
-          }
-          j = await r.json();
-        } catch (e) {
-          sendJson(res, 200, { ok: false, error: "\u65E0\u6CD5\u8FDE\u63A5\u66F4\u65B0\u670D\u52A1\u5668:" + String(e && e.message || e) });
+        let rel = null;
+        if (updateCheckCache && Date.now() - updateCheckCache.at < 6e4) {
+          rel = updateCheckCache.rel;
+        } else {
+          rel = await fetchLatestRelease();
+          updateCheckCache = rel ? { at: Date.now(), rel } : null;
+        }
+        if (!rel) {
+          sendJson(res, 200, { ok: false, error: "\u65E0\u6CD5\u8FDE\u63A5\u66F4\u65B0\u670D\u52A1\u5668(\u5B98\u7F51\u4E0E GitHub \u5747\u5931\u8D25)" });
           return;
         }
-        const latest = String(j && j.version || "").trim() || VERSION;
+        const latest = String(rel.latest || "").trim() || VERSION;
+        let app = null;
+        try {
+          const origin = new URL(OFFICIAL_API_BASE).origin;
+          const appUrl = OFFICIAL_API_BASE + "/api/app/version";
+          const aj = await fetchJson(appUrl, 5e3);
+          let du = String(aj.download_url || "");
+          if (du && du.startsWith("/")) du = origin + du;
+          app = {
+            enabled: !!aj.enabled,
+            latest: String(aj.latest_version_name || ""),
+            downloadUrl: du,
+            notes: String(aj.release_notes || "")
+          };
+        } catch {
+        }
         sendJson(res, 200, {
           ok: true,
           current: VERSION,
           latest,
           hasUpdate: cmpVersion(latest, VERSION) > 0,
-          downloadUrl: j && j.downloadUrl || "",
-          notes: Array.isArray(j && j.notes) ? j.notes : []
+          downloadUrl: rel.downloadUrl || "",
+          notes: Array.isArray(rel.notes) ? rel.notes : [],
+          app,
+          // 安装形态(local=解压目录/link,package=npm/github)+ 本次结果来源,供前端分形态给更新指引
+          install: detectInstallForm(),
+          source: rel.source || ""
         });
         return;
+      }
+      if (route === "/browserctl/api/update-apply") {
+        if (updateApplying) {
+          sendJson(res, 409, { ok: false, error: "\u5DF2\u6709\u4E00\u6B21\u66F4\u65B0\u5728\u8FDB\u884C\u4E2D,\u8BF7\u7A0D\u5019" });
+          return;
+        }
+        if (/-test$/.test(name)) {
+          sendJson(res, 403, { ok: false, error: "\u5F00\u53D1\u5DE5\u4F5C\u533A\u526F\u672C\u4E0D\u652F\u6301\u4E00\u952E\u81EA\u66F4\u65B0:\u8986\u76D6\u5DE5\u4F5C\u533A\u4F1A\u4E22\u5F00\u53D1\u6001,\u8BF7\u7528\u53D1\u5E03\u5DE5\u5177\u540C\u6B65\u6B63\u5F0F\u7248" });
+          return;
+        }
+        const updForm = detectInstallForm();
+        if (updForm.form !== "local") {
+          sendJson(res, 400, { ok: false, error: "\u5F53\u524D\u662F\u5305\u5B89\u88C5(node_modules),\u8BF7\u7528\u547D\u4EE4\u884C\u66F4\u65B0:" + GITHUB_ADD_CMD });
+          return;
+        }
+        let gitRoot = null;
+        for (let d = updForm.dir, i = 0; d && i < 8; i++) {
+          if (existsSync(path.join(d, ".git"))) {
+            gitRoot = d;
+            break;
+          }
+          const parent = path.dirname(d);
+          if (parent === d) break;
+          d = parent;
+        }
+        if (gitRoot) {
+          sendJson(res, 403, { ok: false, error: "\u63D2\u4EF6\u76EE\u5F55\u4F4D\u4E8E git \u4ED3\u5E93\u5185,\u81EA\u66F4\u65B0\u4F1A\u5F04\u810F\u5DE5\u4F5C\u533A;\u8BF7\u5728\u4ED3\u5E93 git pull,\u6216\u628A zip \u89E3\u538B\u5230\u72EC\u7ACB\u76EE\u5F55\u5B89\u88C5" });
+          return;
+        }
+        updateApplying = true;
+        try {
+          const rel = await fetchLatestRelease();
+          if (!rel) {
+            sendJson(res, 200, { ok: false, error: "\u65E0\u6CD5\u83B7\u53D6\u6700\u65B0\u7248\u672C(\u5B98\u7F51\u4E0E GitHub \u5747\u5931\u8D25)" });
+            return;
+          }
+          if (cmpVersion(rel.latest, VERSION) <= 0) {
+            sendJson(res, 200, { ok: true, upToDate: true, current: VERSION, latest: rel.latest });
+            return;
+          }
+          if (!rel.downloadUrl || !/\.zip(?:\?|$)/i.test(rel.downloadUrl)) {
+            sendJson(res, 200, { ok: false, error: "\u66F4\u65B0\u6E90\u6CA1\u6709\u53EF\u7528\u7684 zip \u76F4\u94FE" });
+            return;
+          }
+          await runBrowserctlAsync(["stop"], 3e4);
+          await new Promise((r) => setTimeout(r, 1500));
+          const tmpDir = path.join(os.tmpdir(), "dshremote-update-" + Date.now());
+          mkdirSync(tmpDir, { recursive: true });
+          const zipPath = path.join(tmpDir, "update.zip");
+          let buf = null;
+          try {
+            const ctrl = new AbortController();
+            const timer = setTimeout(() => ctrl.abort(), 9e4);
+            try {
+              const r = await fetch(rel.downloadUrl, { signal: ctrl.signal, cache: "no-store" });
+              if (!r.ok) throw new Error("HTTP " + r.status);
+              buf = Buffer.from(await r.arrayBuffer());
+            } finally {
+              clearTimeout(timer);
+            }
+          } catch (e) {
+            sendJson(res, 200, { ok: false, error: "\u4E0B\u8F7D\u5B89\u88C5\u5305\u5931\u8D25:" + String(e && e.message || e) });
+            return;
+          }
+          if (rel.zipSize && buf.length !== rel.zipSize) {
+            sendJson(res, 200, { ok: false, error: "\u5B89\u88C5\u5305\u5927\u5C0F\u6821\u9A8C\u4E0D\u7B26(\u671F\u671B " + rel.zipSize + " \u5B57\u8282,\u5B9E\u5F97 " + buf.length + " \u5B57\u8282),\u5DF2\u653E\u5F03" });
+            return;
+          }
+          writeFileSync(zipPath, buf);
+          const py = resolvePython();
+          if (py.missing) {
+            sendJson(res, 200, { ok: false, error: PY_NOT_FOUND });
+            return;
+          }
+          const extDir = path.join(tmpDir, "pkg");
+          mkdirSync(extDir, { recursive: true });
+          const scriptPath = path.join(tmpDir, "_extract.py");
+          writeFileSync(scriptPath, EXTRACT_PY, "utf8");
+          const xr = await runProcessAsync(py.cmd, [...py.pre, scriptPath, zipPath, extDir], 6e4);
+          if (xr.status !== 0 || xr.out.indexOf("EXTRACTED") === -1) {
+            sendJson(res, 200, { ok: false, error: "\u89E3\u5305\u5931\u8D25,\u4E34\u65F6\u76EE\u5F55\u5DF2\u4FDD\u7559\u4F9B\u624B\u52A8\u5904\u7406:" + tmpDir, detail: xr.out.slice(-400) });
+            return;
+          }
+          const pkgRoot = findPackageRoot(extDir, 0);
+          if (!pkgRoot) {
+            sendJson(res, 200, { ok: false, error: "\u5B89\u88C5\u5305\u91CC\u627E\u4E0D\u5230\u63D2\u4EF6\u5305\u6839(package.json + browserctl.py),\u5DF2\u4E2D\u6B62" });
+            return;
+          }
+          let pkgVer = "";
+          try {
+            pkgVer = String(JSON.parse(readFileSync(path.join(pkgRoot, "package.json"), "utf8")).version || "");
+          } catch {
+          }
+          if (pkgVer !== rel.latest) {
+            sendJson(res, 200, { ok: false, error: "\u5305\u5185\u7248\u672C(" + (pkgVer || "\u672A\u77E5") + ")\u4E0E\u76EE\u6807\u7248\u672C(" + rel.latest + ")\u4E0D\u4E00\u81F4,\u5DF2\u4E2D\u6B62" });
+            return;
+          }
+          for (const f of ["lib/index.js", "lib/client.js", "browserctl.py", "cordis.patch.yml"]) {
+            if (!existsSync(path.join(pkgRoot, f))) {
+              sendJson(res, 200, { ok: false, error: "\u5B89\u88C5\u5305\u7F3A\u5173\u952E\u6587\u4EF6 " + f + ",\u5DF2\u4E2D\u6B62" });
+              return;
+            }
+          }
+          const result = { copied: 0, skipped: [], errors: [] };
+          await copyTreeInto(pkgRoot, PKG_ROOT, result);
+          const fatal = result.errors.filter((e) => !/^frpc\.exe$/i.test(e.file));
+          rmSync(tmpDir, { recursive: true, force: true });
+          if (fatal.length) {
+            sendJson(res, 200, {
+              ok: false,
+              error: "\u90E8\u5206\u6587\u4EF6\u8986\u76D6\u5931\u8D25(\u88AB\u5360\u7528):" + fatal.map((e) => e.file).join(", ") + "\u3002\u8BF7\u5173\u95ED\u5360\u7528\u7A0B\u5E8F\u540E\u91CD\u8BD5",
+              copied: result.copied
+            });
+            return;
+          }
+          sendJson(res, 200, {
+            ok: true,
+            updatedVersion: rel.latest,
+            filesCopied: result.copied,
+            skippedRuntime: result.skipped.length,
+            ...result.errors.length ? { warning: "frpc.exe \u88AB\u5360\u7528\u672A\u66F4\u65B0(\u65E7\u7248\u53EF\u7EE7\u7EED\u7528,\u91CD\u542F DSH \u540E\u53EF\u518D\u8BD5)" } : {},
+            restartRequired: true
+          });
+        } finally {
+          updateApplying = false;
+        }
       }
       if (route === "/browserctl/api/ticket/export-diag") {
         if ((req.method || "GET") !== "GET") {

@@ -4,6 +4,9 @@ import { defineStore } from '@deepseek-ai/dsh-client-store'
 
 const NS = 'browserctl'
 const STYLE_ID = 'browserctl/styles'
+// 开发副本标记(本镜像正式版恒 false):自动「更新弹窗」与一键自更新的禁用逻辑
+// 只在开发副本生效;正式版恒走完整更新体验(自动检查/红点/一键自更新)。
+const IS_TEST = /-test$/.test(NS)
 
 // 插件版本号(「关于」面板展示)。单一来源 = package.json 的 version:
 // build.mjs 用 esbuild --define:__DSHREMOTE_VERSION__ 注入,浏览器端只认这个注入值
@@ -18,6 +21,8 @@ const ABOUT_LINKS = {
 }
 // 手机端 2FA 需要验证器 App 生成 TOTP 动态码;2FA 卡片提示指向的官方下载页(微软官网)
 const MS_AUTHENTICATOR_URL = 'https://www.microsoft.com/zh-cn/security/authenticator/mobile-app'
+// 包安装形态(npm/github)用户的更新命令;版本源已定 GitHub Release,更新引导统一指 github: 通道
+const PLUGIN_ADD_CMD = 'dsh plugin add github:Memorial-coder/dsh-remote-plugin'
 function lsGet(k) { try { return window.localStorage.getItem(k) || '' } catch (e) { return '' } }
 function lsSet(k, v) { try { window.localStorage.setItem(k, v) } catch (e) {} }
 
@@ -1101,6 +1106,23 @@ div[data-slot='sidebar.footer.action'] > * {
   font-size: 12px;
   line-height: 17px;
   color: var(--dsw-alias-label-secondary, #a6aab2);
+}
+.dshBrowserCtlAboutUpdateGuide {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-secondary, #a6aab2);
+  word-break: break-all;
+}
+.dshBrowserCtlUpdNotes {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--dsw-alias-label-secondary, #cfd3d6);
 }
 .dshBrowserCtlAboutUpdateErr {
   margin: 0;
@@ -3693,11 +3715,65 @@ function PushCard({ t, reloadToken }) {
   )
 }
 
+/* ---------- 一键自更新按钮(本地目录解压/link 安装形态专用) ----------
+   host /update-apply:停隧道 → 下载官网 zip → 校验大小 → Python 安全解包 →
+   覆盖插件目录(运行态文件绝不覆盖) → 回 restartRequired(重启 DSH 生效)。
+   开发副本(IS_TEST)与包安装形态不渲染本按钮(见调用点)。 */
+function UpdateApplyButton({ t, latest, variant, onApplied }) {
+  const [state, setState] = useState('idle') // idle|loading|done|error
+  const [errMsg, setErrMsg] = useState('')
+  async function apply() {
+    if (state === 'loading') return
+    setState('loading')
+    setErrMsg('')
+    try {
+      const r = await fetch(API_P + '/browserctl/api/update-apply', { method: 'POST', cache: 'no-store' })
+      const j = await r.json().catch(() => ({}))
+      if (j && j.ok) {
+        setState('done')
+        if (onApplied) onApplied(j)
+      } else {
+        setState('error')
+        setErrMsg((j && j.error) || ('HTTP ' + r.status))
+      }
+    } catch (e) {
+      setState('error')
+      setErrMsg(String((e && e.message) || e))
+    }
+  }
+  const btn = (
+    <Tooltip label={state === 'done' ? t('updateApplyDone').replace('{v}', latest) : t('updateApplyTip')}>
+      <Button
+        variant={variant || 'primary'}
+        size="sm"
+        disabled={state === 'loading' || state === 'done'}
+        onClick={apply}
+      >
+        {state === 'loading'
+          ? (<><span className="dshBrowserCtlSpinner" aria-hidden="true" /> {t('updateApplying')}</>)
+          : state === 'done'
+            ? t('updateApplyDone').replace('{v}', latest)
+            : t('updateApplyBtn').replace('{v}', latest)}
+      </Button>
+    </Tooltip>
+  )
+  if (state === 'error' && errMsg) {
+    return (
+      <span style={{ display: 'inline-flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start' }}>
+        {btn}
+        <span className="dshBrowserCtlAboutUpdateErr">{errMsg}</span>
+      </span>
+    )
+  }
+  return btn
+}
+
 /* ---------- 「关于」面板:应用名 + 版本 + 简介 + 外部链接 + 检查更新 ---------- */
-function AboutPanel({ t, onClose }) {
+function AboutPanel({ t, onClose, initialResult, onDismissUpdate, onCheckResult }) {
   // 检查更新按钮三态: idle(检查更新) / loading(检查中…) / done(重新检查)
-  const [checkState, setCheckState] = useState('idle')
-  const [checkResult, setCheckResult] = useState(null)
+  // initialResult = 页面加载/打开面板时已自动检查的结果,直接展示,无需再点「检查更新」
+  const [checkState, setCheckState] = useState(initialResult ? 'done' : 'idle')
+  const [checkResult, setCheckResult] = useState(initialResult || null)
   // 用户协议 / 隐私政策弹窗: null=不显示, 否则为要展示的文档对象
   const [legalDoc, setLegalDoc] = useState(null)
   const links = [
@@ -3714,6 +3790,8 @@ function AboutPanel({ t, onClose }) {
       const r = await fetch(API_P + '/browserctl/api/update-check', { cache: 'no-store' })
       const j = await r.json().catch(() => ({}))
       setCheckResult(j)
+      // 手动检查结果同步回父层(updateInfo):红点/忽略状态与卡片保持一致
+      if (onCheckResult && j && j.ok) onCheckResult(j)
     } catch (e) {
       setCheckResult({ ok: false, error: String((e && e.message) || e) })
     } finally {
@@ -3725,6 +3803,9 @@ function AboutPanel({ t, onClose }) {
   const upToDate = !!(checkResult && checkResult.ok && !checkResult.hasUpdate)
   const notes = hasUpdate && Array.isArray(checkResult.notes) ? checkResult.notes : []
   const downloadUrl = hasUpdate ? (checkResult.downloadUrl || ABOUT_LINKS.app) : ABOUT_LINKS.app
+  // 一键自更新可见性:本地目录形态且非开发副本。下载按钮的主次随它切换:
+  // 有一键更新时下载是备用路径(描边 secondary);没有时(包安装)下载就是主 CTA(白底 primary)
+  const canApplyOneClick = !!(hasUpdate && checkResult.install && checkResult.install.form === 'local' && !IS_TEST)
   return (
     <div className="dshBrowserCtlOverlay" role="dialog" aria-modal="true" aria-label={t('about')}>
       <button className="dshBrowserCtlOverlayMask" type="button" aria-label={t('close')} onClick={onClose} />
@@ -3786,12 +3867,30 @@ function AboutPanel({ t, onClose }) {
               {hasUpdate && (
                 <>
                   <p className="dshBrowserCtlAboutUpdateFound">{t('updateFound').replace('{v}', checkResult.latest)}</p>
+                  {/* 一键自更新:仅本地目录(解压/link)形态,开发副本禁用(覆盖工作区会丢开发态) */}
+                  {checkResult.install && checkResult.install.form === 'local' && !IS_TEST && (
+                    <UpdateApplyButton t={t} latest={String(checkResult.latest)} />
+                  )}
                   <div className="dshBrowserCtlUrlRow">
                     <div className="dshBrowserCtlUrl" title={downloadUrl}>{downloadUrl}</div>
-                    <Button variant="secondary" size="sm" onClick={() => window.open(downloadUrl, '_blank')}>
-                      {t('updateDownload')}
-                    </Button>
+                    <Tooltip label={t('updateDownloadTip')}>
+                      <Button variant={canApplyOneClick ? 'secondary' : 'primary'} size="sm" onClick={() => window.open(downloadUrl, '_blank')}>
+                        {t('updateDownload')}
+                      </Button>
+                    </Tooltip>
                   </div>
+                  {/* 更新方法按安装形态分:本地目录(link/解压)=覆盖目录;包安装(npm/github)=重跑安装命令 */}
+                  {checkResult.install && checkResult.install.form === 'local' && (
+                    <p className="dshBrowserCtlAboutUpdateGuide">
+                      {t('updateGuideLocal').replace('{dir}', (checkResult.install && checkResult.install.dir) || '')}
+                      {IS_TEST ? t('updateGuideTestNote') : ''}
+                    </p>
+                  )}
+                  {checkResult.install && checkResult.install.form === 'package' && (
+                    <p className="dshBrowserCtlAboutUpdateGuide">
+                      {t('updateGuidePackage').replace('{cmd}', PLUGIN_ADD_CMD)}
+                    </p>
+                  )}
                   {notes.length > 0 && (
                     <>
                       <p className="dshBrowserCtlCardDesc">{t('updateNotesTitle')}</p>
@@ -3799,6 +3898,15 @@ function AboutPanel({ t, onClose }) {
                         {notes.map((n, i) => <li key={i}>{n}</li>)}
                       </ul>
                     </>
+                  )}
+                  {onDismissUpdate && (
+                    <div className="dshBrowserCtlAboutUpdateIgnoreRow">
+                      <Tooltip label={t('updateIgnoreTip')}>
+                        <Button variant="secondary" size="sm" onClick={onDismissUpdate}>
+                          {t('updateIgnore')}
+                        </Button>
+                      </Tooltip>
+                    </div>
                   )}
                 </>
               )}
@@ -4783,6 +4891,43 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
   const [msgPopOpen, setMsgPopOpen] = useState(false)
   // 当前连接模式(official/selfhost),用于判断未登录时是否显示二维码
   const [cfgMode, setCfgMode] = useState('official')
+  // 新版本提醒:页面加载/打开面板时自动检查(只看插件自身版本),关于按钮亮红点 + 居中弹窗
+  const [updateInfo, setUpdateInfo] = useState(null)
+  const [updTick, setUpdTick] = useState(0)   // 忽略后强制重渲染,收起弹窗/红点
+  // 插件自身有新版本且该版本未被「忽略此版本」→ 关于按钮显示红点
+  const pluginUpdatePending = !!(updateInfo && updateInfo.hasUpdate
+    && updateInfo.latest && lsGet('dsh_plugin_upd_dismiss_' + updateInfo.latest) !== '1')
+  // 本次打开面板已经提示过的版本:点 X / 点遮罩 = 稍后再说(下次打开面板还会提醒)
+  const [updPromptClosed, setUpdPromptClosed] = useState('')
+  const pluginUpdPrompt = !!(pluginUpdatePending && open && !IS_TEST
+    && (!updateInfo || updPromptClosed !== String(updateInfo.latest)))
+  const pluginUpdNotes = (updateInfo && Array.isArray(updateInfo.notes) ? updateInfo.notes : []).slice(0, 3)
+  const pluginUpdUrl = (updateInfo && updateInfo.downloadUrl) || ''
+  const dismissPluginUpdate = () => {
+    if (updateInfo && updateInfo.latest) {
+      lsSet('dsh_plugin_upd_dismiss_' + updateInfo.latest, '1')
+      setUpdTick(x => x + 1)
+    }
+  }
+  // 页面加载即查一次新版本(不等开面板):让「关于」按钮红点开箱可亮。
+  useEffect(() => {
+    let cancelled = false
+    fetch(API_P + '/browserctl/api/update-check', { cache: 'no-store' })
+      .then(r => r.json())
+      .then(j => { if (!cancelled && j) setUpdateInfo(j) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [])
+  // 打开面板时再查一次(复用「关于」里的 update-check 接口),保证数据新鲜
+  useEffect(() => {
+    if (!open) return
+    let cancelled = false
+    fetch(API_P + '/browserctl/api/update-check', { cache: 'no-store' })
+      .then(r => r.json())
+      .then(j => { if (!cancelled && j) setUpdateInfo(j) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [open])
   const panel = useRef(null)
   const { data, error, expiresAt, status, retrying, refresh } = useQr(open, reloadToken, uses)
   const left = useCountdown(expiresAt)
@@ -5114,7 +5259,10 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
             </span>
           </Tooltip>
           <Tooltip label={t('about')}>
-            <Button variant="ghost" size="sm" aria-label={t('about')} icon={Svg.info} onClick={() => setAboutOpen(true)} />
+            <span className="dshBrowserCtlAboutBtn">
+              <Button variant="ghost" size="sm" aria-label={t('about')} icon={Svg.info} onClick={() => setAboutOpen(true)} />
+              {pluginUpdatePending && <span className="dshBrowserCtlBadgeDot" />}
+            </span>
           </Tooltip>
           <Tooltip label={t('config')}>
             <Button variant="ghost" size="sm" aria-label={t('config')} icon={Svg.gear} onClick={() => setConfigOpen(true)} />
@@ -5332,7 +5480,58 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
           )}
         </div>
       </section>
-      {aboutOpen && <AboutPanel t={t} onClose={() => setAboutOpen(false)} />}
+      {aboutOpen && <AboutPanel t={t} onClose={() => setAboutOpen(false)} initialResult={updateInfo} onDismissUpdate={dismissPluginUpdate} onCheckResult={setUpdateInfo} />}
+      {pluginUpdPrompt && updateInfo && (
+        <div className="dshBrowserCtlOverlay dshBrowserCtlLoginPrompt" role="dialog" aria-modal="true" aria-label={t('pluginUpdTitle').replace('{v}', String(updateInfo.latest))}>
+          <button className="dshBrowserCtlOverlayMask" type="button" aria-label={t('close')} onClick={() => setUpdPromptClosed(String(updateInfo.latest))} />
+          <section className="dshBrowserCtlPanel">
+            <header className="dshBrowserCtlHeader">
+              <div>
+                <h1>{t('pluginUpdTitle').replace('{v}', String(updateInfo.latest))}</h1>
+              </div>
+              <Tooltip label={t('close')}>
+                <Button variant="ghost" size="sm" aria-label={t('close')} icon={<IconCloseOutlineRegular />} onClick={() => setUpdPromptClosed(String(updateInfo.latest))} />
+              </Tooltip>
+            </header>
+            <div className="dshBrowserCtlLoginPromptBody">
+              <p className="dshBrowserCtlLoginPromptText">
+                {t('pluginUpdDesc').replace('{cur}', String(updateInfo.current || '')).replace('{v}', String(updateInfo.latest))}
+              </p>
+              {pluginUpdNotes.length > 0 && (
+                <ul className="dshBrowserCtlUpdNotes">
+                  {pluginUpdNotes.map((n, i) => <li key={i}>{n}</li>)}
+                </ul>
+              )}
+              <div className="dshBrowserCtlLoginPromptActions">
+                <Tooltip label={t('updateIgnoreTip')}>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => { dismissPluginUpdate(); setUpdPromptClosed(String(updateInfo.latest)) }}
+                  >
+                    {t('updateIgnore')}
+                  </Button>
+                </Tooltip>
+                {updateInfo.install && updateInfo.install.form === 'local' && !IS_TEST && (
+                  <UpdateApplyButton t={t} latest={String(updateInfo.latest)} variant="primary" onApplied={dismissPluginUpdate} />
+                )}
+                <Tooltip label={t('updateDownloadTip')}>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => {
+                      setUpdPromptClosed(String(updateInfo.latest))
+                      if (pluginUpdUrl) window.open(pluginUpdUrl, '_blank')
+                    }}
+                  >
+                    {t('updateDownload')}
+                  </Button>
+                </Tooltip>
+              </div>
+            </div>
+          </section>
+        </div>
+      )}
       {configOpen && <ConfigPanel t={t} onClose={() => setConfigOpen(false)} onSaved={refreshAll} />}
       {accountOpen && (
         <AccountLoginModal t={t} onClose={() => setAccountOpen(false)} onSaved={refreshAll} />
@@ -5447,6 +5646,19 @@ export function apply(ctx) {
       updateNotesTitle: '更新说明',
       updateUpToDate: '已是最新版本',
       updateFailed: '更新检查失败',
+      updateIgnore: '忽略此版本',
+      pluginUpdTitle: '发现插件新版本 v{v}',
+      pluginUpdDesc: '当前版本 v{cur},官网已发布 v{v}。更新后可获得最新修复与新功能。',
+      updateGuideLocal: '更新方法：下载新 zip 解压后覆盖插件目录（{dir}），重启 DSH 生效；若覆盖后隧道起不来，先双击目录里的 fix-antivirus.bat 解除杀软拦截',
+      updateGuidePackage: '更新方法：命令行执行 {cmd}，重启 DSH 生效',
+      updateApplyBtn: '一键更新到 v{v}',
+      updateApplying: '正在更新（下载并覆盖，勿关闭面板）…',
+      updateApplyDone: '已更新到 v{v}，重启 DSH 后生效',
+      updateApplyTip: '自动下载官方 zip 覆盖当前插件目录（会先停止隧道），重启 DSH 即完成更新；仅适用于解压目录安装',
+      updateRecheckTip: '重新向官方更新源查询最新版本（数据源：GitHub Release，官网服务器每小时同步，国内直连）',
+      updateDownloadTip: '在浏览器打开官方 zip 直链手动下载（约 6.4 MB，走官网服务器）；一键更新失败时的备用方式',
+      updateIgnoreTip: '本版本不再提醒；官网发布更新版本后会重新提示',
+      updateGuideTestNote: '（开发副本：一键更新已禁用——覆盖工作区会丢开发态，请用发布工具同步正式版）',
       legalTerms: '用户协议',
       legalPrivacy: '隐私政策',
       legalMeta: '生效 {d} · 版本 {v}',
@@ -5750,6 +5962,19 @@ export function apply(ctx) {
       updateNotesTitle: 'Release notes',
       updateUpToDate: 'You are up to date',
       updateFailed: 'Update check failed',
+      updateIgnore: 'Ignore this version',
+      pluginUpdTitle: 'New plugin version v{v}',
+      pluginUpdDesc: 'You are on v{cur}; v{v} has been released with the latest fixes and features.',
+      updateGuideLocal: 'To update: download the new zip, extract it over the plugin folder ({dir}), then restart DSH. If the tunnel fails afterwards, run fix-antivirus.bat in the folder first',
+      updateGuidePackage: 'To update: run "{cmd}" in a terminal, then restart DSH',
+      updateApplyBtn: 'Update to v{v}',
+      updateApplying: 'Updating (downloading & overwriting)…',
+      updateApplyDone: 'Updated to v{v}; restart DSH to apply',
+      updateApplyTip: 'Downloads the official zip and overwrites this plugin folder (the tunnel stops first). Restart DSH to finish; works for extracted-folder installs only',
+      updateRecheckTip: 'Query the official update source again (GitHub Release, mirrored hourly by the website server)',
+      updateDownloadTip: 'Open the official zip direct link in your browser (about 6.4 MB) as a manual fallback',
+      updateIgnoreTip: 'Skip reminders for this version; newer releases will notify again',
+      updateGuideTestNote: ' (dev copy: one-click update is disabled here — use the release tool to sync)',
       legalTerms: 'User Agreement',
       legalPrivacy: 'Privacy Policy',
       legalMeta: 'Effective {d} · Version {v}',
