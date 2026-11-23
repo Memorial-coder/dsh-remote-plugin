@@ -1556,6 +1556,10 @@ div[data-slot='sidebar.footer.action'] > * {
   border: 1.5px solid var(--dsw-panel-bg, #fff);
   pointer-events: none;
 }
+/* ---------- 顶栏「通知中心」下拉(铃铛) ----------
+   2026-11-23 三分段改版:与手机消息中心(home.html msg-tabs)同构——
+   官方公告 / 发给我 / 电脑推送 各自分段,行=徽标+短时间+标题(两行)+正文一行摘要,
+   点整行进详情 pane(返回键回列表)。 */
 .dshBrowserCtlMsgMask {
   position: fixed;
   inset: 0;
@@ -1571,7 +1575,7 @@ div[data-slot='sidebar.footer.action'] > * {
   right: 0;
   z-index: 41;
   width: min(340px, 88vw);
-  max-height: min(420px, 70vh);
+  max-height: min(440px, 70vh);
   display: flex;
   flex-direction: column;
   background: var(--dsw-alias-bg-layer-1, #1b1c20);
@@ -1584,12 +1588,74 @@ div[data-slot='sidebar.footer.action'] > * {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 4px;
   padding: 10px 12px 8px;
   font-size: 13px;
   font-weight: 600;
   color: var(--dsw-alias-label-primary, inherit);
 }
+.dshBrowserCtlMsgPopTitle { flex: 1 1 auto; min-width: 0; }
+/* 返回列表按钮(详情 pane 左上角) */
+.dshBrowserCtlMsgBack {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary, #a6aab2);
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  margin-left: -4px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.dshBrowserCtlMsgBack:hover {
+  color: var(--dsw-alias-label-primary, inherit);
+  background: var(--dsw-alias-bg-layer-2, rgba(255, 255, 255, 0.06));
+}
+/* 三分段 tab:官方公告 / 发给我 / 电脑推送(与手机 .msg-tabs 同款) */
+.dshBrowserCtlMsgTabs {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 4px;
+  margin: 2px 8px 6px;
+  padding: 3px;
+  background: var(--dsw-alias-bg-layer-2, rgba(255, 255, 255, 0.06));
+  border-radius: 10px;
+}
+.dshBrowserCtlMsgTab {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary, #a6aab2);
+  font: inherit;
+  font-size: 11.5px;
+  line-height: 16px;
+  padding: 4px 6px;
+  border-radius: 8px;
+  cursor: pointer;
+  flex: 1 1 0;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+.dshBrowserCtlMsgTab:hover { color: var(--dsw-alias-label-primary, inherit); }
+.dshBrowserCtlMsgTab[data-on='true'] {
+  background: var(--dsw-alias-fill-control-active, rgba(255, 255, 255, 0.12));
+  color: var(--dsw-alias-label-primary, #fff);
+  font-weight: 600;
+}
+.dshBrowserCtlMsgTabN {
+  font-size: 10px;
+  color: var(--dsw-alias-accent-primary, #4c8bf5);
+  font-variant-numeric: tabular-nums;
+}
+.dshBrowserCtlMsgTab[data-on='true'] .dshBrowserCtlMsgTabN { color: inherit; opacity: 0.75; }
 .dshBrowserCtlMsgList {
   flex: 1 1 auto;
   min-height: 0;
@@ -1603,13 +1669,29 @@ div[data-slot='sidebar.footer.action'] > * {
 /* flex 列滚动容器必须禁子元素收缩,否则内容被压扁而不是滚动(kb/10) */
 .dshBrowserCtlMsgList > * { flex: 0 0 auto; }
 .dshBrowserCtlMsgItem {
-  padding: 10px 10px 9px;
+  appearance: none;
+  border: none;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 9px 10px 8px;
   border-radius: 10px;
   display: flex;
   flex-direction: column;
   gap: 4px;
+  cursor: pointer;
 }
 .dshBrowserCtlMsgItem:hover { background: var(--dsw-alias-bg-layer-2, rgba(255,255,255,0.05)); }
+/* 行1:分类徽标 + 短时间 */
+.dshBrowserCtlMsgRow1 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
 .dshBrowserCtlMsgKind {
   font-size: 11px;
   line-height: 16px;
@@ -1619,6 +1701,11 @@ div[data-slot='sidebar.footer.action'] > * {
   gap: 6px;
 }
 .dshBrowserCtlMsgKindTag {
+  flex: 0 0 auto;
+  max-width: 72%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   padding: 0 6px;
   border-radius: 6px;
   font-size: 10.5px;
@@ -1626,18 +1713,55 @@ div[data-slot='sidebar.footer.action'] > * {
   color: var(--dsw-alias-state-success-primary, #34b371);
   background: rgba(52, 179, 113, 0.13);
 }
-.dshBrowserCtlMsgKindTag[data-personal='true'] {
+.dshBrowserCtlMsgKindTag[data-personal='true'],
+.dshBrowserCtlMsgKindTag[data-cat='mine'] {
   color: var(--dsw-alias-accent-primary, #4c8bf5);
   background: rgba(76, 139, 245, 0.13);
 }
+/* 电脑推送徽标:中性灰(本机闸机历史,无官方/定向语义) */
+.dshBrowserCtlMsgKindTag[data-cat='feed'] {
+  color: var(--dsw-alias-label-secondary, #a6aab2);
+  background: rgba(139, 143, 152, 0.14);
+}
+/* 公告样式着色:与手机/官网个人中心同色系(kb/16.8 契约:info灰/update蓝/warning橙/event绿) */
+.dshBrowserCtlMsgKindTag[data-style='update'] {
+  color: var(--dsw-alias-accent-primary, #4c8bf5);
+  background: rgba(76, 139, 245, 0.13);
+}
+.dshBrowserCtlMsgKindTag[data-style='warning'] {
+  color: var(--dsw-alias-state-warning-primary, #e69138);
+  background: rgba(230, 145, 56, 0.15);
+}
+.dshBrowserCtlMsgKindTag[data-style='event'] {
+  color: var(--dsw-alias-state-success-primary, #34b371);
+  background: rgba(52, 179, 113, 0.16);
+}
+.dshBrowserCtlMsgTime {
+  margin-left: auto;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-tertiary, #8b8f98);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+/* 标题:未读加粗,最多两行截断(与手机列表行同款) */
 .dshBrowserCtlMsgTitle {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
   font-size: 13px;
   line-height: 19px;
   font-weight: 400;
   color: var(--dsw-alias-label-secondary, #a6aab2);
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
+}
+.dshBrowserCtlMsgTitleText {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
   word-break: break-word;
 }
 .dshBrowserCtlMsgItem[data-unread='true'] .dshBrowserCtlMsgTitle {
@@ -1652,28 +1776,17 @@ div[data-slot='sidebar.footer.action'] > * {
   background: #ff4d4f;
   transform: translateY(-1px);
 }
+/* 正文:列表里只留一行摘要 */
 .dshBrowserCtlMsgBody {
+  display: block;
   margin: 0;
   font-size: 12px;
   line-height: 18px;
   color: var(--dsw-alias-label-secondary, #a6aab2);
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-.dshBrowserCtlMsgLink {
-  font-size: 12px;
-  line-height: 18px;
-  color: var(--dsw-alias-accent-primary, #4c8bf5);
-  text-decoration: none;
-  cursor: pointer;
-  align-self: flex-start;
-}
-.dshBrowserCtlMsgLink:hover { text-decoration: underline; }
-.dshBrowserCtlMsgTime {
-  font-size: 11px;
-  line-height: 16px;
-  color: var(--dsw-alias-label-tertiary, #8b8f98);
-  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 .dshBrowserCtlMsgEmpty {
   padding: 26px 12px;
@@ -1695,6 +1808,67 @@ div[data-slot='sidebar.footer.action'] > * {
   font-size: 11px;
   line-height: 16px;
   color: var(--dsw-alias-label-tertiary, #8b8f98);
+}
+/* 详情 pane:列表行点开后的全文视图(返回按钮在弹窗头部) */
+.dshBrowserCtlMsgDetail {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+  padding: 2px 12px 12px;
+}
+.dshBrowserCtlMsgDetail > * { flex: 0 0 auto; max-width: 100%; }
+.dshBrowserCtlMsgDTitle {
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary, inherit);
+  word-break: break-word;
+}
+.dshBrowserCtlMsgDMeta {
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-tertiary, #8b8f98);
+  font-variant-numeric: tabular-nums;
+}
+.dshBrowserCtlMsgDBody {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 19px;
+  color: var(--dsw-alias-label-secondary, #a6aab2);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.dshBrowserCtlMsgDBtns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.dshBrowserCtlMsgDBtn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border: 1px solid var(--dsw-alias-border-l2, #2a2c33);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-1, rgba(255, 255, 255, 0.03));
+  color: var(--dsw-alias-accent-primary, #4c8bf5);
+  font-size: 12px;
+  line-height: 17px;
+  text-decoration: none;
+  cursor: pointer;
+  max-width: 100%;
+  word-break: break-all;
+}
+.dshBrowserCtlMsgDBtn:hover {
+  background: var(--dsw-alias-bg-layer-2, rgba(255, 255, 255, 0.06));
+  text-decoration: none;
 }
 /* ---------- 工单反馈弹窗(导出日志 → 选去向) ---------- */
 .dshBrowserCtlPanelTicket { width: min(600px, 94vw); overflow: hidden; }
@@ -4169,10 +4343,89 @@ function AccountLoginModal({ t, onClose, onSaved }) {
 // 已登录 → host /server/messages 带 Bearer 拉定向+全员,未读数用服务端(与官网/App 跨端同步);
 // 未登录 → 同一接口自动退回公开公告(全员公告免登录可见),未读用本地水位(localStorage)判断。
 // 打开列表即全部已读:登录态调 /server/messages/read(服务端已读),未登录只推进本地水位。
+/* ---- 通知中心数据整形:官方消息 + 电脑推送 合并(与手机 home.html msgMerge 同口径) ---- */
+// 公告样式(kb/16.8 契约:info灰/update蓝/warning橙/event绿;label 走 locale 键)。
+const MSG_STYLE_MAP = {
+  info: { label: '', style: '' },
+  update: { label: 'msgStyleUpdate', style: 'update' },
+  warning: { label: 'msgStyleWarning', style: 'warning' },
+  event: { label: 'msgStyleEvent', style: 'event' },
+}
+function msgStyleOf(s) { return MSG_STYLE_MAP[s] ? s : 'info' }
+
+// links[] 归一化:只放行 http(s),label 截 24 字,上限 5 条;老数据回退单 link(手机 msgLinksOf 同款)。
+function msgLinksOf(m) {
+  const out = []
+  if (m && Array.isArray(m.links)) {
+    for (const x of m.links) {
+      if (out.length >= 5) break
+      const url = String((x && x.url) || '')
+      if (!/^https?:\/\//.test(url)) continue
+      out.push({ label: String((x && x.label) || '').slice(0, 24), url })
+    }
+  }
+  if (!out.length && m && /^https?:\/\//.test(String(m.link || ''))) out.push({ label: '', url: String(m.link) })
+  return out
+}
+
+// 行右侧短时间:今天 HH:MM,今年 MM-DD,更早 YYYY-MM-DD(与手机 fmtMsgShort 同款)。
+function fmtMsgShort(ts) {
+  const n = Number(ts)
+  if (!n) return ''
+  const d = new Date(n)
+  const now = new Date()
+  const p = x => (x < 10 ? '0' : '') + x
+  if (d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate())
+    return p(d.getHours()) + ':' + p(d.getMinutes())
+  if (d.getFullYear() === now.getFullYear()) return p(d.getMonth() + 1) + '-' + p(d.getDate())
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate())
+}
+
+// 合并排序:官方消息按 kind 分流 official/mine,电脑推送(feed)来自闸机 push-poll 历史;
+// 全部按时间倒序,最新在最上(手机同款)。feed 链接只放行 http(s)——dshsession: 深链是
+// 「点通知直达会话」的语义,消息中心里不可点(与手机口径一致)。
+function buildMsgEntries(msgs, feedItems) {
+  const list = []
+  for (const m of (msgs || [])) {
+    const mine = m && m.kind === 'personal'
+    list.push({
+      id: (m && m.id) || '',
+      cat: mine ? 'mine' : 'official',
+      ts: Number(m && m.createdAt) || 0,
+      kindKey: mine ? 'msgPersonal' : 'msgOfficial',
+      style: msgStyleOf(m && m.style),
+      title: String((m && m.title) || ''),
+      body: String((m && m.body) || ''),
+      links: msgLinksOf(m),
+      unread: !(m && m.read) && !msgIsSeen(m),
+    })
+  }
+  for (const it of (feedItems || [])) {
+    const link = /^https?:\/\//.test(String((it && it.link) || '')) ? String(it.link) : ''
+    list.push({
+      id: (it && it.id) || '',
+      cat: 'feed',
+      ts: (Number(it && it.t) || 0) * 1000,
+      kindKey: 'msgTabFeed',
+      style: 'info',
+      title: String((it && it.title) || ''),
+      body: String((it && it.body) || ''),
+      links: link ? [{ label: '', url: link }] : [],
+      unread: false,
+    })
+  }
+  list.sort((a, b) => b.ts - a.ts)
+  return list
+}
+
 function MsgCenter({ t, loggedInHint, onClose }) {
   const [msgs, setMsgs] = useState(null) // null=加载中
+  const [feed, setFeed] = useState(null) // 电脑推送历史;null=加载中,[]=闸机没跑/无历史
   const [err, setErr] = useState('')
   const [loggedIn, setLoggedIn] = useState(false)
+  // 三分段:official=官方公告 | mine=发给我 | feed=电脑推送(与手机消息中心一致,每次打开重置)
+  const [tab, setTab] = useState('official')
+  const [detail, setDetail] = useState(null) // 点开的条目;null=列表
   useEffect(() => {
     let alive = true
     fetch(API_P + '/browserctl/api/server/messages', { cache: 'no-store' })
@@ -4182,13 +4435,14 @@ function MsgCenter({ t, loggedInHint, onClose }) {
         if (!j || j.ok === false) { setErr((j && j.error) || t('msgLoadFail')); setMsgs([]); return }
         setErr('')
         setLoggedIn(!!j.loggedIn)
-        // 最新在最上:服务器按入库序返回(旧→新),渲染前统一按 createdAt 倒序——
-        // 与 App 消息中心(msgMerge 按 ts 倒序)和推送页签「最近推送」同一口径(kb/16.7)。
-        setMsgs(Array.isArray(j.messages)
-          ? j.messages.slice().sort((a, b) => (Number(b && b.createdAt) || 0) - (Number(a && a.createdAt) || 0))
-          : [])
+        setMsgs(Array.isArray(j.messages) ? j.messages : [])
       })
       .catch(e => { if (alive) { setErr(String((e && e.message) || e)); setMsgs([]) } })
+    // 电脑推送:与「推送」页签同一闸机端点(last=0 回放最近 ~20 条);闸机没跑就空态,不报错
+    fetch(API_P + '/browserctl-gate/push-poll?last=0', { cache: 'no-store' })
+      .then(r => r.json().catch(() => ({})))
+      .then(j => { if (alive) setFeed(j && j.ok && Array.isArray(j.items) ? j.items : []) })
+      .catch(() => { if (alive) setFeed([]) })
     return () => { alive = false }
     // 仅挂载时拉一次(下拉每次打开重新挂载);依赖里放 t 会在父组件重渲染时反复请求
   }, [])
@@ -4200,48 +4454,105 @@ function MsgCenter({ t, loggedInHint, onClose }) {
     lsSet(MSG_SEEN_KEY, String(maxTs))
     if (loggedIn) fetch(API_P + '/browserctl/api/server/messages/read', { method: 'POST', cache: 'no-store' }).catch(() => {})
   }, [msgs, loggedIn])
+  const entries = buildMsgEntries(msgs || [], feed || [])
+  const counts = { official: 0, mine: 0, feed: 0 }
+  for (const e of entries) counts[e.cat]++
+  const visible = entries.filter(e => e.cat === tab)
+  const emptyText = tab === 'official' ? t('msgEmptyOfficial')
+    : tab === 'feed' ? (feed === null ? t('ticketLoading') : t('msgEmptyFeed'))
+      : t('msgEmptyMine')
+  const switchTab = next => { if (tab !== next) { setTab(next); setDetail(null) } }
   return (
     <>
       <button className="dshBrowserCtlMsgMask" type="button" aria-label={t('close')} onClick={onClose} />
       <div className="dshBrowserCtlMsgPop" role="dialog" aria-label={t('msgCenter')}>
         <div className="dshBrowserCtlMsgPopHead">
-          <span>{t('msgCenter')}</span>
+          {detail ? (
+            <button type="button" className="dshBrowserCtlMsgBack" aria-label={t('msgBack')} onClick={() => setDetail(null)}>
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                <path d="M9 2.5 4.5 7 9 11.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+          ) : null}
+          <span className="dshBrowserCtlMsgPopTitle">{t('msgCenter')}</span>
           <Button variant="ghost" size="sm" aria-label={t('close')} icon={<IconCloseOutlineRegular />} onClick={onClose} />
         </div>
-        <div className="dshBrowserCtlMsgList">
-          {msgs === null ? (
-            <div className="dshBrowserCtlMsgEmpty">{t('ticketLoading')}</div>
-          ) : !msgs.length ? (
-            <div className="dshBrowserCtlMsgEmpty">{t('msgEmpty')}</div>
-          ) : msgs.map(m => <MsgItem key={m.id} t={t} msg={m} seen={msgIsSeen(m)} />)}
-        </div>
-        {err ? <p className="dshBrowserCtlMsgErr">{t('msgLoadFail')}: {err}</p> : null}
-        {!loggedIn && !err ? <div className="dshBrowserCtlMsgFoot">{loggedInHint}</div> : null}
+        {detail ? (
+          <MsgDetail t={t} e={detail} />
+        ) : (
+          <>
+            <div className="dshBrowserCtlMsgTabs" role="tablist" aria-label={t('msgCenter')}>
+              <button type="button" role="tab" aria-selected={tab === 'official'} className="dshBrowserCtlMsgTab"
+                data-on={tab === 'official' ? 'true' : 'false'} onClick={() => switchTab('official')}>
+                {t('msgOfficial')}
+                {counts.official ? <span className="dshBrowserCtlMsgTabN">{counts.official}</span> : null}
+              </button>
+              <button type="button" role="tab" aria-selected={tab === 'mine'} className="dshBrowserCtlMsgTab"
+                data-on={tab === 'mine' ? 'true' : 'false'} onClick={() => switchTab('mine')}>
+                {t('msgPersonal')}
+                {counts.mine ? <span className="dshBrowserCtlMsgTabN">{counts.mine}</span> : null}
+              </button>
+              <button type="button" role="tab" aria-selected={tab === 'feed'} className="dshBrowserCtlMsgTab"
+                data-on={tab === 'feed' ? 'true' : 'false'} onClick={() => switchTab('feed')}>
+                {t('msgTabFeed')}
+                {counts.feed ? <span className="dshBrowserCtlMsgTabN">{counts.feed}</span> : null}
+              </button>
+            </div>
+            <div className="dshBrowserCtlMsgList">
+              {msgs === null || (tab === 'feed' && feed === null) ? (
+                <div className="dshBrowserCtlMsgEmpty">{t('ticketLoading')}</div>
+              ) : !visible.length ? (
+                <div className="dshBrowserCtlMsgEmpty">{emptyText}</div>
+              ) : visible.map(e => (
+                <MsgRow key={e.id || (e.cat + '-' + e.ts + '-' + (e.title || ''))} t={t} e={e} onOpen={() => setDetail(e)} />
+              ))}
+            </div>
+            {err ? <p className="dshBrowserCtlMsgErr">{t('msgLoadFail')}: {err}</p> : null}
+            {!loggedIn && !err ? <div className="dshBrowserCtlMsgFoot">{loggedInHint}</div> : null}
+          </>
+        )}
       </div>
     </>
   )
 }
 
-function MsgItem({ t, msg, seen }) {
-  const official = msg.kind !== 'personal'
+/* 列表行:徽标+短时间 / 标题(未读加粗,两行截断) / 正文一行摘要;点整行进详情(手机同款) */
+function MsgRow({ t, e, onOpen }) {
   return (
-    <div className="dshBrowserCtlMsgItem" data-unread={!seen && !msg.read ? 'true' : 'false'}>
-      <div className="dshBrowserCtlMsgKind">
-        <span className="dshBrowserCtlMsgKindTag" data-personal={official ? 'false' : 'true'}>
-          {official ? t('msgOfficial') : t('msgPersonal')}
-        </span>
-      </div>
-      <div className="dshBrowserCtlMsgTitle">
-        {!msg.read && !seen ? <span className="dshBrowserCtlMsgUnreadDot" aria-hidden="true" /> : null}
-        <span>{msg.title}</span>
-      </div>
-      {msg.body ? <p className="dshBrowserCtlMsgBody">{msg.body}</p> : null}
-      {msg.link ? (
-        <a className="dshBrowserCtlMsgLink" href={msg.link} target="_blank" rel="noopener noreferrer">
-          {t('msgOpenLink')}
-        </a>
+    <button type="button" className="dshBrowserCtlMsgItem" data-unread={e.unread ? 'true' : 'false'} onClick={onOpen}>
+      <span className="dshBrowserCtlMsgRow1">
+        <span className="dshBrowserCtlMsgKindTag" data-cat={e.cat} data-style={e.style}>{t(e.kindKey)}</span>
+        <span className="dshBrowserCtlMsgTime">{fmtMsgShort(e.ts)}</span>
+      </span>
+      <span className="dshBrowserCtlMsgTitle">
+        {e.unread ? <span className="dshBrowserCtlMsgUnreadDot" aria-hidden="true" /> : null}
+        <span className="dshBrowserCtlMsgTitleText">{e.title || t('msgNoTitle')}</span>
+      </span>
+      {e.body ? <span className="dshBrowserCtlMsgBody">{e.body}</span> : null}
+    </button>
+  )
+}
+
+/* 详情 pane:分类徽标(带样式名) + 全文 + 完整时间 + 链接按钮组
+   (多链接公告 kb/16.8 契约;老数据 links 空 → msgLinksOf 已回退单 link) */
+function MsgDetail({ t, e }) {
+  const st = MSG_STYLE_MAP[e.style] || MSG_STYLE_MAP.info
+  const head = t(e.kindKey) + (st.label ? ' · ' + t(st.label) : '')
+  return (
+    <div className="dshBrowserCtlMsgDetail">
+      <span className="dshBrowserCtlMsgKindTag" data-cat={e.cat} data-style={e.style}>{head}</span>
+      <div className="dshBrowserCtlMsgDTitle">{e.title || t('msgNoTitle')}</div>
+      <div className="dshBrowserCtlMsgDMeta">{fmtMsgTime(e.ts)}</div>
+      {e.body ? <p className="dshBrowserCtlMsgDBody">{e.body}</p> : null}
+      {e.links.length ? (
+        <div className="dshBrowserCtlMsgDBtns">
+          {e.links.map((l, i) => (
+            <a key={i} className="dshBrowserCtlMsgDBtn" href={l.url} target="_blank" rel="noopener noreferrer">
+              {l.label || t('msgOpenLink')}
+            </a>
+          ))}
+        </div>
       ) : null}
-      <div className="dshBrowserCtlMsgTime">{fmtMsgTime(msg.createdAt)}</div>
     </div>
   )
 }
@@ -5318,6 +5629,15 @@ export function apply(ctx) {
       msgPersonal: '发给我的',
       msgOpenLink: '查看链接',
       msgGuestHint: '当前显示全员公告;登录官方账号后可接收发给你的定向消息。',
+      msgTabFeed: '电脑推送',
+      msgBack: '返回列表',
+      msgEmptyOfficial: '暂无公告',
+      msgEmptyMine: '暂无消息',
+      msgEmptyFeed: '暂无电脑推送;电脑端开启推送后,历史通知会汇总在这里。',
+      msgNoTitle: '(无标题)',
+      msgStyleUpdate: '版本更新',
+      msgStyleWarning: '安全提醒',
+      msgStyleEvent: '活动',
       // ---- 工单反馈(导出日志 → 网页端提交) ----
       tickets: '工单反馈',
       ticketExportSubtitle: '导出本机诊断日志（自动打码），然后选择日志去向。',
@@ -5612,6 +5932,15 @@ export function apply(ctx) {
       msgPersonal: 'For you',
       msgOpenLink: 'Open link',
       msgGuestHint: 'Showing public announcements; sign in to the official account to receive direct messages.',
+      msgTabFeed: 'From this PC',
+      msgBack: 'Back to list',
+      msgEmptyOfficial: 'No announcements',
+      msgEmptyMine: 'No messages',
+      msgEmptyFeed: 'No pushes yet. Once push is enabled on this PC, its notifications will be collected here.',
+      msgNoTitle: '(no title)',
+      msgStyleUpdate: 'Update',
+      msgStyleWarning: 'Security notice',
+      msgStyleEvent: 'Event',
       // ---- ticket feedback (export logs -> choose destination) ----
       tickets: 'Ticket Feedback',
       ticketExportSubtitle: 'Export the local diagnostic log (auto-redacted), then choose where it goes.',

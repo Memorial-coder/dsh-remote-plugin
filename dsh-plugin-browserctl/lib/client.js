@@ -32,7 +32,7 @@ var import_dsh_client_store = require("@deepseek-ai/dsh-client-store");
 var import_jsx_runtime = require("react/jsx-runtime");
 var NS = "browserctl";
 var STYLE_ID = "browserctl/styles";
-var VERSION = true ? "1.0.83" : "dev";
+var VERSION = true ? "1.0.84" : "dev";
 var ABOUT_LINKS = {
   website: "https://remote.ymzcc.com/dsh-remote/",
   github: "https://github.com/Memorial-coder/dsh-remote-plugin",
@@ -1579,6 +1579,10 @@ div[data-slot='sidebar.footer.action'] > * {
   border: 1.5px solid var(--dsw-panel-bg, #fff);
   pointer-events: none;
 }
+/* ---------- \u9876\u680F\u300C\u901A\u77E5\u4E2D\u5FC3\u300D\u4E0B\u62C9(\u94C3\u94DB) ----------
+   2026-11-23 \u4E09\u5206\u6BB5\u6539\u7248:\u4E0E\u624B\u673A\u6D88\u606F\u4E2D\u5FC3(home.html msg-tabs)\u540C\u6784\u2014\u2014
+   \u5B98\u65B9\u516C\u544A / \u53D1\u7ED9\u6211 / \u7535\u8111\u63A8\u9001 \u5404\u81EA\u5206\u6BB5,\u884C=\u5FBD\u6807+\u77ED\u65F6\u95F4+\u6807\u9898(\u4E24\u884C)+\u6B63\u6587\u4E00\u884C\u6458\u8981,
+   \u70B9\u6574\u884C\u8FDB\u8BE6\u60C5 pane(\u8FD4\u56DE\u952E\u56DE\u5217\u8868)\u3002 */
 .dshBrowserCtlMsgMask {
   position: fixed;
   inset: 0;
@@ -1594,7 +1598,7 @@ div[data-slot='sidebar.footer.action'] > * {
   right: 0;
   z-index: 41;
   width: min(340px, 88vw);
-  max-height: min(420px, 70vh);
+  max-height: min(440px, 70vh);
   display: flex;
   flex-direction: column;
   background: var(--dsw-alias-bg-layer-1, #1b1c20);
@@ -1607,12 +1611,74 @@ div[data-slot='sidebar.footer.action'] > * {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 4px;
   padding: 10px 12px 8px;
   font-size: 13px;
   font-weight: 600;
   color: var(--dsw-alias-label-primary, inherit);
 }
+.dshBrowserCtlMsgPopTitle { flex: 1 1 auto; min-width: 0; }
+/* \u8FD4\u56DE\u5217\u8868\u6309\u94AE(\u8BE6\u60C5 pane \u5DE6\u4E0A\u89D2) */
+.dshBrowserCtlMsgBack {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary, #a6aab2);
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  margin-left: -4px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.dshBrowserCtlMsgBack:hover {
+  color: var(--dsw-alias-label-primary, inherit);
+  background: var(--dsw-alias-bg-layer-2, rgba(255, 255, 255, 0.06));
+}
+/* \u4E09\u5206\u6BB5 tab:\u5B98\u65B9\u516C\u544A / \u53D1\u7ED9\u6211 / \u7535\u8111\u63A8\u9001(\u4E0E\u624B\u673A .msg-tabs \u540C\u6B3E) */
+.dshBrowserCtlMsgTabs {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 4px;
+  margin: 2px 8px 6px;
+  padding: 3px;
+  background: var(--dsw-alias-bg-layer-2, rgba(255, 255, 255, 0.06));
+  border-radius: 10px;
+}
+.dshBrowserCtlMsgTab {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary, #a6aab2);
+  font: inherit;
+  font-size: 11.5px;
+  line-height: 16px;
+  padding: 4px 6px;
+  border-radius: 8px;
+  cursor: pointer;
+  flex: 1 1 0;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+.dshBrowserCtlMsgTab:hover { color: var(--dsw-alias-label-primary, inherit); }
+.dshBrowserCtlMsgTab[data-on='true'] {
+  background: var(--dsw-alias-fill-control-active, rgba(255, 255, 255, 0.12));
+  color: var(--dsw-alias-label-primary, #fff);
+  font-weight: 600;
+}
+.dshBrowserCtlMsgTabN {
+  font-size: 10px;
+  color: var(--dsw-alias-accent-primary, #4c8bf5);
+  font-variant-numeric: tabular-nums;
+}
+.dshBrowserCtlMsgTab[data-on='true'] .dshBrowserCtlMsgTabN { color: inherit; opacity: 0.75; }
 .dshBrowserCtlMsgList {
   flex: 1 1 auto;
   min-height: 0;
@@ -1626,13 +1692,29 @@ div[data-slot='sidebar.footer.action'] > * {
 /* flex \u5217\u6EDA\u52A8\u5BB9\u5668\u5FC5\u987B\u7981\u5B50\u5143\u7D20\u6536\u7F29,\u5426\u5219\u5185\u5BB9\u88AB\u538B\u6241\u800C\u4E0D\u662F\u6EDA\u52A8(kb/10) */
 .dshBrowserCtlMsgList > * { flex: 0 0 auto; }
 .dshBrowserCtlMsgItem {
-  padding: 10px 10px 9px;
+  appearance: none;
+  border: none;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 9px 10px 8px;
   border-radius: 10px;
   display: flex;
   flex-direction: column;
   gap: 4px;
+  cursor: pointer;
 }
 .dshBrowserCtlMsgItem:hover { background: var(--dsw-alias-bg-layer-2, rgba(255,255,255,0.05)); }
+/* \u884C1:\u5206\u7C7B\u5FBD\u6807 + \u77ED\u65F6\u95F4 */
+.dshBrowserCtlMsgRow1 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
 .dshBrowserCtlMsgKind {
   font-size: 11px;
   line-height: 16px;
@@ -1642,6 +1724,11 @@ div[data-slot='sidebar.footer.action'] > * {
   gap: 6px;
 }
 .dshBrowserCtlMsgKindTag {
+  flex: 0 0 auto;
+  max-width: 72%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   padding: 0 6px;
   border-radius: 6px;
   font-size: 10.5px;
@@ -1649,18 +1736,55 @@ div[data-slot='sidebar.footer.action'] > * {
   color: var(--dsw-alias-state-success-primary, #34b371);
   background: rgba(52, 179, 113, 0.13);
 }
-.dshBrowserCtlMsgKindTag[data-personal='true'] {
+.dshBrowserCtlMsgKindTag[data-personal='true'],
+.dshBrowserCtlMsgKindTag[data-cat='mine'] {
   color: var(--dsw-alias-accent-primary, #4c8bf5);
   background: rgba(76, 139, 245, 0.13);
 }
+/* \u7535\u8111\u63A8\u9001\u5FBD\u6807:\u4E2D\u6027\u7070(\u672C\u673A\u95F8\u673A\u5386\u53F2,\u65E0\u5B98\u65B9/\u5B9A\u5411\u8BED\u4E49) */
+.dshBrowserCtlMsgKindTag[data-cat='feed'] {
+  color: var(--dsw-alias-label-secondary, #a6aab2);
+  background: rgba(139, 143, 152, 0.14);
+}
+/* \u516C\u544A\u6837\u5F0F\u7740\u8272:\u4E0E\u624B\u673A/\u5B98\u7F51\u4E2A\u4EBA\u4E2D\u5FC3\u540C\u8272\u7CFB(kb/16.8 \u5951\u7EA6:info\u7070/update\u84DD/warning\u6A59/event\u7EFF) */
+.dshBrowserCtlMsgKindTag[data-style='update'] {
+  color: var(--dsw-alias-accent-primary, #4c8bf5);
+  background: rgba(76, 139, 245, 0.13);
+}
+.dshBrowserCtlMsgKindTag[data-style='warning'] {
+  color: var(--dsw-alias-state-warning-primary, #e69138);
+  background: rgba(230, 145, 56, 0.15);
+}
+.dshBrowserCtlMsgKindTag[data-style='event'] {
+  color: var(--dsw-alias-state-success-primary, #34b371);
+  background: rgba(52, 179, 113, 0.16);
+}
+.dshBrowserCtlMsgTime {
+  margin-left: auto;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-tertiary, #8b8f98);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+/* \u6807\u9898:\u672A\u8BFB\u52A0\u7C97,\u6700\u591A\u4E24\u884C\u622A\u65AD(\u4E0E\u624B\u673A\u5217\u8868\u884C\u540C\u6B3E) */
 .dshBrowserCtlMsgTitle {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
   font-size: 13px;
   line-height: 19px;
   font-weight: 400;
   color: var(--dsw-alias-label-secondary, #a6aab2);
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
+}
+.dshBrowserCtlMsgTitleText {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
   word-break: break-word;
 }
 .dshBrowserCtlMsgItem[data-unread='true'] .dshBrowserCtlMsgTitle {
@@ -1675,28 +1799,17 @@ div[data-slot='sidebar.footer.action'] > * {
   background: #ff4d4f;
   transform: translateY(-1px);
 }
+/* \u6B63\u6587:\u5217\u8868\u91CC\u53EA\u7559\u4E00\u884C\u6458\u8981 */
 .dshBrowserCtlMsgBody {
+  display: block;
   margin: 0;
   font-size: 12px;
   line-height: 18px;
   color: var(--dsw-alias-label-secondary, #a6aab2);
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-.dshBrowserCtlMsgLink {
-  font-size: 12px;
-  line-height: 18px;
-  color: var(--dsw-alias-accent-primary, #4c8bf5);
-  text-decoration: none;
-  cursor: pointer;
-  align-self: flex-start;
-}
-.dshBrowserCtlMsgLink:hover { text-decoration: underline; }
-.dshBrowserCtlMsgTime {
-  font-size: 11px;
-  line-height: 16px;
-  color: var(--dsw-alias-label-tertiary, #8b8f98);
-  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 .dshBrowserCtlMsgEmpty {
   padding: 26px 12px;
@@ -1718,6 +1831,67 @@ div[data-slot='sidebar.footer.action'] > * {
   font-size: 11px;
   line-height: 16px;
   color: var(--dsw-alias-label-tertiary, #8b8f98);
+}
+/* \u8BE6\u60C5 pane:\u5217\u8868\u884C\u70B9\u5F00\u540E\u7684\u5168\u6587\u89C6\u56FE(\u8FD4\u56DE\u6309\u94AE\u5728\u5F39\u7A97\u5934\u90E8) */
+.dshBrowserCtlMsgDetail {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+  padding: 2px 12px 12px;
+}
+.dshBrowserCtlMsgDetail > * { flex: 0 0 auto; max-width: 100%; }
+.dshBrowserCtlMsgDTitle {
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary, inherit);
+  word-break: break-word;
+}
+.dshBrowserCtlMsgDMeta {
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-tertiary, #8b8f98);
+  font-variant-numeric: tabular-nums;
+}
+.dshBrowserCtlMsgDBody {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 19px;
+  color: var(--dsw-alias-label-secondary, #a6aab2);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.dshBrowserCtlMsgDBtns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.dshBrowserCtlMsgDBtn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border: 1px solid var(--dsw-alias-border-l2, #2a2c33);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-1, rgba(255, 255, 255, 0.03));
+  color: var(--dsw-alias-accent-primary, #4c8bf5);
+  font-size: 12px;
+  line-height: 17px;
+  text-decoration: none;
+  cursor: pointer;
+  max-width: 100%;
+  word-break: break-all;
+}
+.dshBrowserCtlMsgDBtn:hover {
+  background: var(--dsw-alias-bg-layer-2, rgba(255, 255, 255, 0.06));
+  text-decoration: none;
 }
 /* ---------- \u5DE5\u5355\u53CD\u9988\u5F39\u7A97(\u5BFC\u51FA\u65E5\u5FD7 \u2192 \u9009\u53BB\u5411) ---------- */
 .dshBrowserCtlPanelTicket { width: min(600px, 94vw); overflow: hidden; }
@@ -3994,10 +4168,79 @@ function AccountLoginModal({ t, onClose, onSaved }) {
     ] })
   ] });
 }
+var MSG_STYLE_MAP = {
+  info: { label: "", style: "" },
+  update: { label: "msgStyleUpdate", style: "update" },
+  warning: { label: "msgStyleWarning", style: "warning" },
+  event: { label: "msgStyleEvent", style: "event" }
+};
+function msgStyleOf(s) {
+  return MSG_STYLE_MAP[s] ? s : "info";
+}
+function msgLinksOf(m) {
+  const out = [];
+  if (m && Array.isArray(m.links)) {
+    for (const x of m.links) {
+      if (out.length >= 5) break;
+      const url = String(x && x.url || "");
+      if (!/^https?:\/\//.test(url)) continue;
+      out.push({ label: String(x && x.label || "").slice(0, 24), url });
+    }
+  }
+  if (!out.length && m && /^https?:\/\//.test(String(m.link || ""))) out.push({ label: "", url: String(m.link) });
+  return out;
+}
+function fmtMsgShort(ts) {
+  const n = Number(ts);
+  if (!n) return "";
+  const d = new Date(n);
+  const now = /* @__PURE__ */ new Date();
+  const p = (x) => (x < 10 ? "0" : "") + x;
+  if (d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate())
+    return p(d.getHours()) + ":" + p(d.getMinutes());
+  if (d.getFullYear() === now.getFullYear()) return p(d.getMonth() + 1) + "-" + p(d.getDate());
+  return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate());
+}
+function buildMsgEntries(msgs, feedItems) {
+  const list = [];
+  for (const m of msgs || []) {
+    const mine = m && m.kind === "personal";
+    list.push({
+      id: m && m.id || "",
+      cat: mine ? "mine" : "official",
+      ts: Number(m && m.createdAt) || 0,
+      kindKey: mine ? "msgPersonal" : "msgOfficial",
+      style: msgStyleOf(m && m.style),
+      title: String(m && m.title || ""),
+      body: String(m && m.body || ""),
+      links: msgLinksOf(m),
+      unread: !(m && m.read) && !msgIsSeen(m)
+    });
+  }
+  for (const it of feedItems || []) {
+    const link = /^https?:\/\//.test(String(it && it.link || "")) ? String(it.link) : "";
+    list.push({
+      id: it && it.id || "",
+      cat: "feed",
+      ts: (Number(it && it.t) || 0) * 1e3,
+      kindKey: "msgTabFeed",
+      style: "info",
+      title: String(it && it.title || ""),
+      body: String(it && it.body || ""),
+      links: link ? [{ label: "", url: link }] : [],
+      unread: false
+    });
+  }
+  list.sort((a, b) => b.ts - a.ts);
+  return list;
+}
 function MsgCenter({ t, loggedInHint, onClose }) {
   const [msgs, setMsgs] = (0, import_react.useState)(null);
+  const [feed, setFeed] = (0, import_react.useState)(null);
   const [err, setErr] = (0, import_react.useState)("");
   const [loggedIn, setLoggedIn] = (0, import_react.useState)(false);
+  const [tab, setTab] = (0, import_react.useState)("official");
+  const [detail, setDetail] = (0, import_react.useState)(null);
   (0, import_react.useEffect)(() => {
     let alive = true;
     fetch(API_P + "/browserctl/api/server/messages", { cache: "no-store" }).then((r) => r.json().catch(() => ({ ok: false, error: "HTTP " + r.status }))).then((j) => {
@@ -4009,12 +4252,17 @@ function MsgCenter({ t, loggedInHint, onClose }) {
       }
       setErr("");
       setLoggedIn(!!j.loggedIn);
-      setMsgs(Array.isArray(j.messages) ? j.messages.slice().sort((a, b) => (Number(b && b.createdAt) || 0) - (Number(a && a.createdAt) || 0)) : []);
+      setMsgs(Array.isArray(j.messages) ? j.messages : []);
     }).catch((e) => {
       if (alive) {
         setErr(String(e && e.message || e));
         setMsgs([]);
       }
+    });
+    fetch(API_P + "/browserctl-gate/push-poll?last=0", { cache: "no-store" }).then((r) => r.json().catch(() => ({}))).then((j) => {
+      if (alive) setFeed(j && j.ok && Array.isArray(j.items) ? j.items : []);
+    }).catch(() => {
+      if (alive) setFeed([]);
     });
     return () => {
       alive = false;
@@ -4027,34 +4275,106 @@ function MsgCenter({ t, loggedInHint, onClose }) {
     if (loggedIn) fetch(API_P + "/browserctl/api/server/messages/read", { method: "POST", cache: "no-store" }).catch(() => {
     });
   }, [msgs, loggedIn]);
+  const entries = buildMsgEntries(msgs || [], feed || []);
+  const counts = { official: 0, mine: 0, feed: 0 };
+  for (const e of entries) counts[e.cat]++;
+  const visible = entries.filter((e) => e.cat === tab);
+  const emptyText = tab === "official" ? t("msgEmptyOfficial") : tab === "feed" ? feed === null ? t("ticketLoading") : t("msgEmptyFeed") : t("msgEmptyMine");
+  const switchTab = (next) => {
+    if (tab !== next) {
+      setTab(next);
+      setDetail(null);
+    }
+  };
   return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
     /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { className: "dshBrowserCtlMsgMask", type: "button", "aria-label": t("close"), onClick: onClose }),
     /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlMsgPop", role: "dialog", "aria-label": t("msgCenter"), children: [
       /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlMsgPopHead", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: t("msgCenter") }),
+        detail ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", className: "dshBrowserCtlMsgBack", "aria-label": t("msgBack"), onClick: () => setDetail(null), children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("svg", { width: "14", height: "14", viewBox: "0 0 14 14", fill: "none", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("path", { d: "M9 2.5 4.5 7 9 11.5", stroke: "currentColor", strokeWidth: "1.4", strokeLinecap: "round", strokeLinejoin: "round" }) }) }) : null,
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlMsgPopTitle", children: t("msgCenter") }),
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "ghost", size: "sm", "aria-label": t("close"), icon: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.IconCloseOutlineRegular, {}), onClick: onClose })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlMsgList", children: msgs === null ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlMsgEmpty", children: t("ticketLoading") }) : !msgs.length ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlMsgEmpty", children: t("msgEmpty") }) : msgs.map((m) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)(MsgItem, { t, msg: m, seen: msgIsSeen(m) }, m.id)) }),
-      err ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", { className: "dshBrowserCtlMsgErr", children: [
-        t("msgLoadFail"),
-        ": ",
-        err
-      ] }) : null,
-      !loggedIn && !err ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlMsgFoot", children: loggedInHint }) : null
+      detail ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(MsgDetail, { t, e: detail }) : /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlMsgTabs", role: "tablist", "aria-label": t("msgCenter"), children: [
+          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(
+            "button",
+            {
+              type: "button",
+              role: "tab",
+              "aria-selected": tab === "official",
+              className: "dshBrowserCtlMsgTab",
+              "data-on": tab === "official" ? "true" : "false",
+              onClick: () => switchTab("official"),
+              children: [
+                t("msgOfficial"),
+                counts.official ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlMsgTabN", children: counts.official }) : null
+              ]
+            }
+          ),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(
+            "button",
+            {
+              type: "button",
+              role: "tab",
+              "aria-selected": tab === "mine",
+              className: "dshBrowserCtlMsgTab",
+              "data-on": tab === "mine" ? "true" : "false",
+              onClick: () => switchTab("mine"),
+              children: [
+                t("msgPersonal"),
+                counts.mine ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlMsgTabN", children: counts.mine }) : null
+              ]
+            }
+          ),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(
+            "button",
+            {
+              type: "button",
+              role: "tab",
+              "aria-selected": tab === "feed",
+              className: "dshBrowserCtlMsgTab",
+              "data-on": tab === "feed" ? "true" : "false",
+              onClick: () => switchTab("feed"),
+              children: [
+                t("msgTabFeed"),
+                counts.feed ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlMsgTabN", children: counts.feed }) : null
+              ]
+            }
+          )
+        ] }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlMsgList", children: msgs === null || tab === "feed" && feed === null ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlMsgEmpty", children: t("ticketLoading") }) : !visible.length ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlMsgEmpty", children: emptyText }) : visible.map((e) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)(MsgRow, { t, e, onOpen: () => setDetail(e) }, e.id || e.cat + "-" + e.ts + "-" + (e.title || ""))) }),
+        err ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", { className: "dshBrowserCtlMsgErr", children: [
+          t("msgLoadFail"),
+          ": ",
+          err
+        ] }) : null,
+        !loggedIn && !err ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlMsgFoot", children: loggedInHint }) : null
+      ] })
     ] })
   ] });
 }
-function MsgItem({ t, msg, seen }) {
-  const official = msg.kind !== "personal";
-  return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlMsgItem", "data-unread": !seen && !msg.read ? "true" : "false", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlMsgKind", children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlMsgKindTag", "data-personal": official ? "false" : "true", children: official ? t("msgOfficial") : t("msgPersonal") }) }),
-    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlMsgTitle", children: [
-      !msg.read && !seen ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlMsgUnreadDot", "aria-hidden": "true" }) : null,
-      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: msg.title })
+function MsgRow({ t, e, onOpen }) {
+  return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", { type: "button", className: "dshBrowserCtlMsgItem", "data-unread": e.unread ? "true" : "false", onClick: onOpen, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { className: "dshBrowserCtlMsgRow1", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlMsgKindTag", "data-cat": e.cat, "data-style": e.style, children: t(e.kindKey) }),
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlMsgTime", children: fmtMsgShort(e.ts) })
     ] }),
-    msg.body ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dshBrowserCtlMsgBody", children: msg.body }) : null,
-    msg.link ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("a", { className: "dshBrowserCtlMsgLink", href: msg.link, target: "_blank", rel: "noopener noreferrer", children: t("msgOpenLink") }) : null,
-    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlMsgTime", children: fmtMsgTime(msg.createdAt) })
+    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { className: "dshBrowserCtlMsgTitle", children: [
+      e.unread ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlMsgUnreadDot", "aria-hidden": "true" }) : null,
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlMsgTitleText", children: e.title || t("msgNoTitle") })
+    ] }),
+    e.body ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlMsgBody", children: e.body }) : null
+  ] });
+}
+function MsgDetail({ t, e }) {
+  const st = MSG_STYLE_MAP[e.style] || MSG_STYLE_MAP.info;
+  const head = t(e.kindKey) + (st.label ? " \xB7 " + t(st.label) : "");
+  return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlMsgDetail", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlMsgKindTag", "data-cat": e.cat, "data-style": e.style, children: head }),
+    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlMsgDTitle", children: e.title || t("msgNoTitle") }),
+    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlMsgDMeta", children: fmtMsgTime(e.ts) }),
+    e.body ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dshBrowserCtlMsgDBody", children: e.body }) : null,
+    e.links.length ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlMsgDBtns", children: e.links.map((l, i) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)("a", { className: "dshBrowserCtlMsgDBtn", href: l.url, target: "_blank", rel: "noopener noreferrer", children: l.label || t("msgOpenLink") }, i)) }) : null
   ] });
 }
 var TICKET_PAGE_URL = "https://remote.ymzcc.com/dsh-remote/app.html#tickets";
@@ -5096,6 +5416,15 @@ function apply(ctx) {
       msgPersonal: "\u53D1\u7ED9\u6211\u7684",
       msgOpenLink: "\u67E5\u770B\u94FE\u63A5",
       msgGuestHint: "\u5F53\u524D\u663E\u793A\u5168\u5458\u516C\u544A;\u767B\u5F55\u5B98\u65B9\u8D26\u53F7\u540E\u53EF\u63A5\u6536\u53D1\u7ED9\u4F60\u7684\u5B9A\u5411\u6D88\u606F\u3002",
+      msgTabFeed: "\u7535\u8111\u63A8\u9001",
+      msgBack: "\u8FD4\u56DE\u5217\u8868",
+      msgEmptyOfficial: "\u6682\u65E0\u516C\u544A",
+      msgEmptyMine: "\u6682\u65E0\u6D88\u606F",
+      msgEmptyFeed: "\u6682\u65E0\u7535\u8111\u63A8\u9001;\u7535\u8111\u7AEF\u5F00\u542F\u63A8\u9001\u540E,\u5386\u53F2\u901A\u77E5\u4F1A\u6C47\u603B\u5728\u8FD9\u91CC\u3002",
+      msgNoTitle: "(\u65E0\u6807\u9898)",
+      msgStyleUpdate: "\u7248\u672C\u66F4\u65B0",
+      msgStyleWarning: "\u5B89\u5168\u63D0\u9192",
+      msgStyleEvent: "\u6D3B\u52A8",
       // ---- 工单反馈(导出日志 → 网页端提交) ----
       tickets: "\u5DE5\u5355\u53CD\u9988",
       ticketExportSubtitle: "\u5BFC\u51FA\u672C\u673A\u8BCA\u65AD\u65E5\u5FD7\uFF08\u81EA\u52A8\u6253\u7801\uFF09\uFF0C\u7136\u540E\u9009\u62E9\u65E5\u5FD7\u53BB\u5411\u3002",
@@ -5390,6 +5719,15 @@ function apply(ctx) {
       msgPersonal: "For you",
       msgOpenLink: "Open link",
       msgGuestHint: "Showing public announcements; sign in to the official account to receive direct messages.",
+      msgTabFeed: "From this PC",
+      msgBack: "Back to list",
+      msgEmptyOfficial: "No announcements",
+      msgEmptyMine: "No messages",
+      msgEmptyFeed: "No pushes yet. Once push is enabled on this PC, its notifications will be collected here.",
+      msgNoTitle: "(no title)",
+      msgStyleUpdate: "Update",
+      msgStyleWarning: "Security notice",
+      msgStyleEvent: "Event",
       // ---- ticket feedback (export logs -> choose destination) ----
       tickets: "Ticket Feedback",
       ticketExportSubtitle: "Export the local diagnostic log (auto-redacted), then choose where it goes.",
