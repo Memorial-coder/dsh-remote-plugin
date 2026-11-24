@@ -3058,7 +3058,7 @@ function SigEnforceCard({ t, reloadToken }) {
   }
   async function loadHealth() {
     try {
-      const r = await fetch(API_P + "/browserctl-gate/sig-health", { cache: "no-store" });
+      const r = await fetch(API_P + "/browserctl/api/sig-health", { cache: "no-store" });
       const j = await r.json().catch(() => ({}));
       setHealth(j && j.ok ? j : { ok: false });
     } catch (e) {
@@ -3110,7 +3110,7 @@ function SigEnforceCard({ t, reloadToken }) {
       const r = await fetch(API_P + "/browserctl-gate/revoke-all", { method: "POST", cache: "no-store" });
       const j = await r.json().catch(() => ({}));
       if (j && j.ok) {
-        setAllMsg("\u5DF2\u6E05\u9664:" + (j.sessions || 0) + " \u53F0\u5728\u7EBF\u4F1A\u8BDD\u3001" + (j.devices || 0) + " \u53F0\u8BBE\u5907\u5BC6\u94A5\u3001" + (j.grants || 0) + " \u4E2A\u672A\u7528\u914D\u5BF9\u7801");
+        setAllMsg("\u5DF2\u6E05\u9664:" + (j.sessions || 0) + " \u53F0\u5728\u7EBF\u4F1A\u8BDD\u3001" + (j.devices || 0) + " \u53F0\u8BBE\u5907\u5BC6\u94A5\u3001" + (j.grants || 0) + " \u4E2A\u672A\u7528\u914D\u5BF9\u7801" + (j.records ? "\u3001" + j.records + " \u6761\u8BBE\u5907\u8BB0\u5F55" : ""));
         await refetch();
         await loadHealth();
       } else setAllMsg(j && j.error || t("sigFail2"));
@@ -3165,16 +3165,19 @@ function SigEnforceCard({ t, reloadToken }) {
     setActing("dedupe");
     setMsg("");
     setDedupeConfirm(false);
+    let delN = 0;
     try {
       for (const dev of dups) {
         let r = await fetch(API_P + "/browserctl-gate/kick", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ dev })
+          body: JSON.stringify({ dev, purge: 1 })
         }).catch(() => null);
         if (!r || !r.ok) r = await fetch(API_P + "/browserctl/api/totp-kick?dev=" + encodeURIComponent(dev), { cache: "no-store" }).catch(() => null);
+        const j = r && r.ok ? await r.json().catch(() => ({})) : null;
+        if (j && j.ok && j.purged) delN += 1;
       }
-      setMsg(t("sigDedupeDone"));
+      setMsg(delN === dups.length ? t("sigDedupeDone").replace("{n}", String(delN)) : t("sigDedupePart").replace("{ok}", String(delN)).replace("{n}", String(dups.length)));
       await refetch();
     } catch (e) {
       setMsg(t("sigFail2"));
@@ -3273,7 +3276,7 @@ function SigEnforceCard({ t, reloadToken }) {
         ] })
       ] }),
       allConfirm ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlActions", role: "alertdialog", "aria-label": "\u6E05\u9664\u6240\u6709\u6388\u6743", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { style: { margin: 0, fontSize: 12, lineHeight: "17px", color: "var(--dsw-alias-state-error-primary,#e5655c)" }, children: "\u5C06\u64A4\u9500\u3010\u6240\u6709\u8BBE\u5907\u3011\u7684\u767B\u5F55\u4F1A\u8BDD\u4E0E\u7B7E\u540D\u5BC6\u94A5,\u5E76\u4F5C\u5E9F\u672A\u4F7F\u7528\u7684\u914D\u5BF9\u7801\u3002\u4E4B\u540E\u6BCF\u53F0\u624B\u673A/\u6D4F\u89C8\u5668\u90FD\u5FC5\u987B\u91CD\u65B0\u626B\u7801,\u786E\u5B9A\u7EE7\u7EED?" }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { style: { margin: 0, fontSize: 12, lineHeight: "17px", color: "var(--dsw-alias-state-error-primary,#e5655c)" }, children: "\u5C06\u64A4\u9500\u3010\u6240\u6709\u8BBE\u5907\u3011\u7684\u767B\u5F55\u4F1A\u8BDD\u4E0E\u7B7E\u540D\u5BC6\u94A5,\u4F5C\u5E9F\u672A\u4F7F\u7528\u7684\u914D\u5BF9\u7801,\u5E76\u6E05\u7A7A\u5168\u90E8\u8BBE\u5907\u8BB0\u5F55\u3002\u4E4B\u540E\u6BCF\u53F0\u624B\u673A/\u6D4F\u89C8\u5668\u90FD\u5FC5\u987B\u91CD\u65B0\u626B\u7801,\u786E\u5B9A\u7EE7\u7EED?" }),
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "primary", size: "sm", disabled: !!acting, onClick: revokeAll, children: acting === "all" ? "\u6B63\u5728\u6E05\u9664\u2026" : "\u786E\u8BA4\u6E05\u9664" }),
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "secondary", size: "sm", disabled: !!acting, onClick: () => setAllConfirm(false), children: t("sigCancel") })
       ] }) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: { display: "flex", justifyContent: "flex-end" }, children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "ghost", size: "sm", disabled: !!acting, onClick: () => {
@@ -5645,9 +5648,10 @@ function apply(ctx) {
       sigHasKeyB: "\u5BC6\u94A5",
       sigNoKey: "\u65E0\u5BC6\u94A5",
       sigDedupe: "\u4E00\u952E\u53BB\u91CD({n})",
-      sigDedupeHint: "\u540C\u673A\u91CD\u590D\u6863\u6848 {n} \u53F0:\u505C\u6B62\u6388\u6743\u5E76\u53EA\u4FDD\u7559\u6700\u65B0\u4E00\u53F0",
+      sigDedupeHint: "\u540C\u673A\u91CD\u590D\u6863\u6848 {n} \u53F0:\u5220\u9664\u591A\u4F59\u6863\u6848(\u5E76\u505C\u6B62\u5176\u6388\u6743),\u53EA\u4FDD\u7559\u6700\u65B0\u4E00\u53F0",
       sigDedupeYes: "\u786E\u8BA4\u53BB\u91CD",
-      sigDedupeDone: "\u53BB\u91CD\u5B8C\u6210",
+      sigDedupeDone: "\u5DF2\u5220\u9664 {n} \u53F0\u91CD\u590D\u6863\u6848",
+      sigDedupePart: "\u5DF2\u5220\u9664 {ok}/{n} \u53F0,\u5176\u4F59\u53EA\u505C\u6B62\u6388\u6743(\u5220\u6863\u9700\u65B0\u7248\u95F8\u673A+\u672C\u673A\u9762\u677F)",
       sigFail2: "\u64CD\u4F5C\u5931\u8D25",
       sysTitle: "\u4E3B\u673A\u72B6\u6001",
       sysLoading: "\u8BFB\u53D6\u4E2D\u2026",
@@ -5959,9 +5963,10 @@ function apply(ctx) {
       sigHasKeyB: "Key",
       sigNoKey: "No key",
       sigDedupe: "Dedupe ({n})",
-      sigDedupeHint: "{n} duplicate records of the same device: revoke them, keep the latest",
+      sigDedupeHint: "{n} duplicate records of the same device: delete the extras (and revoke them), keep the latest",
       sigDedupeYes: "Confirm dedupe",
-      sigDedupeDone: "Deduplicated",
+      sigDedupeDone: "Removed {n} duplicate records",
+      sigDedupePart: "Removed {ok}/{n}; the rest were only revoked (deletion needs the new gate + local panel)",
       sigFail2: "Operation failed",
       sysTitle: "Host status",
       sysLoading: "Loading\u2026",

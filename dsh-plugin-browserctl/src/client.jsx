@@ -3131,7 +3131,11 @@ function SigEnforceCard({ t, reloadToken }) {
   }
   async function loadHealth() {
     try {
-      const r = await fetch(API_P + '/browserctl-gate/sig-health', { cache: 'no-store' })
+      // 状态灯必须走插件 /api/sig-health(host 代持管理令牌转闸机 /healthz)。
+      // 历史 bug(2026-11-24 修):曾写错成 gate 反代路径 /browserctl-gate/sig-health,
+      // 闸机端根本没有该路由 → 404 → health 恒 {ok:false},面板永远红字「闸机未响应」,
+      // 与闸机死活无关(踢人/清除/重启走反代能通,只是因为它们恰好真是闸机路由)。
+      const r = await fetch(API_P + '/browserctl/api/sig-health', { cache: 'no-store' })
       const j = await r.json().catch(() => ({}))
       setHealth(j && j.ok ? j : { ok: false })
     } catch (e) { setHealth({ ok: false }) }
@@ -3162,7 +3166,7 @@ function SigEnforceCard({ t, reloadToken }) {
       const r = await fetch(API_P + '/browserctl-gate/revoke-all', { method: 'POST', cache: 'no-store' })
       const j = await r.json().catch(() => ({}))
       if (j && j.ok) {
-        setAllMsg('已清除:' + (j.sessions || 0) + ' 台在线会话、' + (j.devices || 0) + ' 台设备密钥、' + (j.grants || 0) + ' 个未用配对码')
+        setAllMsg('已清除:' + (j.sessions || 0) + ' 台在线会话、' + (j.devices || 0) + ' 台设备密钥、' + (j.grants || 0) + ' 个未用配对码' + (j.records ? '、' + j.records + ' 条设备记录' : ''))
         await refetch(); await loadHealth()
       } else setAllMsg((j && j.error) || t('sigFail2'))
     } catch (e) { setAllMsg(t('sigFail2')) } finally { setActing(''); setAllConfirm(false) }
@@ -3195,15 +3199,24 @@ function SigEnforceCard({ t, reloadToken }) {
   async function dedupe() {
     if (acting || !dups.length) return
     setActing('dedupe'); setMsg(''); setDedupeConfirm(false)
+    // 2026-11-24 去重修正:闸机 kick 只踢会话+作废密钥,档案 husk 留在注册表,
+    // 去重后列表不变(「去重无用」)。改为带 purge:1 请求删档,并逐台核对响应:
+    // 只有 purged=true 才算删掉;闸机未升级/非本机面板只 stop 授权时如实报差值。
+    let delN = 0
     try {
       for (const dev of dups) {
         let r = await fetch(API_P + '/browserctl-gate/kick', {
           method: 'POST', headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ dev }),
+          body: JSON.stringify({ dev, purge: 1 }),
         }).catch(() => null)
         if (!r || !r.ok) r = await fetch(API_P + '/browserctl/api/totp-kick?dev=' + encodeURIComponent(dev), { cache: 'no-store' }).catch(() => null)
+        const j = (r && r.ok) ? await r.json().catch(() => ({})) : null
+        if (j && j.ok && j.purged) delN += 1
       }
-      setMsg(t('sigDedupeDone')); await refetch()
+      setMsg(delN === dups.length
+        ? t('sigDedupeDone').replace('{n}', String(delN))
+        : t('sigDedupePart').replace('{ok}', String(delN)).replace('{n}', String(dups.length)))
+      await refetch()
     } catch (e) { setMsg(t('sigFail2')) } finally { setActing('') }
   }
   const enforce = !!(data && data.enforce)
@@ -3312,7 +3325,7 @@ function SigEnforceCard({ t, reloadToken }) {
         {allConfirm ? (
           <div className="dshBrowserCtlActions" role="alertdialog" aria-label="清除所有授权">
             <p style={{ margin: 0, fontSize: 12, lineHeight: '17px', color: 'var(--dsw-alias-state-error-primary,#e5655c)' }}>
-              将撤销【所有设备】的登录会话与签名密钥,并作废未使用的配对码。之后每台手机/浏览器都必须重新扫码,确定继续?
+              将撤销【所有设备】的登录会话与签名密钥,作废未使用的配对码,并清空全部设备记录。之后每台手机/浏览器都必须重新扫码,确定继续?
             </p>
             <Button variant="primary" size="sm" disabled={!!acting} onClick={revokeAll}>{acting === 'all' ? '正在清除…' : '确认清除'}</Button>
             <Button variant="secondary" size="sm" disabled={!!acting} onClick={() => setAllConfirm(false)}>{t('sigCancel')}</Button>
@@ -5908,9 +5921,10 @@ export function apply(ctx) {
       sigHasKeyB: '密钥',
       sigNoKey: '无密钥',
       sigDedupe: '一键去重({n})',
-      sigDedupeHint: '同机重复档案 {n} 台:停止授权并只保留最新一台',
+      sigDedupeHint: '同机重复档案 {n} 台:删除多余档案(并停止其授权),只保留最新一台',
       sigDedupeYes: '确认去重',
-      sigDedupeDone: '去重完成',
+      sigDedupeDone: '已删除 {n} 台重复档案',
+      sigDedupePart: '已删除 {ok}/{n} 台,其余只停止授权(删档需新版闸机+本机面板)',
       sigFail2: '操作失败',
       sysTitle: '主机状态',
       sysLoading: '读取中…',
@@ -6222,9 +6236,10 @@ export function apply(ctx) {
       sigHasKeyB: 'Key',
       sigNoKey: 'No key',
       sigDedupe: 'Dedupe ({n})',
-      sigDedupeHint: '{n} duplicate records of the same device: revoke them, keep the latest',
+      sigDedupeHint: '{n} duplicate records of the same device: delete the extras (and revoke them), keep the latest',
       sigDedupeYes: 'Confirm dedupe',
-      sigDedupeDone: 'Deduplicated',
+      sigDedupeDone: 'Removed {n} duplicate records',
+      sigDedupePart: 'Removed {ok}/{n}; the rest were only revoked (deletion needs the new gate + local panel)',
       sigFail2: 'Operation failed',
       sysTitle: 'Host status',
       sysLoading: 'Loading…',

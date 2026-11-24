@@ -6785,7 +6785,9 @@ color:#fff;text-decoration:none;font-size:14px}
         - 2FA 关闭:Cookie 有效性不依赖会话在册,靠已踢名单拦住重登记;
         - 2FA 开启:踢出即弹会话,旧 Cookie 随之失效,已踢名单再做一层保险。
         插件/CLI 可用 X-BC-Admin(本机 loopback)直调本端点做同步踢出。
-        DSH webServer/插件反代会排空请求体,body 可能读不到 → 兼容 ?dev= 查询串。"""
+        DSH webServer/插件反代会排空请求体,body 可能读不到 → 兼容 ?dev= 查询串。
+        body 可带 purge:1——管理员(仅本机)连同设备档案一起删除并回 purged:true;
+        非 purge/非管理员一律普通踢出(purged 恒 false,响应不含歧义)。"""
         if not (self._is_admin_call() or self._gate_ok()):
             self._send_json(401, {"ok": False, "error": "未通过验证"})
             return
@@ -6802,6 +6804,10 @@ color:#fff;text-decoration:none;font-size:14px}
         if not dev:
             self._send_json(400, {"ok": False, "error": "缺少 dev 参数"})
             return
+        # purge(2026-11-24 面板「一键去重」):除踢出/作废密钥外,把设备档案从
+        # 注册表里一并删除。此前 kick 只作废密钥,档案 husk 留在 devices 里,
+        # device_list 照样列出 → 去重后按钮还是 (27),用户看到「去重完成」却
+        # 什么都不变。响应带 purged 字段,面板据此如实报数。
         with _gate_lock:
             dev_info = _sessions.pop(dev, None)
             # 已踢名单与 pop 同锁写入:此刻起任何重新登记(含在锁外通过检查、
@@ -6812,7 +6818,18 @@ color:#fff;text-decoration:none;font-size:14px}
         # 离线设备的公钥会一直留着,面板显示「已踢」但手机仍能签名(审计 P1)。
         _device_close(dev)
         _device_revoke_key(dev)  # L1:踢出=密钥作废,须重新配对才能拿到新密钥
-        _append_event("kick", "踢出设备 %s (IP=%s)"
+        # purge 仅限本机管理员(远程面板无 X-BC-Admin,自动降级为普通 kick,
+        # 防止被授权设备越权删除别人的档案)。_dump_devices 自持锁,须锁外调。
+        purged = False
+        if data.get("purge") and self._is_admin_call():
+            with _devices_lock:
+                purged = _devices.pop(dev, None) is not None
+            if purged:
+                try:
+                    _dump_devices()
+                except Exception:
+                    pass
+        _append_event("kick", ("删除设备档案 %s (IP=%s)" if purged else "踢出设备 %s (IP=%s)")
                       % (dev, (dev_info or {}).get("ip", "离线")))
         _dump_sessions()
         # 兜底:pop 与写盘之间若仍有已过闸的并发请求把设备挤回 _sessions,再清一次
@@ -6825,14 +6842,15 @@ color:#fff;text-decoration:none;font-size:14px}
             update_state(lambda s: {**s, "gate_kicked_devs": st.get("gate_kicked_devs")})
         except Exception:
             pass
-        self._send_json(200, {"ok": True})
+        self._send_json(200, {"ok": True, "purged": purged})
 
     def _gate_revoke_all(self):
         """一键清除所有授权(2026-11-18 用户需求):撤销全部设备的登录会话与签名密钥,
         并作废所有未使用的配对码/引导 token。执行后每台设备都必须重新扫码。
 
         与「全部踢下线」的区别:踢下线只遍历在线设备,离线设备的档案密钥会留着,
-        回来照旧能用;这里是真·全清——把设备档案里的 dev_pubkey / dev_key 一起抹掉。
+        回来照旧能用;这里是真·全清——设备档案(含 dev_pubkey / dev_key)整个清空,
+        面板「设备凭据」列表同步归零(2026-11-24 用户需求:空壳档案行也要清掉)。
         幂等:没有任何授权时返回 0/0/0,不报错、不改动任何东西。
         """
         if not self._is_admin_call():
@@ -6842,6 +6860,7 @@ color:#fff;text-decoration:none;font-size:14px}
             n_sess = len(_sessions)
             _sessions.clear()
         n_dev = 0
+        n_rec = 0
         dev_ids = []
         try:
             rows = json.loads(DEVICES_FILE.read_text(encoding="utf-8")) if DEVICES_FILE.exists() else []
@@ -6851,26 +6870,20 @@ color:#fff;text-decoration:none;font-size:14px}
             for r in rows:
                 if not isinstance(r, dict):
                     continue
+                n_rec += 1
                 if r.get("dev_pubkey") or r.get("dev_key"):
                     n_dev += 1
-                r.pop("dev_pubkey", None)
-                r.pop("dev_key", None)
-                r["online"] = False
                 if r.get("dev"):
                     dev_ids.append(r["dev"])
             try:
-                tmp = DEVICES_FILE.with_suffix(".tmp")
-                tmp.write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
-                os.replace(tmp, DEVICES_FILE)
+                _atomic_write_file(DEVICES_FILE, "[]")
             except Exception:
                 pass
-        # kb/06 第 40 条(2026-11-19):验签走内存 _devices,上面只清文件当场
-        # 无效,且任何一次 housekeeping 落盘都会把旧密钥写回复活。必须同步清
-        # 内存,后续落盘交给 housekeeping 统一做(与内存态一致,不会互相覆盖)。
+        # kb/06 第 40 条(2026-11-19):验签走内存 _devices,只清文件当场无效,
+        # 任何一次 housekeeping 落盘都会把旧数据写回复活。这里连档案行整档全清,
+        # 内存/文件同时归零,后续落盘交给 housekeeping 统一做(与内存态一致)。
         with _devices_lock:
-            for d in _devices.values():
-                d.pop("dev_key", None)
-                d.pop("dev_pubkey", None)
+            _devices.clear()
         n_grant = 0
         try:
             if GRANTS_FILE.exists():
@@ -6887,9 +6900,10 @@ color:#fff;text-decoration:none;font-size:14px}
             return st
 
         update_state(_bump)
-        _append_event("settings", "一键清除所有授权:会话 %d / 密钥 %d / 配对码 %d"
-                      % (n_sess, n_dev, n_grant))
-        self._send_json(200, {"ok": True, "sessions": n_sess, "devices": n_dev, "grants": n_grant})
+        _append_event("settings", "一键清除所有授权:会话 %d / 密钥 %d / 配对码 %d / 设备记录 %d"
+                      % (n_sess, n_dev, n_grant, n_rec))
+        self._send_json(200, {"ok": True, "sessions": n_sess, "devices": n_dev,
+                              "grants": n_grant, "records": n_rec})
 
     def _gate_restart(self):
         """面板上一键重启闸机(2026-11-18 用户需求:改完设置不用再手动重启)。
