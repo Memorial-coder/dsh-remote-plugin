@@ -1,12 +1,42 @@
-import { useEffect, useRef, useState } from 'react'
-import { Button, IconCloseOutlineRegular, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
+import { useEffect, useLayoutEffect, useRef, useState, forwardRef } from 'react'
+import { Button as DshButton, IconCloseOutlineRegular, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import { defineStore } from '@deepseek-ai/dsh-client-store'
 
+// ---------- 统一文字按钮(2026-11-25 用户投诉「不带白底的看不出来是按钮」) ----------
+// DSH primitives 的 Button 只有 primary/ghost/outline/toolbar 四个变体,没有 secondary——
+// clsx 取 css['secondary'] 得 undefined,面板里所有 variant="secondary" 的文字按钮
+// 实际都渲染成透明 ghost,和说明文字混在一起分不清是按钮。这里包一层统一修:
+//  - primary、纯图标 ghost(头部工具条/侧栏启动器,类名 Header*/Launcher* 跳过):原样透传;
+//  - 文字类 ghost/secondary:补 dshBrowserCtlBtnSoft(灰底+细描边,悬停加深),一眼是按钮。
+const BTN_SOFT_SKIP = /^dshBrowserCtl(Header|Launcher)/
+const Button = forwardRef(function Button({ variant = 'ghost', className, children, ...rest }, ref) {
+  const soft = children != null
+    && (variant === 'ghost' || variant === 'secondary')
+    && !(typeof className === 'string' && BTN_SOFT_SKIP.test(className))
+  return (
+    <DshButton
+      ref={ref}
+      {...rest}
+      variant={variant === 'secondary' ? 'ghost' : variant}
+      className={soft ? ('dshBrowserCtlBtnSoft' + (className ? ' ' + className : '')) : className}
+    >
+      {children}
+    </DshButton>
+  )
+})
+
+// 面板文案统一走 locale/{zh,en}.json 的 panel 段（不再内联在本文件）：
+// 374 条 × 2 语言约 1700 行内联在本文件里，加一门语言就得改代码、diff 也全是噪声。
+// 这两份 JSON 由 esbuild 构建期内联进 lib/client.js，运行时无额外请求。
+import LOCALE_ZH from '../locale/zh.json'
+import LOCALE_EN from '../locale/en.json'
+
 const NS = 'browserctl'
-const STYLE_ID = 'browserctl/styles'
-// 开发副本标记(本镜像正式版恒 false):自动「更新弹窗」与一键自更新的禁用逻辑
-// 只在开发副本生效;正式版恒走完整更新体验(自动检查/红点/一键自更新)。
+// 测试副本标记:更新「自动弹窗」与「一键自更新」对测试版禁用(工作区被覆盖就丢开发态),
+// 但版本检查/「关于」按钮红点保留——测试副本同样能看到「有新版」提示,手动检查不受影响
 const IS_TEST = /-test$/.test(NS)
+// 样式节点 id 按 NS 派生:双装时两份插件各用各的 <style>,不再互相覆盖
+const STYLE_ID = NS + '/styles'
 
 // 插件版本号(「关于」面板展示)。单一来源 = package.json 的 version:
 // build.mjs 用 esbuild --define:__DSHREMOTE_VERSION__ 注入,浏览器端只认这个注入值
@@ -19,14 +49,16 @@ const ABOUT_LINKS = {
   app: 'https://github.com/Memorial-coder/dsh-remote-plugin/releases/latest',
   qq: 'https://qm.qq.com/q/K6RXqOKLAu',
 }
-// 手机端 2FA 需要验证器 App 生成 TOTP 动态码;2FA 卡片提示指向的官方下载页(微软官网)
-const MS_AUTHENTICATOR_URL = 'https://www.microsoft.com/zh-cn/security/authenticator/mobile-app'
 // 包安装形态(npm/github)用户的更新命令;版本源已定 GitHub Release,更新引导统一指 github: 通道
 const PLUGIN_ADD_CMD = 'dsh plugin add github:Memorial-coder/dsh-remote-plugin'
+// 手机端 2FA 需要验证器 App 生成 TOTP 动态码;2FA 卡片提示指向的官方下载页(微软官网)
+const MS_AUTHENTICATOR_URL = 'https://www.microsoft.com/zh-cn/security/authenticator/mobile-app'
+// 新版本提醒的「忽略此版本」状态:按版本号记 localStorage,发布新版本后再提醒
 function lsGet(k) { try { return window.localStorage.getItem(k) || '' } catch (e) { return '' } }
 function lsSet(k, v) { try { window.localStorage.setItem(k, v) } catch (e) {} }
 
 // ---------- 顶栏「通知中心」本地水位(未登录已读判断) ----------
+// 键带 NS:双装(正式版+测试版)两份面板各记各的水位,互不干扰。
 // 值 = 最后一次打开通知列表时见过的最大 createdAt(毫秒);新于水位即视为未读。
 const MSG_SEEN_KEY = 'dsh_msg_seen_' + NS
 function msgSeenTs() { const v = parseInt(lsGet(MSG_SEEN_KEY), 10); return Number.isFinite(v) ? v : 0 }
@@ -37,6 +69,41 @@ function fmtMsgTime(ts) {
   const d = new Date(t)
   const p = n => (n < 10 ? '0' : '') + n
   return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes())
+}
+
+// ---------- C7 推送深链：点手机通知直达对应会话（2026-11-20） ----------
+// 链路：智能体 /notify?...&link=dshsession:<id> → 闸机通知行 → App push-poll →
+// 点通知 → WebConsoleActivity 打开面板页并追加 #dshremote-open=<link>。
+// 本函数在插件 apply 里调用：读 location.hash 里的 dshremote-open 参数，
+// 通过官方 UI 导航服务（ctx.uiWorkspace.openSession）切换到对应会话，然后清掉
+// hash（防刷新重复触发）。
+//
+// 安全边界：
+//  - 只认 #hash（不进服务器日志、不吃 query）；值域只放会话 id 字符（宽松：
+//    DSH 会话 id 是 UUID/短 id 形态，这里只放字母数字-_，≤120）；
+//  - openSession 找不到会话时官方层静默/抛错，均吞掉，绝不影响面板正常启动；
+//  - 不接受任意 URL/JS——插件只是把 id 交给宿主自己的导航 API，没有 eval 通道。
+const DEEPLINK_HASH_KEY = 'dshremote-open'
+const DEEPLINK_SID_RE = /^[A-Za-z0-9_-]{1,120}$/
+
+function consumeOpenSessionHash(openSession) {
+  try {
+    const h = String((typeof location !== 'undefined' && location.hash) || '')
+    if (!h || h.length < DEEPLINK_HASH_KEY.length + 2) return
+    const m = new RegExp('[#&]' + DEEPLINK_HASH_KEY + '=([^&]+)').exec(h)
+    if (!m) return
+    const raw = decodeURIComponent(m[1] || '')
+    // 支持两种形态：dshsession:<sessionId> / 裸 sessionId
+    const sid = raw.startsWith('dshsession:') ? raw.slice(11) : raw
+    try { history.replaceState(null, '', location.pathname + location.search) } catch (e) {}
+    if (!sid || !DEEPLINK_SID_RE.test(sid)) return
+    // 会话列表可能尚未就绪（面板刚启动）：延迟到下一拍再试；失败静默
+    const tryOpen = (delay) => setTimeout(() => {
+      try { openSession(sid) } catch (e) { /* 会话不存在/已归档：忽略 */ }
+    }, delay)
+    tryOpen(0)
+    tryOpen(1500)
+  } catch (e) { /* 深链是尽力而为功能，任何异常都不许影响面板 */ }
 }
 
 // ---------- API 路径前缀(远程访问适配) ----------
@@ -547,6 +614,43 @@ const css = `
   flex-wrap: wrap;
   justify-content: center;
 }
+/* ---------- 文字按钮统一软底(2026-11-25) ----------
+   primitives Button 无 secondary 变体,ghost/secondary 文字按钮此前=透明底,
+   和说明文字混在一起分不清是按钮。统一补:灰底+细描边,悬停/按下加深;
+   primary(白底)与图标按钮不受影响(包装器只给文字类按钮加 dshBrowserCtlBtnSoft)。 */
+.dshBrowserCtlBtnSoft {
+  background: var(--dsw-alias-fill-control-secondary, rgba(255, 255, 255, 0.08)) !important;
+  box-shadow: inset 0 0 0 var(--dsh-hairline-width, 0.5px) var(--dsw-alias-border-l3, rgba(255, 255, 255, 0.16));
+  color: var(--dsw-alias-label-primary, inherit);
+}
+.dshBrowserCtlBtnSoft:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover, rgba(255, 255, 255, 0.14)) !important;
+}
+.dshBrowserCtlBtnSoft:active:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-active, rgba(255, 255, 255, 0.18)) !important;
+}
+/* 卡片内小文字按钮(签名健康行的「刷新/重启闸机」等):同样给底,别混进正文 */
+.dshBrowserCtlMiniBtn {
+  appearance: none;
+  border: 1px solid var(--dsw-alias-border-l2, #2a2c33);
+  background: var(--dsw-alias-fill-control-secondary, rgba(255, 255, 255, 0.08));
+  color: var(--dsw-alias-label-secondary, #a6aab2);
+  font: inherit;
+  font-size: 11px;
+  line-height: 16px;
+  padding: 2px 8px;
+  border-radius: 7px;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.dshBrowserCtlMiniBtn:hover:not(:disabled) {
+  color: var(--dsw-alias-label-primary, inherit);
+  background: var(--dsw-alias-interactive-bg-hover, rgba(255, 255, 255, 0.14));
+}
+.dshBrowserCtlMiniBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 .dshBrowserCtlCard {
   border: 1px solid var(--dsw-alias-border-l2, #2a2c33);
   border-radius: 12px;
@@ -925,6 +1029,36 @@ const css = `
   padding: 2px 0;
 }
 /* 运行日志:可折叠,最多显示一屏,内部滚动 */
+/* 分类页签(2026-11-16):横向可换行的小 chip,选中高亮;计数用弱化色 */
+.dshBrowserCtlLogTabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding-bottom: 6px;
+}
+.dshBrowserCtlLogTab {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--dsw-alias-border-l1, rgba(255,255,255,0.08));
+  background: transparent;
+  color: var(--dsw-alias-label-secondary, #a6aab2);
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 1;
+  padding: 5px 9px;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.dshBrowserCtlLogTab:hover { color: var(--dsw-alias-label-primary, #fff); }
+.dshBrowserCtlLogTab[data-on='true'] {
+  background: var(--dsw-alias-fill-control-active, rgba(255,255,255,0.12));
+  color: var(--dsw-alias-label-primary, #fff);
+}
+.dshBrowserCtlLogTabN {
+  font-size: 10px;
+  color: var(--dsw-alias-label-tertiary, #8b8f98);
+}
 .dshBrowserCtlLogBody {
   max-height: 168px;
   overflow-y: auto;
@@ -1060,6 +1194,17 @@ div[data-slot='sidebar.footer.action'] > * {
   gap: 10px;
   justify-content: flex-end;
 }
+/* 插件新版本提示弹窗里的更新说明列表 */
+.dshBrowserCtlUpdNotes {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--dsw-alias-label-secondary, #cfd3d6);
+}
 /* 检查更新:42px 三态按钮 + 版本对比 + 下载 + 更新说明 */
 .dshBrowserCtlAboutUpdate {
   display: flex;
@@ -1097,6 +1242,13 @@ div[data-slot='sidebar.footer.action'] > * {
   line-height: 18px;
   color: var(--dsw-alias-label-secondary, #a6aab2);
 }
+.dshBrowserCtlAboutUpdateGuide {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-secondary, #a6aab2);
+  word-break: break-all;
+}
 .dshBrowserCtlAboutUpdateNotes {
   margin: 0;
   padding-left: 18px;
@@ -1107,22 +1259,19 @@ div[data-slot='sidebar.footer.action'] > * {
   line-height: 17px;
   color: var(--dsw-alias-label-secondary, #a6aab2);
 }
-.dshBrowserCtlAboutUpdateGuide {
-  margin: 8px 0 0;
-  font-size: 12px;
-  line-height: 18px;
-  color: var(--dsw-alias-label-secondary, #a6aab2);
-  word-break: break-all;
+/* 更新区分隔线:把「版本对比+按钮」和「更新方法/更新说明」两摊信息隔开(2026-11-25) */
+.dshBrowserCtlAboutUpdateSep {
+  height: 1px;
+  margin: 2px 0;
+  background: var(--dsw-alias-border-l2, #2a2c33);
 }
-.dshBrowserCtlUpdNotes {
+/* 「更新说明」小节标题:比正文说明字重高一级,读得出这是标题不是介绍 */
+.dshBrowserCtlAboutUpdateLabel {
   margin: 0;
-  padding-left: 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
   font-size: 12px;
-  line-height: 1.6;
-  color: var(--dsw-alias-label-secondary, #cfd3d6);
+  line-height: 17px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary, inherit);
 }
 .dshBrowserCtlAboutUpdateErr {
   margin: 0;
@@ -1514,6 +1663,16 @@ div[data-slot='sidebar.footer.action'] > * {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  overflow-y: auto;
+  max-height: 320px;
+}
+/* 通知分组标题(2026-11-16):官方消息 / 安全动态 */
+.dshBrowserCtlPushGroupHead {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-tertiary, #8b8f98);
+  padding: 4px 2px 0;
 }
 .dshBrowserCtlPushRow {
   display: flex;
@@ -1565,7 +1724,26 @@ div[data-slot='sidebar.footer.action'] > * {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* ---------- 顶栏「通知中心」铃铛 + 下拉列表 ---------- */
+/* 新版本提醒横幅:面板顶部,发布新版本后出现 */
+.dshBrowserCtlUpdBanner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  margin: 8px 10px 0;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: rgba(10, 132, 255, 0.12);
+  border: 1px solid rgba(10, 132, 255, 0.35);
+}
+.dshBrowserCtlUpdBannerText {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary, inherit);
+}
+/* 关于按钮上的新版本小红点 */
 .dshBrowserCtlAboutBtn { position: relative; display: inline-flex; }
 .dshBrowserCtlBadgeDot {
   position: absolute;
@@ -1581,7 +1759,8 @@ div[data-slot='sidebar.footer.action'] > * {
 /* ---------- 顶栏「通知中心」下拉(铃铛) ----------
    2026-11-23 三分段改版:与手机消息中心(home.html msg-tabs)同构——
    官方公告 / 发给我 / 电脑推送 各自分段,行=徽标+短时间+标题(两行)+正文一行摘要,
-   点整行进详情 pane(返回键回列表)。 */
+   点整行进详情 pane(返回键回列表)。此前工作区副本漏带这组 CSS(正式版镜像有),
+   测试副本的下拉一直裸奔,这次随改版一并补齐。 */
 .dshBrowserCtlMsgMask {
   position: fixed;
   inset: 0;
@@ -1892,7 +2071,7 @@ div[data-slot='sidebar.footer.action'] > * {
   background: var(--dsw-alias-bg-layer-2, rgba(255, 255, 255, 0.06));
   text-decoration: none;
 }
-/* ---------- 工单反馈弹窗(导出日志 → 选去向) ---------- */
+/* ---------- 工单反馈弹窗 ---------- */
 .dshBrowserCtlPanelTicket { width: min(600px, 94vw); overflow: hidden; }
 .dshBrowserCtlTicketBody {
   display: flex;
@@ -1906,6 +2085,72 @@ div[data-slot='sidebar.footer.action'] > * {
   padding-right: 2px;
 }
 .dshBrowserCtlTicketBody > * { flex: 0 0 auto; }
+.dshBrowserCtlTicketLogin { display: flex; flex-direction: column; gap: 12px; padding: 6px 2px; }
+.dshBrowserCtlTicketLoginTitle { margin: 0; font-size: 14px; font-weight: 600; }
+.dshBrowserCtlTicketLoginDesc { margin: 0; font-size: 12.5px; line-height: 19px; color: var(--dsw-alias-label-secondary, #a6aab2); }
+.dshBrowserCtlTicketChips { display: flex; flex-wrap: wrap; gap: 6px; }
+.dshBrowserCtlTicketChip {
+  appearance: none;
+  border: 1px solid var(--dsw-alias-border-l2, #2a2c33);
+  background: var(--dsw-alias-bg-layer-1, rgba(255,255,255,0.03));
+  color: var(--dsw-alias-label-secondary, #a6aab2);
+  border-radius: 999px;
+  padding: 5px 11px;
+  font: inherit;
+  font-size: 12px;
+  line-height: 16px;
+  cursor: pointer;
+  transition: background .15s ease, color .15s ease;
+}
+.dshBrowserCtlTicketChip[data-active='true'] {
+  background: var(--dsw-alias-state-info-primary, #4da3ff);
+  border-color: transparent;
+  color: #fff;
+}
+.dshBrowserCtlTicketChip:disabled { opacity: .5; cursor: default; }
+.dshBrowserCtlTicketList { display: flex; flex-direction: column; gap: 8px; }
+.dshBrowserCtlTicketCard {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: left;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 11px 12px;
+  border: 1px solid var(--dsw-alias-border-l2, #2a2c33);
+  border-radius: 10px;
+  background: var(--dsw-alias-bg-layer-1, rgba(255,255,255,0.03));
+  color: var(--dsw-alias-label-primary, inherit);
+  font: inherit;
+  cursor: pointer;
+  transition: background .15s ease;
+}
+.dshBrowserCtlTicketCard:hover { background: var(--dsw-alias-bg-layer-2, rgba(255,255,255,0.06)); }
+.dshBrowserCtlTicketCard:disabled { cursor: default; opacity: .7; }
+.dshBrowserCtlTicketCardTop { display: flex; align-items: center; gap: 8px; }
+.dshBrowserCtlTicketCardTitle { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dshBrowserCtlTicketUnread { width: 8px; height: 8px; border-radius: 50%; background: #ff4d4f; flex: none; }
+.dshBrowserCtlTicketMeta { display: flex; align-items: center; gap: 8px; font-size: 11.5px; line-height: 16px; color: var(--dsw-alias-label-tertiary, #8b8f98); }
+.dshBrowserCtlTicketMetaTime { margin-left: auto; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.dshBrowserCtlTicketStatus {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 500;
+  background: rgba(255,255,255,0.07);
+  color: var(--dsw-alias-label-secondary, #a6aab2);
+  flex: none;
+}
+.dshBrowserCtlTicketStatus[data-status='pending'] { background: rgba(230,145,56,0.16); color: #e69138; }
+.dshBrowserCtlTicketStatus[data-status='processing'] { background: rgba(77,163,255,0.16); color: #4da3ff; }
+.dshBrowserCtlTicketStatus[data-status='replied'] { background: rgba(52,179,113,0.16); color: #34b371; }
+.dshBrowserCtlTicketStatus[data-status='completed'] { background: rgba(52,179,113,0.22); color: #34b371; }
+.dshBrowserCtlTicketStatus[data-status='closed'] { background: rgba(139,143,152,0.18); color: #8b8f98; }
+.dshBrowserCtlTicketForm { display: flex; flex-direction: column; gap: 12px; }
+.dshBrowserCtlTicketField { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--dsw-alias-label-secondary, #a6aab2); }
 .dshBrowserCtlTicketInput {
   width: 100%;
   box-sizing: border-box;
@@ -1920,6 +2165,94 @@ div[data-slot='sidebar.footer.action'] > * {
   outline: none;
 }
 .dshBrowserCtlTicketInput:focus { border-color: var(--dsw-alias-state-success-primary, #34b371); }
+.dshBrowserCtlTicketTextarea { min-height: 92px; resize: vertical; }
+.dshBrowserCtlTicketAttachRow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.dshBrowserCtlTicketAttach {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: 1px solid var(--dsw-alias-border-l2, #2a2c33);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-1, rgba(255,255,255,0.03));
+  font-size: 11.5px;
+  max-width: 100%;
+}
+.dshBrowserCtlTicketThumb { width: 26px; height: 26px; object-fit: cover; border-radius: 5px; flex: none; }
+.dshBrowserCtlTicketAttachName { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dsw-alias-label-secondary, #a6aab2); }
+.dshBrowserCtlTicketAttachRemove {
+  appearance: none; border: none; background: none; padding: 0 2px; margin: 0;
+  color: var(--dsw-alias-state-error-primary, #e5655c); font: inherit; font-size: 11.5px; cursor: pointer;
+}
+.dshBrowserCtlTicketBtn { height: 42px !important; margin: 4px 0 !important; }
+.dshBrowserCtlTicketDetailHead { display: flex; align-items: flex-start; gap: 6px; }
+.dshBrowserCtlTicketDetailInfo { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; }
+.dshBrowserCtlTicketDetailTitle { font-size: 14px; font-weight: 600; line-height: 20px; word-break: break-word; }
+.dshBrowserCtlTicketDetailSub { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 11.5px; line-height: 16px; color: var(--dsw-alias-label-tertiary, #8b8f98); }
+.dshBrowserCtlTicketTimeline { display: flex; flex-direction: column; gap: 8px; }
+.dshBrowserCtlTicketPost {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 9px 11px;
+  border-radius: 9px;
+  border: 1px solid var(--dsw-alias-border-l1, rgba(255,255,255,0.06));
+  background: var(--dsw-alias-bg-layer-1, rgba(255,255,255,0.03));
+}
+.dshBrowserCtlTicketPost[data-role='admin'] {
+  border-color: rgba(77,163,255,0.32);
+  background: rgba(77,163,255,0.08);
+}
+.dshBrowserCtlTicketPostHead { display: flex; align-items: center; gap: 8px; font-size: 11px; line-height: 15px; color: var(--dsw-alias-label-tertiary, #8b8f98); }
+.dshBrowserCtlTicketPostHead > :first-child { font-weight: 600; color: var(--dsw-alias-label-secondary, #a6aab2); }
+.dshBrowserCtlTicketPostBody { margin: 0; font-size: 12.5px; line-height: 19px; color: var(--dsw-alias-label-primary, inherit); white-space: pre-wrap; word-break: break-word; }
+.dshBrowserCtlTicketPostImgs { display: flex; flex-wrap: wrap; gap: 6px; }
+.dshBrowserCtlTicketPostImg { width: 64px; height: 64px; object-fit: cover; border-radius: 7px; border: 1px solid var(--dsw-alias-border-l2, #2a2c33); display: block; }
+.dshBrowserCtlTicketFollow { display: flex; flex-direction: column; gap: 10px; margin-top: 2px; }
+/* ---- 诊断日志（可选）：预览 + 勾选确认 ---- */
+.dshBrowserCtlTicketDiag {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 11px 12px;
+  border: 1px solid var(--dsw-alias-border-l2, #2a2c33);
+  border-radius: 10px;
+  background: var(--dsw-alias-bg-layer-1, rgba(255,255,255,0.03));
+}
+.dshBrowserCtlTicketDiagHead { display: flex; align-items: center; gap: 8px; }
+.dshBrowserCtlTicketDiagTitle { flex: 1; min-width: 0; font-size: 12.5px; font-weight: 600; line-height: 18px; }
+.dshBrowserCtlTicketDiagBadge {
+  flex: none; padding: 1px 7px; border-radius: 999px; font-size: 11px; line-height: 16px;
+  background: rgba(255,255,255,0.07); color: var(--dsw-alias-label-tertiary, #8b8f98);
+}
+.dshBrowserCtlTicketDiagBadge[data-on='true'] { background: rgba(52,179,113,0.18); color: #34b371; }
+.dshBrowserCtlTicketDiagDesc { margin: 0; font-size: 11.5px; line-height: 17px; color: var(--dsw-alias-label-tertiary, #8b8f98); }
+.dshBrowserCtlTicketDiagLegal { margin: 0; font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-tertiary, #8b8f98); }
+.dshBrowserCtlTicketDiagFiles { display: flex; flex-wrap: wrap; gap: 6px; }
+.dshBrowserCtlTicketDiagPreview {
+  display: flex; flex-direction: column; gap: 9px;
+  padding: 11px 12px; border: 1px solid var(--dsw-alias-state-info-primary, #4da3ff);
+  border-radius: 10px; background: var(--dsw-alias-bg-layer-1, rgba(255,255,255,0.03));
+}
+.dshBrowserCtlTicketDiagPre {
+  margin: 0; max-height: 260px; overflow: auto; padding: 9px 10px;
+  border-radius: 8px; background: rgba(0,0,0,0.28); color: var(--dsw-alias-label-secondary, #c9ccd2);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px; line-height: 1.55; white-space: pre-wrap; word-break: break-word;
+  flex: 0 0 auto;
+}
+.dshBrowserCtlTicketDiagConsent {
+  display: flex; align-items: flex-start; gap: 8px; font-size: 11.5px; line-height: 17px;
+  color: var(--dsw-alias-label-secondary, #a6aab2); cursor: pointer;
+}
+.dshBrowserCtlTicketDiagConsent input { margin: 3px 0 0; flex: none; }
+.dshBrowserCtlTicketLogLink {
+  display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; border-radius: 7px;
+  border: 1px solid var(--dsw-alias-border-l2, #2a2c33); font-size: 11.5px;
+  color: var(--dsw-alias-state-info-primary, #4da3ff); text-decoration: none;
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dshBrowserCtlTicketLogLink:hover { background: rgba(77,163,255,0.1); }
 .dshBrowserCtlTicketDest {
   display: flex; flex-direction: column; gap: 3px; width: 100%;
   margin: 0 0 8px; padding: 10px 12px; text-align: left;
@@ -1934,8 +2267,8 @@ div[data-slot='sidebar.footer.action'] > * {
 
 function installStyles() {
   // 注意:client 半是热更新的 —— GUI 刷新时 JS 模块会重新执行,但 DOM 里的 <style> 不会重建。
-  // 以前「已存在就直接 return」会让旧样式永远生效:新版本加的 CSS 全都不生效,表现为
-  // 「弹窗里的元素没样式、挤在一起」,只有彻底重启 DSH 才恢复。
+  // 以前「已存在就直接 return」会让旧样式永远生效:新版本加的 CSS(工单表单、更新弹窗等)
+  // 全都不生效,表现为「弹窗里的元素没样式、挤在一起」,只有彻底重启 DSH 才恢复。
   // 所以这里必须每次把 textContent 对齐到当前 css,而不是跳过。
   let style = document.querySelector(`style[data-plugin="${STYLE_ID}"]`)
   if (style === null) {
@@ -2477,9 +2810,29 @@ function fmtClock(ts) {
   return p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds())
 }
 
+/* ---- 日志分类页签(2026-11-16):行内 cat 字段闸机已随事件写入,旧事件无 cat 时
+   由 typ 兜底归类(与闸机 EVENT_CATS 同表)。改这里必须同步闸机 browserctl.py。---- */
+const LOG_CAT_OF = {
+  verify: 'login', pair: 'pair', kick: 'kick', ban: 'ban', totp: 'totp',
+  devbind: 'totp', settings: 'settings', devsig: 'devsig', devsig_sum: 'devsig',
+  file_dl: 'sys', error: 'sys',
+}
+const LOG_TABS = [
+  { id: 'all', labelKey: 'logTabAll' },
+  { id: 'login', labelKey: 'logTabLogin' },
+  { id: 'pair', labelKey: 'logTabPair' },
+  { id: 'kick', labelKey: 'logTabKick' },
+  { id: 'ban', labelKey: 'logTabBan' },
+  { id: 'totp', labelKey: 'logTabTotp' },
+  { id: 'devsig', labelKey: 'logTabUnsigned' },
+  { id: 'settings', labelKey: 'logTabSettings' },
+  { id: 'sys', labelKey: 'logTabSys' },
+]
+
 function LogCard({ t, reloadToken }) {
   const [open, setOpen] = useState(true) // 独立页签内默认展开
   const [events, setEvents] = useState(null)
+  const [cat, setCat] = useState('all')
   useEffect(() => {
     let alive = true
     // 优先闸机端点(公网面板同源可达,无需 DSH 重启);本机直开面板回退到插件 API。
@@ -2492,7 +2845,16 @@ function LogCard({ t, reloadToken }) {
         .catch(() => { if (alive) setEvents([]) }))
     return () => { alive = false }
   }, [reloadToken])
-  const list = (events || []).slice().reverse()
+  const catOf = e => (e && e.cat) || LOG_CAT_OF[e && e.typ] || 'other'
+  const counts = {}
+  for (const e of events || []) {
+    const c = catOf(e)
+    counts[c] = (counts[c] || 0) + 1
+  }
+  const list = (events || [])
+    .filter(e => cat === 'all' || catOf(e) === cat)
+    .slice()
+    .reverse()
 
   return (
     <div className="dshBrowserCtlCard">
@@ -2505,7 +2867,7 @@ function LogCard({ t, reloadToken }) {
         {Svg.clip}
         <span>{t('logTitle')}</span>
         <span style={{ fontWeight: 500, fontSize: 12, color: 'var(--dsw-alias-label-tertiary,#8b8f98)' }}>
-          {list.length ? list.length + ' 条' : '暂无'}
+          {(events || []).length ? (events || []).length + ' 条' : '暂无'}
         </span>
         <span className="dshBrowserCtlCardArrow" aria-hidden="true">
           <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
@@ -2514,10 +2876,31 @@ function LogCard({ t, reloadToken }) {
         </span>
       </button>
       <div className="dshBrowserCtlCardBody" data-open={open}>
+        {/* 分类页签:全部/登录/配对/踢出/黑名单/2FA/无签名/设置/系统 */}
+        <div className="dshBrowserCtlLogTabs" role="tablist">
+          {LOG_TABS.map(tab => {
+            const n = tab.id === 'all' ? (events || []).length : (counts[tab.id] || 0)
+            if (tab.id !== 'all' && !n) return null
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                role="tab"
+                aria-selected={cat === tab.id}
+                className="dshBrowserCtlLogTab"
+                data-on={cat === tab.id ? 'true' : 'false'}
+                onClick={() => setCat(tab.id)}
+              >
+                {t(tab.labelKey)}
+                {n ? <span className="dshBrowserCtlLogTabN">{n > 99 ? '99+' : n}</span> : null}
+              </button>
+            )
+          })}
+        </div>
         {list.length === 0 ? (
           <div className="dshBrowserCtlDevEmpty">{t('logEmpty')}</div>
         ) : (
-          <div className="dshBrowserCtlLogBody">
+          <div className="dshBrowserCtlLogBody" data-cat={cat}>
             {list.map((e, i) => (
               <div key={i} className="dshBrowserCtlLogRow">
                 <span className="dshBrowserCtlLogType"><LogIcon typ={e.typ} /></span>
@@ -3083,9 +3466,7 @@ function SessionDaysCard({ t, disabled }) {
   )
 }
 
-/* ---------- 批次1-A5:主机遥测(CPU/内存/磁盘;闸机 10s 缓存) ---------- */
-/* ---------- L1 设备签名强制开关 + 设备凭证管理(闸机 sig-toggle;GET 读/POST 仅本机管理员) ---------- */
-
+/* ---------- 批次4-②:L1 设备签名强制开关(闸机 sig-toggle;GET 读/POST 仅本机管理员) ---------- */
 function SigEnforceCard({ t, reloadToken }) {
   const [data, setData] = useState(null)
   const [busy, setBusy] = useState(false)
@@ -3098,7 +3479,6 @@ function SigEnforceCard({ t, reloadToken }) {
   const [health, setHealth] = useState(null)
   const [allConfirm, setAllConfirm] = useState(false)
   const [allMsg, setAllMsg] = useState('')
-  const [restarting, setRestarting] = useState(false)
   useEffect(() => {
     let alive = true
     fetch(API_P + '/browserctl/api/sig', { cache: 'no-store' })
@@ -3140,6 +3520,7 @@ function SigEnforceCard({ t, reloadToken }) {
       setHealth(j && j.ok ? j : { ok: false })
     } catch (e) { setHealth({ ok: false }) }
   }
+  const [restarting, setRestarting] = useState(false)
   useEffect(() => { loadHealth() }, [reloadToken])
   // 状态轮询(2026-11-18 用户实测:别处开/关后本面板一直显示旧值):
   // 5s 一刷 + 标签页切回前台立刻刷,开关状态/授权台数不再需要手动刷新页面。
@@ -3152,10 +3533,14 @@ function SigEnforceCard({ t, reloadToken }) {
   async function restartGate() {
     if (restarting) return
     setRestarting(true)
-    try { await fetch(API_P + '/browserctl-gate/gate-restart', { method: 'POST', cache: 'no-store' }) } catch (e) {}
+    try {
+      await fetch(API_P + '/browserctl-gate/gate-restart', { method: 'POST', cache: 'no-store' })
+    } catch (e) {}
+    // 8 秒内每 2 秒探一次,恢复后自动收尾
     let n = 0
     const timer = setInterval(async () => {
-      n += 1; await loadHealth()
+      n += 1
+      await loadHealth()
       if (n >= 5) { clearInterval(timer); setRestarting(false) }
     }, 2000)
   }
@@ -3263,8 +3648,8 @@ function SigEnforceCard({ t, reloadToken }) {
               ? <span>闸机运行中 · 强制签名{health.enforce ? '已生效' : '未开启'} · 已授权 {health.devices_with_pubkey} 台 · 在线 {health.sessions} 台</span>
               : <span style={{ color: '#e5655c' }}>闸机未响应(隧道/进程可能已停)</span>}
             <span style={{ flex: 1 }} />
-            <button type="button" style={{ fontSize: 11, background: 'transparent', border: 0, color: 'inherit', cursor: 'pointer', padding: 0 }} onClick={loadHealth}>刷新</button>
-            <button type="button" style={{ fontSize: 11, background: 'transparent', border: 0, color: 'inherit', cursor: 'pointer', padding: 0 }} onClick={restartGate}>{restarting ? '重启中…' : '重启闸机'}</button>
+            <button type="button" className="dshBrowserCtlMiniBtn" onClick={loadHealth}>刷新</button>
+            <button type="button" className="dshBrowserCtlMiniBtn" onClick={restartGate}>{restarting ? '重启中…' : '重启闸机'}</button>
           </div>
         )}
         {confirming && (
@@ -3350,7 +3735,6 @@ function SigEnforceCard({ t, reloadToken }) {
 }
 
 /* ---------- 批次1-A5:主机遥测(CPU/内存/磁盘;闸机 10s 缓存) ---------- */
-
 function SysinfoCard({ t }) {
   const [d, setD] = useState(null)
   const [busy, setBusy] = useState(false)
@@ -3433,7 +3817,7 @@ function SysinfoCard({ t }) {
 }
 
 /* ---------- 「推送」页签:接收手机推送 + 系统安全事件 + 测试推送 + 最近推送 ---------- */
-const PUSH_KIND = { test: 'Test', verify: 'Verify', kick: 'Kick', ban: 'Ban', totp: 'Totp', pair: 'Pair', join: 'Join', dev: 'Dev', msg: 'Msg', announce: 'Announce' }
+const PUSH_KIND = { test: 'Test', verify: 'Verify', kick: 'Kick', ban: 'Ban', totp: 'Totp', pair: 'Pair', join: 'Join', dev: 'Dev', msg: 'Msg' }
 
 function pushKindLabel(t, kind) {
   const key = PUSH_KIND[kind]
@@ -3445,6 +3829,49 @@ function fmtPushTime(ts) {
   const d = new Date(ts * 1000)
   const p = n => String(n).padStart(2, '0')
   return p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes())
+}
+
+/* ---- 通知分类(2026-11-16):official=官方发的消息(公告/客服);security=自己的历史消息
+   (本机安全动态:设备连入/配对/踢出/黑名单/2FA)。闸机 _push_notify 写 cat 字段,
+   旧数据无 cat 时按 kind 兜底:announce→official,其余→security。---- */
+const PUSH_CAT_OF_KIND = { announce: 'official' }
+function pushCatOf(it) {
+  const c = it && it.cat
+  if (c === 'official' || c === 'security') return c
+  return PUSH_CAT_OF_KIND[it && it.kind] || 'security'
+}
+
+function PushGroupedList({ t, items }) {
+  const groups = { official: [], security: [] }
+  for (const it of items) groups[pushCatOf(it)].push(it)
+  const groupHead = key => (
+    <div key={'g-' + key} className="dshBrowserCtlPushGroupHead">{t(key === 'official' ? 'pushGroupOfficial' : 'pushGroupSecurity')}</div>
+  )
+  const rows = []
+  if (groups.official.length) {
+    rows.push(groupHead('official'))
+    rows.push(...groups.official.map(it => <PushRow key={'o' + (it.id || it.t)} t={t} it={it} />))
+  }
+  if (groups.security.length) {
+    rows.push(groupHead('security'))
+    rows.push(...groups.security.map(it => <PushRow key={'s' + (it.id || it.t)} t={t} it={it} />))
+  }
+  return <div className="dshBrowserCtlPushList">{rows}</div>
+}
+
+function PushRow({ t, it }) {
+  return (
+    <div className="dshBrowserCtlPushRow">
+      <span className="dshBrowserCtlPushAside">
+        <span className="dshBrowserCtlPushType">{pushKindLabel(t, it.kind)}</span>
+        <span className="dshBrowserCtlPushTime">{fmtPushTime(it.t)}</span>
+      </span>
+      <span className="dshBrowserCtlPushMain">
+        <span className="dshBrowserCtlPushTitle" title={it.title || ''}>{it.title || ''}</span>
+        {it.body ? <span className="dshBrowserCtlPushBody" title={it.body}>{it.body}</span> : null}
+      </span>
+    </div>
+  )
 }
 
 function PushCard({ t, reloadToken }) {
@@ -3558,7 +3985,7 @@ function PushCard({ t, reloadToken }) {
     }
   }
 
-  // 拉最近推送(newest first,取 ~10 条)
+  // 拉最近推送(newest first,取 ~20 条;2026-11-16 起按 cat 分两组展示)
   async function loadPoll() {
     if (polling) return
     setPolling(true)
@@ -3566,7 +3993,7 @@ function PushCard({ t, reloadToken }) {
       const r = await fetch(API_P + '/browserctl-gate/push-poll?last=0', { cache: 'no-store' })
       const j = await r.json().catch(() => ({}))
       if (r.ok && j.ok) {
-        setItems(Array.isArray(j.items) ? j.items.slice(0, 10) : [])
+        setItems(Array.isArray(j.items) ? j.items.slice(0, 20) : [])
         setCfg(c => ({ ...(c || {}), enabled: !!j.enabled, since: j.since || (c && c.since) || 0 }))
         setCfgErr('')   // 闸机已应答:清掉可能过期的红字(如短暂 401/离线后恢复)
       }
@@ -3696,7 +4123,7 @@ function PushCard({ t, reloadToken }) {
             {toast.text}
           </div>
         )}
-        {/* 最近推送列表 */}
+        {/* 最近推送列表:官方消息(公告等)与安全动态(设备连入/配对/踢出/黑名单)分组展示 */}
         <div className="dshBrowserCtlPairedList">
           <div className="dshBrowserCtlPairedHead">
             <span>{t('pushRecent')}</span>
@@ -3707,20 +4134,7 @@ function PushCard({ t, reloadToken }) {
           {list.length === 0 ? (
             <div className="dshBrowserCtlPairedEmpty">{t('pushEmpty')}</div>
           ) : (
-            <div className="dshBrowserCtlPushList">
-              {list.map(it => (
-                <div key={it.id || (it.t + (it.title || ''))} className="dshBrowserCtlPushRow">
-                  <span className="dshBrowserCtlPushAside">
-                    <span className="dshBrowserCtlPushType">{pushKindLabel(t, it.kind)}</span>
-                    <span className="dshBrowserCtlPushTime">{fmtPushTime(it.t)}</span>
-                  </span>
-                  <span className="dshBrowserCtlPushMain">
-                    <span className="dshBrowserCtlPushTitle" title={it.title || ''}>{it.title || ''}</span>
-                    {it.body ? <span className="dshBrowserCtlPushBody" title={it.body}>{it.body}</span> : null}
-                  </span>
-                </div>
-              ))}
-            </div>
+            <PushGroupedList t={t} items={list} />
           )}
         </div>
       </div>
@@ -3731,7 +4145,7 @@ function PushCard({ t, reloadToken }) {
 /* ---------- 一键自更新按钮(本地目录解压/link 安装形态专用) ----------
    host /update-apply:停隧道 → 下载官网 zip → 校验大小 → Python 安全解包 →
    覆盖插件目录(运行态文件绝不覆盖) → 回 restartRequired(重启 DSH 生效)。
-   开发副本(IS_TEST)与包安装形态不渲染本按钮(见调用点)。 */
+   测试副本(IS_TEST)与包安装形态不渲染本按钮(见调用点)。 */
 function UpdateApplyButton({ t, latest, variant, onApplied }) {
   const [state, setState] = useState('idle') // idle|loading|done|error
   const [errMsg, setErrMsg] = useState('')
@@ -3784,7 +4198,7 @@ function UpdateApplyButton({ t, latest, variant, onApplied }) {
 /* ---------- 「关于」面板:应用名 + 版本 + 简介 + 外部链接 + 检查更新 ---------- */
 function AboutPanel({ t, onClose, initialResult, onDismissUpdate, onCheckResult }) {
   // 检查更新按钮三态: idle(检查更新) / loading(检查中…) / done(重新检查)
-  // initialResult = 页面加载/打开面板时已自动检查的结果,直接展示,无需再点「检查更新」
+  // initialResult = 打开面板时已自动检查的结果,直接展示,无需再点「检查更新」
   const [checkState, setCheckState] = useState(initialResult ? 'done' : 'idle')
   const [checkResult, setCheckResult] = useState(initialResult || null)
   // 用户协议 / 隐私政策弹窗: null=不显示, 否则为要展示的文档对象
@@ -3816,8 +4230,8 @@ function AboutPanel({ t, onClose, initialResult, onDismissUpdate, onCheckResult 
   const upToDate = !!(checkResult && checkResult.ok && !checkResult.hasUpdate)
   const notes = hasUpdate && Array.isArray(checkResult.notes) ? checkResult.notes : []
   const downloadUrl = hasUpdate ? (checkResult.downloadUrl || ABOUT_LINKS.app) : ABOUT_LINKS.app
-  // 一键自更新可见性:本地目录形态且非开发副本。下载按钮的主次随它切换:
-  // 有一键更新时下载是备用路径(描边 secondary);没有时(包安装)下载就是主 CTA(白底 primary)
+  // 一键自更新可见性:本地目录形态且非测试副本。下载按钮的主次随它切换:
+  // 有一键更新时下载是备用路径(描边 secondary);没有时(测试副本/包安装)下载就是主 CTA(白底 primary)
   const canApplyOneClick = !!(hasUpdate && checkResult.install && checkResult.install.form === 'local' && !IS_TEST)
   return (
     <div className="dshBrowserCtlOverlay" role="dialog" aria-modal="true" aria-label={t('about')}>
@@ -3854,15 +4268,17 @@ function AboutPanel({ t, onClose, initialResult, onDismissUpdate, onCheckResult 
           </button>
         </div>
         <div className="dshBrowserCtlAboutUpdate">
-          <Button
-            variant="secondary"
-            size="sm"
-            className="dshBrowserCtlAboutUpdateBtn"
-            disabled={checkState === 'loading'}
-            onClick={checkUpdate}
-          >
-            {checkState === 'loading' ? t('updateChecking') : checkState === 'done' ? t('updateRecheck') : t('updateCheck')}
-          </Button>
+          <Tooltip label={t('updateRecheckTip')}>
+            <Button
+              variant="secondary"
+              size="sm"
+              className="dshBrowserCtlAboutUpdateBtn"
+              disabled={checkState === 'loading'}
+              onClick={checkUpdate}
+            >
+              {checkState === 'loading' ? t('updateChecking') : checkState === 'done' ? t('updateRecheck') : t('updateCheck')}
+            </Button>
+          </Tooltip>
           {checkState === 'done' && (
             <>
               {(hasUpdate || upToDate) && (
@@ -3880,8 +4296,8 @@ function AboutPanel({ t, onClose, initialResult, onDismissUpdate, onCheckResult 
               {hasUpdate && (
                 <>
                   <p className="dshBrowserCtlAboutUpdateFound">{t('updateFound').replace('{v}', checkResult.latest)}</p>
-                  {/* 一键自更新:仅本地目录(解压/link)形态,开发副本禁用(覆盖工作区会丢开发态) */}
-                  {checkResult.install && checkResult.install.form === 'local' && !IS_TEST && (
+                  {/* 一键自更新:仅本地目录(解压/link)形态,测试副本禁用(覆盖工作区会丢开发态) */}
+                  {canApplyOneClick && (
                     <UpdateApplyButton t={t} latest={String(checkResult.latest)} />
                   )}
                   <div className="dshBrowserCtlUrlRow">
@@ -3893,6 +4309,7 @@ function AboutPanel({ t, onClose, initialResult, onDismissUpdate, onCheckResult 
                     </Tooltip>
                   </div>
                   {/* 更新方法按安装形态分:本地目录(link/解压)=覆盖目录;包安装(npm/github)=重跑安装命令 */}
+                  <div className="dshBrowserCtlAboutUpdateSep" aria-hidden="true" />
                   {checkResult.install && checkResult.install.form === 'local' && (
                     <p className="dshBrowserCtlAboutUpdateGuide">
                       {t('updateGuideLocal').replace('{dir}', (checkResult.install && checkResult.install.dir) || '')}
@@ -3906,7 +4323,7 @@ function AboutPanel({ t, onClose, initialResult, onDismissUpdate, onCheckResult 
                   )}
                   {notes.length > 0 && (
                     <>
-                      <p className="dshBrowserCtlCardDesc">{t('updateNotesTitle')}</p>
+                      <p className="dshBrowserCtlAboutUpdateLabel">{t('updateNotesTitle')}</p>
                       <ul className="dshBrowserCtlAboutUpdateNotes">
                         {notes.map((n, i) => <li key={i}>{n}</li>)}
                       </ul>
@@ -4062,7 +4479,6 @@ function ConfigPanel({ t, onClose, onSaved }) {
       params.set('host', h)
       params.set('port', String(parseInt(port, 10) || 17000))
       if (remotePort.trim()) params.set('remotePort', String(parseInt(remotePort, 10) || ''))
-      // frp_token 不再进 URL（kb/24）：query 会进闸机 reqlog 并被自动上报官方，改走 POST body
     } else {
       params.set('mode', 'official')
     }
@@ -4225,6 +4641,35 @@ function OfficialAccountCard({ t, onSaved }) {
   const pollTimer = useRef(null)
   const pendingRef = useRef(null)                 // 闭包安全:poll 读这个而非 pending(state 跨 render 会变)
   const [copiedOauth, setCopiedOauth] = useState(false)
+  // 账号密码登录(与「设备授权」并存)
+  const [pwdEmail, setPwdEmail] = useState('')
+  const [pwdPass, setPwdPass] = useState('')
+  const [busyLogin, setBusyLogin] = useState(false)
+  const pwdLogin = async () => {
+    if (busyLogin || !pwdEmail.trim() || !pwdPass) return
+    setBusyLogin(true); setErr(''); setMsg('')
+    try {
+      const r = await fetch(API_P + '/browserctl/api/server/login', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email: pwdEmail.trim(), password: pwdPass }),
+        cache: 'no-store',
+      })
+      const j = await r.json().catch(() => ({}))
+      if (j && j.ok) {
+        setMsg(t('configAcctOauthDone'))
+        setPwdEmail(''); setPwdPass('')
+        onSaved()
+        const okRestart = await restartTunnel()
+        if (!okRestart) { setErr(t('configAcctRestartFail')); setMsg('') }
+      } else {
+        setErr((j && j.error) || ('HTTP ' + r.status))
+      }
+    } catch (e) {
+      setErr(String((e && e.message) || e))
+    }
+    setBusyLogin(false)
+  }
 
   const loadAcct = async () => {
     try {
@@ -4423,6 +4868,12 @@ function OfficialAccountCard({ t, onSaved }) {
     )
   }
 
+  const inputCss = {
+    width: '100%', boxSizing: 'border-box', padding: '6px 8px', fontSize: 13,
+    background: 'transparent', color: 'inherit', borderRadius: 6,
+    border: '1px solid var(--dsw-alias-border-secondary,#3a3c41)', outline: 'none',
+  }
+  const busyPwd = busyLogin || pwdEmail.trim() === '' || pwdPass === ''
   return (
     <div className="dshBrowserCtlCfgFields">
       <label className="dshBrowserCtlCfgField">
@@ -4431,9 +4882,32 @@ function OfficialAccountCard({ t, onSaved }) {
       </label>
       {msg && <p className="dshBrowserCtlCfgNote">{msg}</p>}
       {err && <p className="dshBrowserCtlCfgErr">{err}</p>}
-      <Button variant="primary" size="sm" disabled={working} onClick={startOAuth}>
-        {busy === 'begin' ? t('configAcctOauthOpening') : t('configAcctOauthBtn')}
-      </Button>
+      <div className="dshBrowserCtlCfgFieldRow">
+        <Button variant="primary" size="sm" disabled={working} onClick={startOAuth}>
+          {busy === 'begin' ? t('configAcctOauthOpening') : t('configAcctOauthBtn')}
+        </Button>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '10px 0 4px', width: '100%',
+          fontSize: 11, color: 'var(--dsw-alias-label-tertiary,#8b8f98)' }}>
+        <span style={{ flex: '1 1 auto', height: 1, background: 'var(--dsw-alias-border-secondary,#3a3c41)' }} />
+        <span style={{ flex: '0 0 auto' }}>{t('loginOr')}</span>
+        <span style={{ flex: '1 1 auto', height: 1, background: 'var(--dsw-alias-border-secondary,#3a3c41)' }} />
+      </div>
+      <label className="dshBrowserCtlCfgField">
+        <span>{t('loginPwdTitle')}</span>
+        <input type="email" autoComplete="username" placeholder={t('loginEmail')} style={inputCss}
+          value={pwdEmail} onChange={e => setPwdEmail(e.target.value)} disabled={!!busy || busyLogin} />
+      </label>
+      <label className="dshBrowserCtlCfgField">
+        <span>{t('loginPassword')}</span>
+        <input type="password" autoComplete="current-password" placeholder={t('loginPassword')} style={inputCss}
+          value={pwdPass} onChange={e => setPwdPass(e.target.value)} disabled={!!busy || busyLogin} />
+      </label>
+      <div className="dshBrowserCtlCfgFieldRow">
+        <Button variant="secondary" size="sm" disabled={!!busy || busyPwd} onClick={pwdLogin}>
+          {busyLogin ? t('loginLoggingIn') : t('loginBtn')}
+        </Button>
+      </div>
     </div>
   )
 }
@@ -4539,7 +5013,7 @@ function buildMsgEntries(msgs, feedItems) {
   return list
 }
 
-function MsgCenter({ t, loggedInHint, onClose }) {
+function MsgCenter({ t, loggedInHint, onClose, anchorRef }) {
   const [msgs, setMsgs] = useState(null) // null=加载中
   const [feed, setFeed] = useState(null) // 电脑推送历史;null=加载中,[]=闸机没跑/无历史
   const [err, setErr] = useState('')
@@ -4547,6 +5021,45 @@ function MsgCenter({ t, loggedInHint, onClose }) {
   // 三分段:official=官方公告 | mine=发给我 | feed=电脑推送(与手机消息中心一致,每次打开重置)
   const [tab, setTab] = useState('official')
   const [detail, setDetail] = useState(null) // 点开的条目;null=列表
+  // 弹层改 fixed 定位(2026-11-25):此前 position:absolute 挂在面板头部里,面板
+  // overflow-y:auto 会把下拉裁到只剩一条(用户截图「通知中心因为限高看不见」)。
+  // 挂载时按铃铛锚点实测坐标换算 viewport 定位;下方放不下翻到上方;随窗口缩放重算。
+  // html 有 CSS zoom 时 gBCR 是视觉像素、style 是本地像素,按 kb/10 #16 口诀除以 zoom 归一。
+  const popRef = useRef(null)
+  const [popStyle, setPopStyle] = useState(null)
+  useLayoutEffect(() => {
+    const anchor = anchorRef && anchorRef.current
+    if (!anchor) return
+    const place = () => {
+      const r = anchor.getBoundingClientRect()
+      const vw = window.innerWidth, vh = window.innerHeight
+      if (!r || (!r.width && !r.height) || !vw || !vh) return
+      let z = 1
+      try { z = parseFloat(getComputedStyle(document.documentElement).zoom) || 1 } catch (e) {}
+      const w = Math.min(340, vw - 16) / z
+      const right = Math.max(8, vw - r.right) / z
+      const below = (vh - r.bottom - 12) / z // 锚点下方可用高度(本地 px)
+      const above = (r.top - 12) / z
+      const up = below < 220 && above > below
+      const maxH = Math.max(180, Math.min(480, up ? above : below))
+      setPopStyle(up
+        ? { position: 'fixed', right, bottom: (vh - r.top + 6) / z, maxHeight: maxH, width: w }
+        : { position: 'fixed', right, top: (r.bottom + 6) / z, maxHeight: maxH, width: w })
+    }
+    place()
+    window.addEventListener('resize', place)
+    return () => window.removeEventListener('resize', place)
+  }, [anchorRef])
+  // 面板/窗口任何滚动都收起下拉(fixed 弹层不跟内容走,留在原地反而错位);弹窗内部滚动除外
+  useEffect(() => {
+    const onScroll = e => {
+      const node = popRef.current
+      if (node && e.target && e.target.nodeType === 1 && node.contains(e.target)) return
+      onClose()
+    }
+    window.addEventListener('scroll', onScroll, true)
+    return () => window.removeEventListener('scroll', onScroll, true)
+  }, [onClose])
   useEffect(() => {
     let alive = true
     fetch(API_P + '/browserctl/api/server/messages', { cache: 'no-store' })
@@ -4586,7 +5099,7 @@ function MsgCenter({ t, loggedInHint, onClose }) {
   return (
     <>
       <button className="dshBrowserCtlMsgMask" type="button" aria-label={t('close')} onClick={onClose} />
-      <div className="dshBrowserCtlMsgPop" role="dialog" aria-label={t('msgCenter')}>
+      <div ref={popRef} className="dshBrowserCtlMsgPop" style={popStyle || undefined} role="dialog" aria-label={t('msgCenter')}>
         <div className="dshBrowserCtlMsgPopHead">
           {detail ? (
             <button type="button" className="dshBrowserCtlMsgBack" aria-label={t('msgBack')} onClick={() => setDetail(null)}>
@@ -4904,7 +5417,7 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
   const [msgPopOpen, setMsgPopOpen] = useState(false)
   // 当前连接模式(official/selfhost),用于判断未登录时是否显示二维码
   const [cfgMode, setCfgMode] = useState('official')
-  // 新版本提醒:页面加载/打开面板时自动检查(只看插件自身版本),关于按钮亮红点 + 居中弹窗
+  // 新版本提醒:打开面板时自动检查一次(只看插件自身版本,不再提示 App)
   const [updateInfo, setUpdateInfo] = useState(null)
   const [updTick, setUpdTick] = useState(0)   // 忽略后强制重渲染,收起弹窗/红点
   // 插件自身有新版本且该版本未被「忽略此版本」→ 关于按钮显示红点
@@ -4912,6 +5425,8 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
     && updateInfo.latest && lsGet('dsh_plugin_upd_dismiss_' + updateInfo.latest) !== '1')
   // 本次打开面板已经提示过的版本:点 X / 点遮罩 = 稍后再说(下次打开面板还会提醒)
   const [updPromptClosed, setUpdPromptClosed] = useState('')
+  // 插件有新版本 → 弹提示弹窗(与「未登录提示」同款居中面板,不是横幅)
+  // 测试副本不弹:清单版本永远 ≥ 正式版,对测试版弹「更新到正式版」是误导
   const pluginUpdPrompt = !!(pluginUpdatePending && open && !IS_TEST
     && (!updateInfo || updPromptClosed !== String(updateInfo.latest)))
   const pluginUpdNotes = (updateInfo && Array.isArray(updateInfo.notes) ? updateInfo.notes : []).slice(0, 3)
@@ -4922,26 +5437,8 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
       setUpdTick(x => x + 1)
     }
   }
-  // 页面加载即查一次新版本(不等开面板):让「关于」按钮红点开箱可亮。
-  useEffect(() => {
-    let cancelled = false
-    fetch(API_P + '/browserctl/api/update-check', { cache: 'no-store' })
-      .then(r => r.json())
-      .then(j => { if (!cancelled && j) setUpdateInfo(j) })
-      .catch(() => {})
-    return () => { cancelled = true }
-  }, [])
-  // 打开面板时再查一次(复用「关于」里的 update-check 接口),保证数据新鲜
-  useEffect(() => {
-    if (!open) return
-    let cancelled = false
-    fetch(API_P + '/browserctl/api/update-check', { cache: 'no-store' })
-      .then(r => r.json())
-      .then(j => { if (!cancelled && j) setUpdateInfo(j) })
-      .catch(() => {})
-    return () => { cancelled = true }
-  }, [open])
   const panel = useRef(null)
+  const bellRef = useRef(null) // 通知中心铃铛锚点:下拉弹层按它实测坐标做 fixed 定位
   const { data, error, expiresAt, status, retrying, refresh } = useQr(open, reloadToken, uses)
   const left = useCountdown(expiresAt)
   const run = async (label, fn) => {
@@ -4983,6 +5480,26 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
     ? (msgData.unread || 0)
     : (msgData.messages || []).filter(m => !msgIsSeen(m)).length
   const msgShowDot = !msgPopOpen && msgUnreadCount > 0
+  // 页面加载即查一次新版本(不等开面板):让「关于」按钮红点开箱可亮。
+  // 测试副本同样检查(红点有意义);自动「弹窗」仍仅正式版(见 pluginUpdPrompt 的 !IS_TEST)。
+  useEffect(() => {
+    let cancelled = false
+    fetch(API_P + '/browserctl/api/update-check', { cache: 'no-store' })
+      .then(r => r.json())
+      .then(j => { if (!cancelled && j) setUpdateInfo(j) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [])
+  // 打开面板时再查一次(复用「关于」里的 update-check 接口,含 App 发布信息),保证数据新鲜
+  useEffect(() => {
+    if (!open) return
+    let cancelled = false
+    fetch(API_P + '/browserctl/api/update-check', { cache: 'no-store' })
+      .then(r => r.json())
+      .then(j => { if (!cancelled && j) setUpdateInfo(j) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [open])
   // 加载连接模式(用于判断未登录时是否隐藏二维码)
   useEffect(() => {
     if (!open) return
@@ -5176,6 +5693,7 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
     const onKeyDown = (event) => {
       if (event.key !== 'Escape') return
       if (loginPrompt) { setLoginPrompt(false); return }
+      if (ticketOpen) { setTicketOpen(false); return }
       if (msgPopOpen) { closeMsgPop(); return }
       if (accountOpen) { setAccountOpen(false); return }
       if (aboutOpen) { setAboutOpen(false); return }
@@ -5185,7 +5703,7 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
     }
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
-  }, [actions, open, aboutOpen, configOpen, accountOpen, loginPrompt, msgPopOpen])
+  }, [actions, open, aboutOpen, configOpen, accountOpen, loginPrompt, ticketOpen, msgPopOpen])
 
   // 心跳保活:面板一打开(任意页签)就每 2 分钟向闸机报一次活动,
   // "在线设备"卡片据此判断谁还在线;关闭面板即停止上报,10 分钟后自动转为历史设备。
@@ -5255,7 +5773,7 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
             />
           </Tooltip>
           <Tooltip label={t('msgCenter')}>
-            <span className="dshBrowserCtlAboutBtn">
+            <span ref={bellRef} className="dshBrowserCtlAboutBtn">
               <Button
                 variant="ghost"
                 size="sm"
@@ -5267,7 +5785,7 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
               />
               {msgShowDot && <span className="dshBrowserCtlBadgeDot" />}
               {msgPopOpen && (
-                <MsgCenter t={t} loggedInHint={t('msgGuestHint')} onClose={closeMsgPop} />
+                <MsgCenter t={t} loggedInHint={t('msgGuestHint')} onClose={closeMsgPop} anchorRef={bellRef} />
               )}
             </span>
           </Tooltip>
@@ -5494,6 +6012,39 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
         </div>
       </section>
       {aboutOpen && <AboutPanel t={t} onClose={() => setAboutOpen(false)} initialResult={updateInfo} onDismissUpdate={dismissPluginUpdate} onCheckResult={setUpdateInfo} />}
+      {configOpen && <ConfigPanel t={t} onClose={() => setConfigOpen(false)} onSaved={refreshAll} />}
+      {accountOpen && (
+        <AccountLoginModal t={t} onClose={() => setAccountOpen(false)} onSaved={refreshAll} />
+      )}
+      {ticketOpen && (
+        <TicketModal t={t} onClose={() => setTicketOpen(false)} />
+      )}
+      {loginPrompt && (
+        <div className="dshBrowserCtlOverlay dshBrowserCtlLoginPrompt" role="dialog" aria-modal="true" aria-label={t('loginRequired')}>
+          <button className="dshBrowserCtlOverlayMask" type="button" aria-label={t('close')} onClick={() => setLoginPrompt(false)} />
+          <section className="dshBrowserCtlPanel">
+            <header className="dshBrowserCtlHeader">
+              <div>
+                <h1>{t('loginRequired')}</h1>
+              </div>
+              <Tooltip label={t('close')}>
+                <Button variant="ghost" size="sm" aria-label={t('close')} icon={<IconCloseOutlineRegular />} onClick={() => setLoginPrompt(false)} />
+              </Tooltip>
+            </header>
+            <div className="dshBrowserCtlLoginPromptBody">
+              <p className="dshBrowserCtlLoginPromptText">{t('loginRequiredDesc')}</p>
+              <div className="dshBrowserCtlLoginPromptActions">
+                <Button variant="secondary" size="sm" onClick={() => setLoginPrompt(false)}>
+                  {t('cancel')}
+                </Button>
+                <Button variant="primary" size="sm" onClick={() => { setLoginPrompt(false); setAccountOpen(true) }}>
+                  {t('aboutAccount')}
+                </Button>
+              </div>
+            </div>
+          </section>
+        </div>
+      )}
       {pluginUpdPrompt && updateInfo && (
         <div className="dshBrowserCtlOverlay dshBrowserCtlLoginPrompt" role="dialog" aria-modal="true" aria-label={t('pluginUpdTitle').replace('{v}', String(updateInfo.latest))}>
           <button className="dshBrowserCtlOverlayMask" type="button" aria-label={t('close')} onClick={() => setUpdPromptClosed(String(updateInfo.latest))} />
@@ -5545,39 +6096,6 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
           </section>
         </div>
       )}
-      {configOpen && <ConfigPanel t={t} onClose={() => setConfigOpen(false)} onSaved={refreshAll} />}
-      {accountOpen && (
-        <AccountLoginModal t={t} onClose={() => setAccountOpen(false)} onSaved={refreshAll} />
-      )}
-      {ticketOpen && (
-        <TicketModal t={t} onClose={() => setTicketOpen(false)} />
-      )}
-      {loginPrompt && (
-        <div className="dshBrowserCtlOverlay dshBrowserCtlLoginPrompt" role="dialog" aria-modal="true" aria-label={t('loginRequired')}>
-          <button className="dshBrowserCtlOverlayMask" type="button" aria-label={t('close')} onClick={() => setLoginPrompt(false)} />
-          <section className="dshBrowserCtlPanel">
-            <header className="dshBrowserCtlHeader">
-              <div>
-                <h1>{t('loginRequired')}</h1>
-              </div>
-              <Tooltip label={t('close')}>
-                <Button variant="ghost" size="sm" aria-label={t('close')} icon={<IconCloseOutlineRegular />} onClick={() => setLoginPrompt(false)} />
-              </Tooltip>
-            </header>
-            <div className="dshBrowserCtlLoginPromptBody">
-              <p className="dshBrowserCtlLoginPromptText">{t('loginRequiredDesc')}</p>
-              <div className="dshBrowserCtlLoginPromptActions">
-                <Button variant="secondary" size="sm" onClick={() => setLoginPrompt(false)}>
-                  {t('cancel')}
-                </Button>
-                <Button variant="primary" size="sm" onClick={() => { setLoginPrompt(false); setAccountOpen(true) }}>
-                  {t('aboutAccount')}
-                </Button>
-              </div>
-            </div>
-          </section>
-        </div>
-      )}
     </div>
   )
 }
@@ -5607,9 +6125,13 @@ function BrowserCtlButton({ wide, useStore, actions, t }) {
 }
 
 
-export const inject = ['slots', 'locale']
+export const inject = ['slots', 'locale', 'uiWorkspace']
 
 export function apply(ctx) {
+  // C7 推送深链：面板（含手机远控页）加载后消费 #dshremote-open=<sessionId>，
+  // 用官方 UI 导航服务切到对应会话（找不到/异常静默，不影响面板）。
+  ctx.effect(() => consumeOpenSessionHash((sid) => ctx.uiWorkspace.openSession(sid)),
+    'browserctl: push deep-link open session')
   const view = defineStore({
     init: () => ({ open: false }),
     actions: {
@@ -5618,638 +6140,8 @@ export function apply(ctx) {
     },
   })
   ctx.effect(() => ctx.locale.register(NS, {
-    zh: {
-      tab: 'DSH 远程助手',
-      tabConnect: '连接',
-      tabDevices: '设备',
-      tab2fa: '2FA',
-      tabBan: '黑名单',
-      tabLog: '日志',
-      tabApp: 'App 配对',
-      tabPush: '推送',
-      appSubtitle: '手机 App 扫一次,之后打开免扫码直连',
-      appQrAlt: '手机 App 长期配对二维码',
-      appLoading: '正在生成长期配对码…',
-      appReady: '长期配对码已生成',
-      appFailed: '配对码生成失败',
-      appOnceHint: '这是长期配对码:手机 App 扫码后登记设备并保存登录状态,之后打开免扫码直连。若扫「连接」页的一次性二维码,只会获得 1 小时临时会话,不会长期绑定。',
-      appRefresh: '刷新配对码',
-      appCopyLink: '复制配对链接',
-      appNoQr: '长期配对码不可用',
-      subtitle: '手机扫码或复制链接,直接打开本机助手面板',
-      about: '关于',
-      config: '配置',
-      aboutAccount: '账号登录',
-      aboutAccountLogged: '已登录',
-      loginRequired: '需要先登录',
-      loginRequiredDesc: '使用官方服务器需要先登录账号,登录后才会分配专属入口。点击下方按钮前往登录。',
-      startFailed: '启动失败:',
-      aboutDesc: '把本机 DeepSeek 助手 Web 面板安全穿透到手机或外网浏览器,随时随地远程控制。',
-      aboutWebsite: '官网',
-      aboutGithub: 'GitHub',
-      aboutApp: 'App 下载',
-      aboutQq: '加入QQ群',
-      updateCheck: '检查更新',
-      updateChecking: '检查中…',
-      updateRecheck: '重新检查',
-      updateCur: '当前版本',
-      updateLst: '最新版本',
-      updateFound: '发现新版本 v{v}',
-      updateDownload: '下载新版本',
-      updateNotesTitle: '更新说明',
-      updateUpToDate: '已是最新版本',
-      updateFailed: '更新检查失败',
-      updateIgnore: '忽略此版本',
-      pluginUpdTitle: '发现插件新版本 v{v}',
-      pluginUpdDesc: '当前版本 v{cur},官网已发布 v{v}。更新后可获得最新修复与新功能。',
-      updateGuideLocal: '更新方法：下载新 zip 解压后覆盖插件目录（{dir}），重启 DSH 生效；若覆盖后隧道起不来，先双击目录里的 fix-antivirus.bat 解除杀软拦截',
-      updateGuidePackage: '更新方法：命令行执行 {cmd}，重启 DSH 生效',
-      updateApplyBtn: '一键更新到 v{v}',
-      updateApplying: '正在更新（下载并覆盖，勿关闭面板）…',
-      updateApplyDone: '已更新到 v{v}，重启 DSH 后生效',
-      updateApplyTip: '自动下载官方 zip 覆盖当前插件目录（会先停止隧道），重启 DSH 即完成更新；仅适用于解压目录安装',
-      updateRecheckTip: '重新向官方更新源查询最新版本（数据源：GitHub Release，官网服务器每小时同步，国内直连）',
-      updateDownloadTip: '在浏览器打开官方 zip 直链手动下载（约 6.4 MB，走官网服务器）；一键更新失败时的备用方式',
-      updateIgnoreTip: '本版本不再提醒；官网发布更新版本后会重新提示',
-      updateGuideTestNote: '（开发副本：一键更新已禁用——覆盖工作区会丢开发态，请用发布工具同步正式版）',
-      legalTerms: '用户协议',
-      legalPrivacy: '隐私政策',
-      legalMeta: '生效 {d} · 版本 {v}',
-      legalAck: '我知道了',
-      configSubtitle: '选择连接官方服务器或你自己的 frps 服务器',
-      configOfficial: '官方服务器',
-      configOfficialHint: '注册 / 登录官方账号,开箱即用',
-      configOfficialNote: '使用官方服务器:登录(或注册)账号后自动分配专属入口,无需手工填写任何服务器信息。',
-      configAcctTitle: '官方账号',
-      configAcctLoggedIn: '已登录',
-      configAcctPort: '专属端口',
-      configAcctLogout: '退出登录',
-      configAcctLoggingOut: '退出中…',
-      configAcctLoggedOut: '已退出(隧道将断开,重新登录可恢复)',
-      configAcctOauthBtn: '登录 / 注册官方账号',
-      configAcctOauthHint: '将打开浏览器跳转官网,在网页完成登录/注册后自动回调',
-      configAcctOauthOpening: '正在打开浏览器…',
-      configAcctOauthWait: '等待授权…',
-      configAcctOauthOpenBrowser: '已打开浏览器:请在官网页面登录账号并点「确认授权」。若未自动打开,请点下方按钮重试。',
-      configAcctOauthOpenAgain: '重新打开授权页',
-      configAcctOauthOpenFail: '自动打开浏览器失败:请点下方链接手动打开授权页。',
-      configAcctCopy: '复制链接',
-      configAcctCopied: '已复制',
-      configAcctOauthCancel: '取消',
-      configAcctOauthExpired: '授权已过期,请重新发起。',
-      configAcctOauthFail: '授权失败:',
-      configAcctOauthNetwork: '官方服务器暂时不可达,请稍后再试。',
-      configAcctOauthDone: '授权成功,正在应用账号与专属端口…',
-      configAcctRestartFail: '登录成功,但隧道重启失败:请点「开始控制」手动启动。',
-      configAcctLoadFail: '官方服务器暂时不可达,请稍后再试。',
-      configSelfhost: '自建服务器',
-      configSelfhostHint: '使用你自己的 frps 服务器',
-      configHost: '服务器地址 (host)',
-      configHostPh: '例如 frps.example.com',
-      configPort: 'frps 端口',
-      configRemotePort: '远程端口 (可选)',
-      configToken: 'FRP token',
-      configTokenPh: '输入 frps 认证 token',
-      configTokenKeep: '已保存(留空保持不变)',
-      configTokenNote: 'Token 仅保存在本机 browserctl_secrets.json(已被 gitignore 排除,不会提交或上传)。',
-      configHostRequired: '请填写服务器地址',
-      configTestBtn: '测试连接',
-      configTesting: '测试中…',
-      configTestVer: '探针 frpc v{v}(自建 frps 不要求与客户端版本完全一致,建议同代相近)',
-      configTestOkTitle: '✅ 连接成功:frps 可达,token 有效',
-      configTestOkHint: '当前配置可以正常建立隧道,点「保存」后即可使用。',
-      configTestAuthTitle: '❌ 服务器可达,但 token 被拒绝',
-      configTestAuthHint: 'frps 服务的 token 与这里填写的不一致:核对 frps.toml 的 auth.token 与配置面板里的 token 是否完全相同(注意首尾空格)。',
-      configTestDnsTitle: '❌ 域名解析失败:「{h}」',
-      configTestDnsHint: '域名不存在或还没生效:检查拼写、DNS 解析(A 记录)是否已配置,或直接改用服务器 IP 测试。',
-      configTestRefusedTitle: '❌ 连接被拒绝(端口未开放)',
-      configTestRefusedHint: 'frps 可能没在运行,或端口不对:确认服务器上 frps 已启动,bindPort/kcpBindPort 与这里填的端口一致。',
-      configTestUnreachTitle: '❌ 服务器不可达(TCP 与 UDP 都连不上)',
-      configTestUnreachHint: '地址或端口填错、frps 没在运行、或防火墙/云安全组拦截:先在服务器上确认 frps 进程活着,再检查安全组是否放行该端口的 TCP+UDP。',
-      configTestKcpTitle: '⚠️ frps 可达,但 KCP(UDP)连不通',
-      configTestKcpHint: '插件的隧道走 KCP(UDP)。需要在 frps.toml 里加 kcpBindPort = <端口>(可与 bindPort 同号,TCP/UDP 不同协议不冲突),并在云安全组放行同端口的 UDP。',
-      configTestProtoTitle: '⚠️ 连上了但握手失败(疑似 frps 版本或 TLS 配置不兼容)',
-      configTestProtoHint: '自建 frps 与探针 frpc({v})版本差距过大,或 frps 强制了不同 TLS 配置:建议把 frps 升级到 0.52+ 的同代版本再试。',
-      configTestToolTitle: '❌ frpc 探针无法启动',
-      configTestToolHint: 'frpc.exe 可能被安全软件隔离:先运行插件目录里的 fix-antivirus.bat,再重试。',
-      configTestErrTitle: '❌ 测试失败',
-      save: '保存',
-      saving: '保存中…',
-      saved: '已保存',
-      cancel: '取消',
-      close: '关闭',
-      startCtl: '开始控制',
-      starting: '正在启动隧道…',
-      stopCtl: '停止控制',
-      stopping: '正在停止…',
-      elevateStart: '以管理员身份启动',
-      elevateStop: '以管理员身份停止',
-      elevating: '等待提权确认…',
-      elevateHint: '若失败原因是杀软拦了 frpc.exe 或被权限挡住,点下面按钮用管理员权限重试(Windows 会弹 UAC 确认框)。',
-      elevateStopHint: '停止没生效:这套进程可能以管理员身份在跑,普通权限杀不掉。',
-      copyLink: '复制链接',
-      copied: '已复制',
-      refresh: '刷新二维码',
-      openPanel: '打开面板',
-      opening: '正在打开…',
-      openFailed: '打开面板失败',
-      qrAlt: '配对二维码',
-      pairOnce: '一次性配对链接',
-      pairLeft: '剩余',
-      pairExpired: '配对已过期,点"刷新二维码"重新生成',
-      pairStatic: '引导链接(24 小时有效)',
-      pairAppTempNote: '手机 App 扫此码只获得 1 小时临时会话,不会长期绑定;要长期免扫码请用「App 配对」页签。',
-      pairUses: '已扫码',
-      pairUsesLabel: '扫码次数',
-      pairUsesOne: '1 次(扫完换码)',
-      pairUsesTimes: '次',
-      pairSwap: '换一个码',
-      linkTitle: 'iOS / 无 App 设备',
-      linkWebTag: '网页绑定',
-      linkSubtitle: '没有 App 的设备(iPhone / iPad)用「长期配对码」绑定网页版:扫一次码登记设备,30 天免验证,再「添加到主屏幕」当 App 用,不再需要 PWA 引导链接。',
-      linkCopy: '复制链接',
-      linkCopied: '已复制',
-      linkOpenSite: '打开官网',
-      linkStepsTitle: '绑定步骤',
-      linkStep1: '手机浏览器打开上面的官网地址(可登录账号看设备与时长;这个入口长期不变,端口怎么变都不受影响)',
-      linkStep2: '电脑端切到本面板的「App 配对」页签,出示长期配对码(扫完会自动换新码)',
-      linkStep3: '用 iPhone 相机扫这个码(别用微信扫):浏览器打开即自动登记设备并绑定,30 天免验证直达面板',
-      linkStep4: '在面板页面点浏览器「分享 → 添加到主屏幕」,把入口永久保存;免验证期过后再扫一次码即可恢复',
-      linkNote: '扫码绑定的设备会出现在「App 配对」页签「已配对的手机」列表,可随时解除;配对码别截图发给别人。',
-      statusLoading: '正在生成二维码…',
-      statusReady: '隧道就绪,扫码即可打开面板',
-      statusTunnelStarting: '隧道正在建立,请稍候几秒后刷新二维码',
-      statusTunnelBuilding: '隧道正在建立,几秒后自动出二维码(无需再点「开始控制」)',
-      statusNoSecret: '隧道未就绪:点下方"开始控制"启动本机穿透,几秒后自动出二维码',
-      totpTitle: '两步验证 (2FA)',
-      totpOn: '已启用',
-      totpOff: '未启用',
-      totpHint: '启用后,所有设备打开面板前必须先输入验证器 6 位动态码(RFC 6238);连错 5 次冻结 15 分钟,同码防重放。绑定方式:用手机验证器扫描下方二维码或手动输入密钥。',
-      totpHintShort: '开启后,手机打开面板需先输入验证器 6 位动态码;连错 5 次冻结 15 分钟。',
-      totpAppHint: '手机端需要安装验证器 App 生成动态码,推荐微软官方 Microsoft Authenticator:',
-      totpAppLink: '微软官网下载',
-      totpBind: '2FA 绑定二维码',
-      totpSecretLabel: '密钥(手动输入用)',
-      totpEnable: '启用 2FA',
-      totpDisable: '禁用 2FA',
-      totpReset: '重置密钥',
-      totpKick: '全部踢下线',
-      devicesTitle: '在线设备',
-      devicesOnline: '在线 {n} 台',
-      noDevices: '暂无已验证设备',
-      noOnlineDevices: '当前没有设备在线',
-      noDevicesHint: '手机扫码打开面板并通过动态码验证后,设备会显示在这里;本机直开的面板不计入。',
-      deviceSeen: '活跃:',
-      deviceKick: '踢下线',
-      copySecret: '复制密钥',
-      logTitle: '运行日志',
-      logEmpty: '暂无日志。设备验证、踢下线、2FA 开关都会记录在这里。',
-      banTitle: 'IP 黑名单',
-      banEmpty: '暂无被封禁的 IP 地址。在设备列表点“拉黑”可添加。',
-      pushTitle: '消息推送',
-      pushDesc: '把设备连入、被踢、黑名单、2FA、配对等安全事件,以及系统消息实时推送到你的手机。',
-      pushOn: '已开启',
-      pushOff: '未开启',
-      pushEnabledLabel: '接收手机推送',
-      pushEnabledHint: '总开关:开启后手机可收到本机面板的推送消息',
-      pushSystemLabel: '系统安全事件',
-      pushSystemHint: '设备连入 / 被踢 / 黑名单 / 2FA / 配对',
-      pushTest: '发送测试推送',
-      pushTesting: '发送中…',
-      pushTestTitle: '测试推送',
-      pushTestBody: '这是一条来自 DSH 远程助手的测试推送消息',
-      pushTestOk: '测试推送已发送',
-      pushTestFail: '测试推送发送失败',
-      pushComposerTitle: '发送消息',
-      pushComposerHint: '发送后,手机 App 与本机通知中心都会弹出这条消息',
-      pushMsgTitleLabel: '标题(可选)',
-      pushMsgTitlePh: '不填则只显示消息内容',
-      pushMsgBodyLabel: '内容',
-      pushMsgBodyPh: '输入要推送的消息…',
-      pushSend: '发送',
-      pushSending: '发送中…',
-      pushSendOk: '消息已推送',
-      pushSendOff: '推送开关未开启,消息未发出',
-      pushSendFail: '消息发送失败',
-      pushSaveFailed: '设置保存失败',
-      pushRecent: '最近推送',
-      pushRefresh: '刷新',
-      pushRefreshing: '刷新中…',
-      pushEmpty: '暂无推送。开启推送后,安全事件会显示在这里。',
-      pushPollFailed: '读取推送配置失败',
-      pushKindTest: '测试',
-      pushKindVerify: '验证',
-      pushKindKick: '踢下线',
-      pushKindBan: '黑名单',
-      pushKindTotp: '2FA',
-      pushKindPair: '配对',
-      pushKindJoin: '设备连入',
-      pushKindDev: '设备',
-      pushKindMsg: '消息',
-      // ---- 顶栏通知中心(铃铛) ----
-      msgCenter: '通知中心',
-      msgEmpty: '暂无通知',
-      msgLoadFail: '通知加载失败',
-      msgOfficial: '官方公告',
-      msgPersonal: '发给我的',
-      msgOpenLink: '查看链接',
-      msgGuestHint: '当前显示全员公告;登录官方账号后可接收发给你的定向消息。',
-      msgTabFeed: '电脑推送',
-      msgBack: '返回列表',
-      msgEmptyOfficial: '暂无公告',
-      msgEmptyMine: '暂无消息',
-      msgEmptyFeed: '暂无电脑推送;电脑端开启推送后,历史通知会汇总在这里。',
-      msgNoTitle: '(无标题)',
-      msgStyleUpdate: '版本更新',
-      msgStyleWarning: '安全提醒',
-      msgStyleEvent: '活动',
-      // ---- 工单反馈(导出日志 → 网页端提交) ----
-      tickets: '工单反馈',
-      ticketExportSubtitle: '导出本机诊断日志（自动打码），然后选择日志去向。',
-      ticketExportDo: '生成并导出诊断日志',
-      ticketExporting: '正在导出…',
-      ticketExportAgain: '重新导出',
-      ticketExportDone: '已导出到：',
-      ticketDestTitle: '导出去向',
-      ticketOpenWeb: '打开网页版工单',
-      ticketOpenWebDesc: '推荐：登录后在网页端提交工单，并把这份 txt 作为「运行日志」上传。',
-      ticketSaveOther: '存到其他文件夹',
-      ticketSaveOtherDesc: '把这份日志再存一份到你选的文件夹。',
-      ticketCopyContent: '复制日志内容',
-      ticketCopyContentDesc: '把已打码的全文复制到剪贴板，可直接粘贴给别人。',
-      ticketOpenFolder: '打开所在文件夹',
-      ticketOpening: '正在打开…',
-      ticketCopyPath: '复制路径',
-      ticketCopyPathOk: '路径已复制',
-      ticketCopyOk: '日志内容已复制到剪贴板',
-      ticketCopyFail: '复制失败，请打开导出的 txt 手动复制。',
-      ticketSavePathPh: '粘贴文件夹完整路径，如 C:\\Users\\你\\Documents',
-      ticketSaveGo: '保存到这里',
-      ticketSaving: '正在保存…',
-      ticketSaveOk: '已另存到：',
-      ticketNoContent: '日志还没生成，请先「生成并导出诊断日志」。',
-      ticketExportNote: '日志只在本机生成、不会自动上传；何时上传、上传哪一版完全由你在网页端决定。',
-      ticketExportHostOld: '插件宿主还是旧版本（新功能要完全重启 DSH 才生效）。请彻底退出 DSH 再重新打开，然后重试。',
-      // ---- 批次1-C2:会话有效期 / 批次1-A5:主机遥测 ----
-      sdTitle: '会话有效期',
-      sdCurrent: '当前 {n} 天',
-      sdLoading: '…',
-      sdDay1: '1 天',
-      sdDay7: '7 天',
-      sdDay30: '30 天',
-      sdHint: '新设备验证通过后,免重复验证的有效期。只影响之后新签发的会话;要立即让全部设备重新验证,用 2FA 页的「全部踢下线」。',
-      sdSaveFail: '保存失败',
-      sdLoadFail: '读取失败(闸机未运行?)',
-      // ---- 批次4-②:L1 设备签名强制开关 ----
-      sigTitle: '强制设备签名',
-      sigLoading: '…',
-      sigOff: '宽容期',
-      sigOn: '强制',
-      sigCounts: '设备 {d} · 持密钥 {k} · 持公钥 {p}',
-      sigSwitchLabel: '开启强制校验',
-      sigSwitchHint: '开启后,无有效设备签名的请求一律 401+引导页;持 30 天会话但未绑密钥的设备会被拒。',
-      sigConfirm: '再确认一次:所有常用设备都已升级到 v1.0.55+ 并完成密钥绑定?开启误伤自己时,回来这里关掉即可(立即生效)。',
-      sigYes: '确认开启',
-      sigCancel: '取消',
-      sigHint: '判据:运行日志里「宽容期:无签名请求」不再出现(事件 60s 节流,关掉手机浏览器后台刷新再等几分钟再看)。',
-      sigFail: '切换失败(需 DSH 重启后生效的 host 路由未就绪?)',
-      sigDevs: '设备凭证',
-      sigRevoke: '停止授权',
-      sigRevoking: '停止中…',
-      sigRevoked: '已停止授权,该设备需重新配对或输动态码',
-      sigHasPub: '公钥',
-      sigHasKeyB: '密钥',
-      sigNoKey: '无密钥',
-      sigDedupe: '一键去重({n})',
-      sigDedupeHint: '同机重复档案 {n} 台:删除多余档案(并停止其授权),只保留最新一台',
-      sigDedupeYes: '确认去重',
-      sigDedupeDone: '已删除 {n} 台重复档案',
-      sigDedupePart: '已删除 {ok}/{n} 台,其余只停止授权(删档需新版闸机+本机面板)',
-      sigFail2: '操作失败',
-      sysTitle: '主机状态',
-      sysLoading: '读取中…',
-      sysFail: '读取失败(闸机未运行?)',
-      sysMem: '内存',
-      sysFree: '余',
-      sysCached: '缓存',
-      sysHint: '数据来自本机闸机,约 10 秒缓存。',
-      pushKindAnnounce: '公告',
-    },
-    en: {
-      tab: 'DshRemote',
-      tabConnect: 'Connect',
-      tabDevices: 'Devices',
-      tab2fa: '2FA',
-      tabBan: 'Blacklist',
-      tabLog: 'Log',
-      tabApp: 'App Pairing',
-      tabPush: 'Push',
-      appSubtitle: 'Scan once to pair; the app reconnects without scanning',
-      appQrAlt: 'Long-term pairing QR code',
-      appLoading: 'Generating long-term pairing code…',
-      appReady: 'Long-term pairing code ready',
-      appFailed: 'Failed to generate pairing code',
-      appOnceHint: 'This is a long-term pairing code: the app registers the device and saves its login, then reconnects without scanning. Scanning the one-time QR on the "Connect" tab only grants a 1-hour temporary session, not a persistent binding.',
-      appRefresh: 'Refresh pairing code',
-      appCopyLink: 'Copy pairing link',
-      appNoQr: 'Long-term pairing code unavailable',
-      subtitle: 'Scan or copy the link to open this panel from any device',
-      about: 'About',
-      config: 'Settings',
-      aboutAccount: 'Sign in',
-      aboutAccountLogged: 'Signed in',
-      loginRequired: 'Sign in required',
-      loginRequiredDesc: 'Using the official server requires signing in first; a dedicated entry is assigned after login. Tap below to sign in.',
-      startFailed: 'Start failed:',
-      aboutDesc: 'Securely tunnel this DeepSeek assistant web panel to your phone or any browser for remote control, anywhere.',
-      aboutWebsite: 'Website',
-      aboutGithub: 'GitHub',
-      aboutApp: 'App Download',
-      aboutQq: 'QQ Group',
-      updateCheck: 'Check for updates',
-      updateChecking: 'Checking…',
-      updateRecheck: 'Check again',
-      updateCur: 'Current version',
-      updateLst: 'Latest version',
-      updateFound: 'New version v{v} available',
-      updateDownload: 'Download',
-      updateNotesTitle: 'Release notes',
-      updateUpToDate: 'You are up to date',
-      updateFailed: 'Update check failed',
-      updateIgnore: 'Ignore this version',
-      pluginUpdTitle: 'New plugin version v{v}',
-      pluginUpdDesc: 'You are on v{cur}; v{v} has been released with the latest fixes and features.',
-      updateGuideLocal: 'To update: download the new zip, extract it over the plugin folder ({dir}), then restart DSH. If the tunnel fails afterwards, run fix-antivirus.bat in the folder first',
-      updateGuidePackage: 'To update: run "{cmd}" in a terminal, then restart DSH',
-      updateApplyBtn: 'Update to v{v}',
-      updateApplying: 'Updating (downloading & overwriting)…',
-      updateApplyDone: 'Updated to v{v}; restart DSH to apply',
-      updateApplyTip: 'Downloads the official zip and overwrites this plugin folder (the tunnel stops first). Restart DSH to finish; works for extracted-folder installs only',
-      updateRecheckTip: 'Query the official update source again (GitHub Release, mirrored hourly by the website server)',
-      updateDownloadTip: 'Open the official zip direct link in your browser (about 6.4 MB) as a manual fallback',
-      updateIgnoreTip: 'Skip reminders for this version; newer releases will notify again',
-      updateGuideTestNote: ' (dev copy: one-click update is disabled here — use the release tool to sync)',
-      legalTerms: 'User Agreement',
-      legalPrivacy: 'Privacy Policy',
-      legalMeta: 'Effective {d} · Version {v}',
-      legalAck: 'Got it',
-      configSubtitle: 'Connect to the official server or your own frps server',
-      configOfficial: 'Official server',
-      configOfficialHint: 'Register / sign in to your official account — works out of the box',
-      configOfficialNote: 'Official server: sign in (or register) and a dedicated entry is assigned automatically — no server details to fill in.',
-      configAcctTitle: 'Official account',
-      configAcctLoggedIn: 'Signed in',
-      configAcctPort: 'Dedicated port',
-      configAcctLogout: 'Sign out',
-      configAcctLoggingOut: 'Signing out…',
-      configAcctLoggedOut: 'Signed out (tunnel will disconnect; sign in again to restore)',
-      configAcctOauthBtn: 'Sign in / Register',
-      configAcctOauthHint: 'Your browser will open the official site to sign in / register, then come back automatically',
-      configAcctOauthOpening: 'Opening browser…',
-      configAcctOauthWait: 'Waiting for approval…',
-      configAcctOauthOpenBrowser: 'Browser opened: sign in to your account on the site and click "Approve". If it did not open, use the button below.',
-      configAcctOauthOpenAgain: 'Reopen approval page',
-      configAcctOauthOpenFail: 'Could not open your browser automatically — open the approval page via the link below.',
-      configAcctCopy: 'Copy link',
-      configAcctCopied: 'Copied',
-      configAcctOauthCancel: 'Cancel',
-      configAcctOauthExpired: 'Authorization expired, please start again.',
-      configAcctOauthFail: 'Authorization failed:',
-      configAcctOauthNetwork: 'Official server unreachable, please try again later.',
-      configAcctOauthDone: 'Authorized — applying your account and dedicated port…',
-      configAcctRestartFail: 'Signed in, but tunnel restart failed: press "Start" to launch it manually.',
-      configAcctLoadFail: 'Official server unreachable, please try again later.',
-      configSelfhost: 'Self-hosted server',
-      configSelfhostHint: 'Use your own frps server',
-      configHost: 'Server address (host)',
-      configHostPh: 'e.g. frps.example.com',
-      configPort: 'frps port',
-      configRemotePort: 'Remote port (optional)',
-      configToken: 'FRP token',
-      configTokenPh: 'Enter the frps auth token',
-      configTokenKeep: 'Saved (leave blank to keep)',
-      configTokenNote: 'Token is stored only in local browserctl_secrets.json (gitignored, never committed or uploaded).',
-      configHostRequired: 'Server address is required',
-      configTestBtn: 'Test connection',
-      configTesting: 'Testing…',
-      configTestVer: 'Probe frpc v{v} (a self-hosted frps does not need the exact same version; keep it in the same generation)',
-      configTestOkTitle: '✅ Connection OK: frps reachable, token valid',
-      configTestOkHint: 'This configuration can establish the tunnel; click Save to use it.',
-      configTestAuthTitle: '❌ Server reachable, but the token was rejected',
-      configTestAuthHint: 'The frps token does not match what you typed: check auth.token in frps.toml against the token field here (watch for stray spaces).',
-      configTestDnsTitle: '❌ DNS lookup failed: "{h}"',
-      configTestDnsHint: 'The domain does not resolve yet: check the spelling and the DNS A record, or test with the server IP directly.',
-      configTestRefusedTitle: '❌ Connection refused (port not open)',
-      configTestRefusedHint: 'frps may not be running, or the port is wrong: make sure frps is up and its bindPort/kcpBindPort matches the port here.',
-      configTestUnreachTitle: '❌ Server unreachable (both TCP and UDP failed)',
-      configTestUnreachHint: 'Wrong address/port, frps down, or a firewall/security-group block: confirm the frps process on the server, then allow this port (TCP+UDP) in your cloud security group.',
-      configTestKcpTitle: '⚠️ frps reachable, but KCP (UDP) fails',
-      configTestKcpHint: 'The plugin tunnel uses KCP (UDP). Add kcpBindPort = <port> to frps.toml (may equal bindPort; TCP/UDP do not conflict) and allow the same port over UDP in your security group.',
-      configTestProtoTitle: '⚠️ Connected but handshake failed (possible frps version or TLS mismatch)',
-      configTestProtoHint: 'Your frps is too far from probe frpc ({v}) or enforces different TLS settings: upgrade frps to a same-generation release (0.52+) and retry.',
-      configTestToolTitle: '❌ Failed to launch the frpc probe',
-      configTestToolHint: 'frpc.exe may be quarantined by antivirus: run fix-antivirus.bat from the plugin folder first, then retry.',
-      configTestErrTitle: '❌ Test failed',
-      save: 'Save',
-      saving: 'Saving…',
-      saved: 'Saved',
-      cancel: 'Cancel',
-      close: 'Close',
-      startCtl: 'Start control',
-      starting: 'Starting tunnel…',
-      stopCtl: 'Stop control',
-      stopping: 'Stopping…',
-      elevateStart: 'Start as administrator',
-      elevateStop: 'Stop as administrator',
-      elevating: 'Waiting for elevation…',
-      elevateHint: 'If antivirus blocked frpc.exe or permissions got in the way, retry with administrator rights below (Windows will show a UAC prompt).',
-      elevateStopHint: 'Stop did not take effect: these processes may be running as administrator.',
-      copyLink: 'Copy link',
-      copied: 'Copied',
-      refresh: 'Refresh QR',
-      openPanel: 'Open panel',
-      opening: 'Opening…',
-      openFailed: 'Failed to open panel',
-      qrAlt: 'Pairing QR code',
-      pairOnce: 'One-time pairing link',
-      pairLeft: 'expires in',
-      pairExpired: 'Pairing expired — refresh to generate a new one',
-      pairStatic: 'Bootstrap link (valid for 24 hours)',
-      pairAppTempNote: 'Scanning this code with the app grants only a 1-hour temporary session; for long-term pairing use the "App pairing" tab.',
-      pairUses: 'used',
-      pairUsesLabel: 'Uses',
-      pairUsesOne: '1 use (rotate after scan)',
-      pairUsesTimes: 'uses',
-      pairSwap: 'New code',
-      linkTitle: 'iOS / No-App devices',
-      linkWebTag: 'Web pairing',
-      linkSubtitle: 'For devices without the app (iPhone / iPad): open the official site, then scan the long-term pairing code from the "App pairing" tab — one scan registers the device for 30 days of verification-free access; then "Add to Home Screen" to use it like an app. No PWA invite link needed.',
-      linkCopy: 'Copy link',
-      linkCopied: 'Copied',
-      linkOpenSite: 'Open site',
-      linkStepsTitle: 'Binding steps',
-      linkStep1: 'Open the official site above in the phone browser (sign-in optional; this entry never changes, no matter how ports rotate)',
-      linkStep2: 'On the computer, switch to the "App pairing" tab and show the long-term pairing code (it rotates automatically after each scan)',
-      linkStep3: 'Scan it with the iPhone camera (not WeChat): the browser registers and binds the device, then opens the panel verification-free for 30 days',
-      linkStep4: 'On the panel page, tap Share → "Add to Home Screen" to keep the entry permanently; after the 30-day window, scan a fresh code to renew',
-      linkNote: 'Paired devices appear in the "App pairing" tab and can be unpaired anytime; never share the pairing code with others.',
-      statusLoading: 'Generating QR code…',
-      statusReady: 'Tunnel ready — scan to open the panel',
-      statusTunnelStarting: 'Tunnel starting; refresh the QR in a few seconds',
-      statusTunnelBuilding: 'Tunnel is starting — the QR appears automatically in a few seconds (no need to click Start again)',
-      statusNoSecret: 'Tunnel not ready: click "Start control" below, QR appears in a few seconds',
-      totpTitle: 'Two-Factor Auth (2FA)',
-      totpOn: 'Enabled',
-      totpOff: 'Disabled',
-      totpHint: 'When enabled, every device must pass a 6-digit authenticator code (RFC 6238) before opening the panel; 5 wrong tries lock for 15 minutes; replayed codes are rejected.',
-      totpHintShort: 'Devices must enter a 6-digit code to open the panel; 5 wrong tries lock for 15 minutes.',
-      totpAppHint: 'An authenticator app on the phone generates the codes; Microsoft Authenticator is recommended:',
-      totpAppLink: 'Get it from Microsoft',
-      totpBind: '2FA binding QR code',
-      totpSecretLabel: 'Secret (manual entry)',
-      totpEnable: 'Enable 2FA',
-      totpDisable: 'Disable 2FA',
-      totpReset: 'Reset secret',
-      totpKick: 'Kick all devices',
-      devicesTitle: 'Online devices',
-      devicesOnline: '{n} online',
-      noDevices: 'No verified devices yet',
-      noOnlineDevices: 'No devices online right now',
-      noDevicesHint: 'Devices appear here after opening the panel via the QR link and passing the 2FA code; locally opened panels are not counted.',
-      deviceSeen: 'Active:',
-      deviceKick: 'Kick',
-      copySecret: 'Copy secret',
-      logTitle: 'Event log',
-      logEmpty: 'No events yet. Device verifications, kicks and 2FA toggles are recorded here.',
-      banTitle: 'IP Blacklist',
-      banEmpty: 'No banned IPs. Click "Ban" on a device to add.',
-      pushTitle: 'Push Notifications',
-      pushDesc: 'Realtime push of security events — device connect / kick / blacklist / 2FA / pairing — plus system messages to your phone.',
-      pushOn: 'On',
-      pushOff: 'Off',
-      pushEnabledLabel: 'Receive phone push',
-      pushEnabledHint: 'Master switch: receive push from this panel on your phone',
-      pushSystemLabel: 'Security events',
-      pushSystemHint: 'Device connect / kick / blacklist / 2FA / pairing',
-      pushTest: 'Send test push',
-      pushTesting: 'Sending…',
-      pushTestTitle: 'Test push',
-      pushTestBody: 'This is a test push from DSH Remote Assistant',
-      pushTestOk: 'Test push sent',
-      pushTestFail: 'Failed to send test push',
-      pushComposerTitle: 'Send a message',
-      pushComposerHint: 'The message pops up on the phone App and in this PC\'s notification centre',
-      pushMsgTitleLabel: 'Title (optional)',
-      pushMsgTitlePh: 'Leave empty to show the message only',
-      pushMsgBodyLabel: 'Content',
-      pushMsgBodyPh: 'Type the message to push…',
-      pushSend: 'Send',
-      pushSending: 'Sending…',
-      pushSendOk: 'Message pushed',
-      pushSendOff: 'Push is off — message not sent',
-      pushSendFail: 'Failed to send message',
-      pushSaveFailed: 'Failed to save settings',
-      pushRecent: 'Recent pushes',
-      pushRefresh: 'Refresh',
-      pushRefreshing: 'Refreshing…',
-      pushEmpty: 'No pushes yet. Security events will appear here once push is enabled.',
-      pushPollFailed: 'Failed to load push config',
-      pushKindTest: 'Test',
-      pushKindVerify: 'Verify',
-      pushKindKick: 'Kick',
-      pushKindBan: 'Ban',
-      pushKindTotp: '2FA',
-      pushKindPair: 'Pair',
-      pushKindJoin: 'Connect',
-      pushKindDev: 'Device',
-      pushKindMsg: 'Message',
-      // ---- Header notification centre (bell) ----
-      msgCenter: 'Notifications',
-      msgEmpty: 'No notifications',
-      msgLoadFail: 'Failed to load notifications',
-      msgOfficial: 'Announcement',
-      msgPersonal: 'For you',
-      msgOpenLink: 'Open link',
-      msgGuestHint: 'Showing public announcements; sign in to the official account to receive direct messages.',
-      msgTabFeed: 'From this PC',
-      msgBack: 'Back to list',
-      msgEmptyOfficial: 'No announcements',
-      msgEmptyMine: 'No messages',
-      msgEmptyFeed: 'No pushes yet. Once push is enabled on this PC, its notifications will be collected here.',
-      msgNoTitle: '(no title)',
-      msgStyleUpdate: 'Update',
-      msgStyleWarning: 'Security notice',
-      msgStyleEvent: 'Event',
-      // ---- ticket feedback (export logs -> choose destination) ----
-      tickets: 'Ticket Feedback',
-      ticketExportSubtitle: 'Export the local diagnostic log (auto-redacted), then choose where it goes.',
-      ticketExportDo: 'Export diagnostic logs',
-      ticketExporting: 'Exporting…',
-      ticketExportAgain: 'Export again',
-      ticketExportDone: 'Exported to:',
-      ticketDestTitle: 'Where the log goes',
-      ticketOpenWeb: 'Open web ticket page',
-      ticketOpenWebDesc: 'Recommended: sign in, submit the ticket on the web and upload this txt as a log file.',
-      ticketSaveOther: 'Save to another folder',
-      ticketSaveOtherDesc: 'Keep another copy of this log in a folder you choose.',
-      ticketCopyContent: 'Copy log content',
-      ticketCopyContentDesc: 'Copy the redacted full text to the clipboard for pasting into a chat.',
-      ticketOpenFolder: 'Open folder',
-      ticketOpening: 'Opening…',
-      ticketCopyPath: 'Copy path',
-      ticketCopyPathOk: 'Path copied',
-      ticketCopyOk: 'Log content copied to clipboard',
-      ticketCopyFail: 'Copy failed — open the exported txt and copy manually.',
-      ticketSavePathPh: 'Paste a full folder path, e.g. C:\\Users\\you\\Documents',
-      ticketSaveGo: 'Save here',
-      ticketSaving: 'Saving…',
-      ticketSaveOk: 'Saved to: ',
-      ticketNoContent: 'Log not generated yet — click "Export diagnostic logs" first.',
-      ticketExportNote: 'Logs are generated locally and never uploaded automatically; you decide what to upload on the web.',
-      ticketExportHostOld: 'The plugin host is still the old version (this feature needs a full DSH restart). Quit DSH completely, reopen it, then try again.',
-      sdTitle: 'Session lifetime',
-      sdCurrent: 'Currently {n} days',
-      sdLoading: '…',
-      sdDay1: '1 day',
-      sdDay7: '7 days',
-      sdDay30: '30 days',
-      sdHint: 'How long a verified device stays trusted. Only affects sessions issued afterwards; to force all devices to re-verify now, use "Kick all devices" on the 2FA tab.',
-      sdSaveFail: 'Save failed',
-      sdLoadFail: 'Load failed (gate not running?)',
-      sigTitle: 'Enforce device signatures',
-      sigLoading: '…',
-      sigOff: 'Grace period',
-      sigOn: 'Enforced',
-      sigCounts: 'Devices {d} · With key {k} · With pubkey {p}',
-      sigSwitchLabel: 'Enable enforcement',
-      sigSwitchHint: 'When enabled, requests without a valid device signature are rejected with 401 + onboarding page; devices holding a 30-day session but no bound key are refused.',
-      sigConfirm: 'Confirm once more: all regular devices are on v1.0.55+ with keys bound? If this locks you out, come back here to switch it off (effective immediately).',
-      sigYes: 'Confirm',
-      sigCancel: 'Cancel',
-      sigHint: 'Criterion: "grace: unsigned request" stops appearing in the run log (events are throttled to 60s; close background phone browser tabs and wait a few minutes before judging).',
-      sigFail: 'Switch failed (host route not ready? needs DSH restart)',
-      sigDevs: 'Device credentials',
-      sigRevoke: 'Revoke',
-      sigRevoking: 'Revoking…',
-      sigRevoked: 'Revoked; the device must re-pair or verify with a code',
-      sigHasPub: 'PubKey',
-      sigHasKeyB: 'Key',
-      sigNoKey: 'No key',
-      sigDedupe: 'Dedupe ({n})',
-      sigDedupeHint: '{n} duplicate records of the same device: delete the extras (and revoke them), keep the latest',
-      sigDedupeYes: 'Confirm dedupe',
-      sigDedupeDone: 'Removed {n} duplicate records',
-      sigDedupePart: 'Removed {ok}/{n}; the rest were only revoked (deletion needs the new gate + local panel)',
-      sigFail2: 'Operation failed',
-      sysTitle: 'Host status',
-      sysLoading: 'Loading…',
-      sysFail: 'Load failed (gate not running?)',
-      sysMem: 'Memory',
-      sysFree: 'free',
-      sysCached: 'cached',
-      sysHint: 'Sampled by the local gate, ~10s cache.',
-      pushKindAnnounce: 'Announcement',
-    },
+    zh: LOCALE_ZH.panel,
+    en: LOCALE_EN.panel,
   }), 'browserctl: dictionaries')
   ctx.effect(() => installStyles(), 'browserctl: styles')
   ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({

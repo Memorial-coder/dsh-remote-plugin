@@ -29,19 +29,843 @@ module.exports = __toCommonJS(client_exports);
 var import_react = require("react");
 var import_dsh_client_ui_primitives = require("@deepseek-ai/dsh-client-ui-primitives");
 var import_dsh_client_store = require("@deepseek-ai/dsh-client-store");
+
+// locale/zh.json
+var zh_default = {
+  meta: {
+    description: "\u628A\u672C\u673A DeepSeek \u52A9\u624B Web \u9762\u677F\u5B89\u5168\u7A7F\u900F\u5230\u624B\u673A\u4E0E\u5916\u7F51, \u4FA7\u8FB9\u680F\u4E00\u952E\u5F00\u542F",
+    title: "DSH\u8FDC\u7A0B\u52A9\u624B\uFF08\u6D4B\u8BD5\uFF09"
+  },
+  panel: {
+    about: "\u5173\u4E8E",
+    aboutAccount: "\u8D26\u53F7\u767B\u5F55",
+    aboutAccountLogged: "\u5DF2\u767B\u5F55",
+    aboutApp: "App \u4E0B\u8F7D",
+    aboutDesc: "\u628A\u672C\u673A DeepSeek \u52A9\u624B Web \u9762\u677F\u5B89\u5168\u7A7F\u900F\u5230\u624B\u673A\u6216\u5916\u7F51\u6D4F\u89C8\u5668,\u968F\u65F6\u968F\u5730\u8FDC\u7A0B\u63A7\u5236\u3002",
+    aboutGithub: "GitHub",
+    aboutQq: "\u52A0\u5165QQ\u7FA4",
+    aboutWebsite: "\u5B98\u7F51",
+    appCopyLink: "\u590D\u5236\u914D\u5BF9\u94FE\u63A5",
+    appFailed: "\u914D\u5BF9\u7801\u751F\u6210\u5931\u8D25",
+    appLoading: "\u6B63\u5728\u751F\u6210\u957F\u671F\u914D\u5BF9\u7801\u2026",
+    appNoQr: "\u957F\u671F\u914D\u5BF9\u7801\u4E0D\u53EF\u7528",
+    appOnceHint: "\u8FD9\u662F\u957F\u671F\u914D\u5BF9\u7801:\u624B\u673A App \u626B\u7801\u540E\u767B\u8BB0\u8BBE\u5907\u5E76\u4FDD\u5B58\u767B\u5F55\u72B6\u6001,\u4E4B\u540E\u6253\u5F00\u514D\u626B\u7801\u76F4\u8FDE\u3002\u82E5\u626B\u300C\u8FDE\u63A5\u300D\u9875\u7684\u4E00\u6B21\u6027\u4E8C\u7EF4\u7801,\u53EA\u4F1A\u83B7\u5F97 1 \u5C0F\u65F6\u4E34\u65F6\u4F1A\u8BDD,\u4E0D\u4F1A\u957F\u671F\u7ED1\u5B9A\u3002",
+    appQrAlt: "\u624B\u673A App \u957F\u671F\u914D\u5BF9\u4E8C\u7EF4\u7801",
+    appReady: "\u957F\u671F\u914D\u5BF9\u7801\u5DF2\u751F\u6210",
+    appRefresh: "\u5237\u65B0\u914D\u5BF9\u7801",
+    appSubtitle: "\u624B\u673A App \u626B\u4E00\u6B21,\u4E4B\u540E\u6253\u5F00\u514D\u626B\u7801\u76F4\u8FDE",
+    banEmpty: "\u6682\u65E0\u88AB\u5C01\u7981\u7684 IP \u5730\u5740\u3002\u5728\u8BBE\u5907\u5217\u8868\u70B9\u201C\u62C9\u9ED1\u201D\u53EF\u6DFB\u52A0\u3002",
+    banTitle: "IP \u9ED1\u540D\u5355",
+    cancel: "\u53D6\u6D88",
+    close: "\u5173\u95ED",
+    config: "\u914D\u7F6E",
+    configAcctCopied: "\u5DF2\u590D\u5236",
+    configAcctCopy: "\u590D\u5236\u94FE\u63A5",
+    configAcctLoadFail: "\u5B98\u65B9\u670D\u52A1\u5668\u6682\u65F6\u4E0D\u53EF\u8FBE,\u8BF7\u7A0D\u540E\u518D\u8BD5\u3002",
+    configAcctLoggedIn: "\u5DF2\u767B\u5F55",
+    configAcctLoggedOut: "\u5DF2\u9000\u51FA(\u96A7\u9053\u5C06\u65AD\u5F00,\u91CD\u65B0\u767B\u5F55\u53EF\u6062\u590D)",
+    configAcctLoggingOut: "\u9000\u51FA\u4E2D\u2026",
+    configAcctLogout: "\u9000\u51FA\u767B\u5F55",
+    configAcctOauthBtn: "\u767B\u5F55 / \u6CE8\u518C\u5B98\u65B9\u8D26\u53F7",
+    configAcctOauthCancel: "\u53D6\u6D88",
+    configAcctOauthDone: "\u6388\u6743\u6210\u529F,\u6B63\u5728\u5E94\u7528\u8D26\u53F7\u4E0E\u4E13\u5C5E\u7AEF\u53E3\u2026",
+    configAcctOauthExpired: "\u6388\u6743\u5DF2\u8FC7\u671F,\u8BF7\u91CD\u65B0\u53D1\u8D77\u3002",
+    configAcctOauthFail: "\u6388\u6743\u5931\u8D25:",
+    configAcctOauthHint: "\u5C06\u6253\u5F00\u6D4F\u89C8\u5668\u8DF3\u8F6C\u5B98\u7F51,\u5728\u7F51\u9875\u5B8C\u6210\u767B\u5F55/\u6CE8\u518C\u540E\u81EA\u52A8\u56DE\u8C03",
+    configAcctOauthNetwork: "\u5B98\u65B9\u670D\u52A1\u5668\u6682\u65F6\u4E0D\u53EF\u8FBE,\u8BF7\u7A0D\u540E\u518D\u8BD5\u3002",
+    configAcctOauthOpenAgain: "\u91CD\u65B0\u6253\u5F00\u6388\u6743\u9875",
+    configAcctOauthOpenBrowser: "\u5DF2\u6253\u5F00\u6D4F\u89C8\u5668:\u8BF7\u5728\u5B98\u7F51\u9875\u9762\u767B\u5F55\u8D26\u53F7\u5E76\u70B9\u300C\u786E\u8BA4\u6388\u6743\u300D\u3002\u82E5\u672A\u81EA\u52A8\u6253\u5F00,\u8BF7\u70B9\u4E0B\u65B9\u6309\u94AE\u91CD\u8BD5\u3002",
+    configAcctOauthOpenFail: "\u81EA\u52A8\u6253\u5F00\u6D4F\u89C8\u5668\u5931\u8D25:\u8BF7\u70B9\u4E0B\u65B9\u94FE\u63A5\u624B\u52A8\u6253\u5F00\u6388\u6743\u9875\u3002",
+    configAcctOauthOpening: "\u6B63\u5728\u6253\u5F00\u6D4F\u89C8\u5668\u2026",
+    configAcctOauthWait: "\u7B49\u5F85\u6388\u6743\u2026",
+    configAcctPort: "\u4E13\u5C5E\u7AEF\u53E3",
+    configAcctRestartFail: "\u767B\u5F55\u6210\u529F,\u4F46\u96A7\u9053\u91CD\u542F\u5931\u8D25:\u8BF7\u70B9\u300C\u5F00\u59CB\u63A7\u5236\u300D\u624B\u52A8\u542F\u52A8\u3002",
+    configAcctTitle: "\u5B98\u65B9\u8D26\u53F7",
+    configHost: "\u670D\u52A1\u5668\u5730\u5740 (host)",
+    configHostPh: "\u4F8B\u5982 frps.example.com",
+    configHostRequired: "\u8BF7\u586B\u5199\u670D\u52A1\u5668\u5730\u5740",
+    configOfficial: "\u5B98\u65B9\u670D\u52A1\u5668",
+    configOfficialHint: "\u6CE8\u518C / \u767B\u5F55\u5B98\u65B9\u8D26\u53F7,\u5F00\u7BB1\u5373\u7528",
+    configOfficialNote: "\u4F7F\u7528\u5B98\u65B9\u670D\u52A1\u5668:\u767B\u5F55(\u6216\u6CE8\u518C)\u8D26\u53F7\u540E\u81EA\u52A8\u5206\u914D\u4E13\u5C5E\u5165\u53E3,\u65E0\u9700\u624B\u5DE5\u586B\u5199\u4EFB\u4F55\u670D\u52A1\u5668\u4FE1\u606F\u3002",
+    configPort: "frps \u7AEF\u53E3",
+    configRemotePort: "\u8FDC\u7A0B\u7AEF\u53E3 (\u53EF\u9009)",
+    configSelfhost: "\u81EA\u5EFA\u670D\u52A1\u5668",
+    configSelfhostHint: "\u4F7F\u7528\u4F60\u81EA\u5DF1\u7684 frps \u670D\u52A1\u5668",
+    configSubtitle: "\u9009\u62E9\u8FDE\u63A5\u5B98\u65B9\u670D\u52A1\u5668\u6216\u4F60\u81EA\u5DF1\u7684 frps \u670D\u52A1\u5668",
+    configToken: "FRP token",
+    configTokenKeep: "\u5DF2\u4FDD\u5B58(\u7559\u7A7A\u4FDD\u6301\u4E0D\u53D8)",
+    configTokenNote: "Token \u4EC5\u4FDD\u5B58\u5728\u672C\u673A browserctl_secrets.json(\u5DF2\u88AB gitignore \u6392\u9664,\u4E0D\u4F1A\u63D0\u4EA4\u6216\u4E0A\u4F20)\u3002",
+    configTokenPh: "\u8F93\u5165 frps \u8BA4\u8BC1 token",
+    copied: "\u5DF2\u590D\u5236",
+    copyLink: "\u590D\u5236\u94FE\u63A5",
+    copySecret: "\u590D\u5236\u5BC6\u94A5",
+    deviceKick: "\u8E22\u4E0B\u7EBF",
+    deviceSeen: "\u6D3B\u8DC3:",
+    devicesOnline: "\u5728\u7EBF {n} \u53F0",
+    devicesTitle: "\u5728\u7EBF\u8BBE\u5907",
+    elevateHint: "\u82E5\u5931\u8D25\u539F\u56E0\u662F\u6740\u8F6F\u62E6\u4E86 frpc.exe \u6216\u88AB\u6743\u9650\u6321\u4F4F,\u70B9\u4E0B\u9762\u6309\u94AE\u7528\u7BA1\u7406\u5458\u6743\u9650\u91CD\u8BD5(Windows \u4F1A\u5F39 UAC \u786E\u8BA4\u6846)\u3002",
+    elevateStart: "\u4EE5\u7BA1\u7406\u5458\u8EAB\u4EFD\u542F\u52A8",
+    elevateStop: "\u4EE5\u7BA1\u7406\u5458\u8EAB\u4EFD\u505C\u6B62",
+    elevateStopHint: "\u505C\u6B62\u6CA1\u751F\u6548:\u8FD9\u5957\u8FDB\u7A0B\u53EF\u80FD\u4EE5\u7BA1\u7406\u5458\u8EAB\u4EFD\u5728\u8DD1,\u666E\u901A\u6743\u9650\u6740\u4E0D\u6389\u3002",
+    elevating: "\u7B49\u5F85\u63D0\u6743\u786E\u8BA4\u2026",
+    legalAck: "\u6211\u77E5\u9053\u4E86",
+    legalMeta: "\u751F\u6548 {d} \xB7 \u7248\u672C {v}",
+    legalPrivacy: "\u9690\u79C1\u653F\u7B56",
+    legalTerms: "\u7528\u6237\u534F\u8BAE",
+    linkCopied: "\u5DF2\u590D\u5236",
+    linkCopy: "\u590D\u5236\u94FE\u63A5",
+    linkNote: "\u626B\u7801\u7ED1\u5B9A\u7684\u8BBE\u5907\u4F1A\u51FA\u73B0\u5728\u300CApp \u914D\u5BF9\u300D\u9875\u7B7E\u300C\u5DF2\u914D\u5BF9\u7684\u624B\u673A\u300D\u5217\u8868,\u53EF\u968F\u65F6\u89E3\u9664;\u914D\u5BF9\u7801\u522B\u622A\u56FE\u53D1\u7ED9\u522B\u4EBA\u3002",
+    linkOpenSite: "\u6253\u5F00\u5B98\u7F51",
+    linkStep1: "\u624B\u673A\u6D4F\u89C8\u5668\u6253\u5F00\u4E0A\u9762\u7684\u5B98\u7F51\u5730\u5740(\u53EF\u767B\u5F55\u8D26\u53F7\u770B\u8BBE\u5907\u4E0E\u65F6\u957F;\u8FD9\u4E2A\u5165\u53E3\u957F\u671F\u4E0D\u53D8,\u7AEF\u53E3\u600E\u4E48\u53D8\u90FD\u4E0D\u53D7\u5F71\u54CD)",
+    linkStep2: "\u7535\u8111\u7AEF\u5207\u5230\u672C\u9762\u677F\u7684\u300CApp \u914D\u5BF9\u300D\u9875\u7B7E,\u51FA\u793A\u957F\u671F\u914D\u5BF9\u7801(\u626B\u5B8C\u4F1A\u81EA\u52A8\u6362\u65B0\u7801)",
+    linkStep3: "\u7528 iPhone \u76F8\u673A\u626B\u8FD9\u4E2A\u7801(\u522B\u7528\u5FAE\u4FE1\u626B):\u6D4F\u89C8\u5668\u6253\u5F00\u5373\u81EA\u52A8\u767B\u8BB0\u8BBE\u5907\u5E76\u7ED1\u5B9A,30 \u5929\u514D\u9A8C\u8BC1\u76F4\u8FBE\u9762\u677F",
+    linkStep4: "\u5728\u9762\u677F\u9875\u9762\u70B9\u6D4F\u89C8\u5668\u300C\u5206\u4EAB \u2192 \u6DFB\u52A0\u5230\u4E3B\u5C4F\u5E55\u300D,\u628A\u5165\u53E3\u6C38\u4E45\u4FDD\u5B58;\u514D\u9A8C\u8BC1\u671F\u8FC7\u540E\u518D\u626B\u4E00\u6B21\u7801\u5373\u53EF\u6062\u590D",
+    linkStepsTitle: "\u7ED1\u5B9A\u6B65\u9AA4",
+    linkSubtitle: "\u6CA1\u6709 App \u7684\u8BBE\u5907(iPhone / iPad)\u7528\u300C\u957F\u671F\u914D\u5BF9\u7801\u300D\u7ED1\u5B9A\u7F51\u9875\u7248:\u626B\u4E00\u6B21\u7801\u767B\u8BB0\u8BBE\u5907,30 \u5929\u514D\u9A8C\u8BC1,\u518D\u300C\u6DFB\u52A0\u5230\u4E3B\u5C4F\u5E55\u300D\u5F53 App \u7528,\u4E0D\u518D\u9700\u8981 PWA \u5F15\u5BFC\u94FE\u63A5\u3002",
+    linkTitle: "iOS / \u65E0 App \u8BBE\u5907",
+    linkWebTag: "\u7F51\u9875\u7ED1\u5B9A",
+    logEmpty: "\u6682\u65E0\u65E5\u5FD7\u3002\u8BBE\u5907\u9A8C\u8BC1\u3001\u8E22\u4E0B\u7EBF\u30012FA \u5F00\u5173\u90FD\u4F1A\u8BB0\u5F55\u5728\u8FD9\u91CC\u3002",
+    logTabAll: "\u5168\u90E8",
+    logTabBan: "\u9ED1\u540D\u5355",
+    logTabKick: "\u8E22\u51FA",
+    logTabLogin: "\u767B\u5F55",
+    logTabPair: "\u914D\u5BF9",
+    logTabSettings: "\u8BBE\u7F6E",
+    logTabSys: "\u7CFB\u7EDF",
+    logTabTotp: "2FA",
+    logTabUnsigned: "\u65E0\u7B7E\u540D",
+    logTitle: "\u8FD0\u884C\u65E5\u5FD7",
+    loginBtn: "\u767B\u5F55",
+    loginEmail: "\u90AE\u7BB1",
+    loginLoggingIn: "\u767B\u5F55\u4E2D\u2026",
+    loginOr: "\u6216",
+    loginPassword: "\u5BC6\u7801",
+    loginPwdTitle: "\u8D26\u53F7\u5BC6\u7801\u767B\u5F55",
+    loginRequired: "\u9700\u8981\u5148\u767B\u5F55",
+    loginRequiredDesc: "\u4F7F\u7528\u5B98\u65B9\u670D\u52A1\u5668\u9700\u8981\u5148\u767B\u5F55\u8D26\u53F7,\u767B\u5F55\u540E\u624D\u4F1A\u5206\u914D\u4E13\u5C5E\u5165\u53E3\u3002\u70B9\u51FB\u4E0B\u65B9\u6309\u94AE\u524D\u5F80\u767B\u5F55\u3002",
+    msgBack: "\u8FD4\u56DE\u5217\u8868",
+    msgCenter: "\u901A\u77E5\u4E2D\u5FC3",
+    msgEmpty: "\u6682\u65E0\u901A\u77E5",
+    msgEmptyFeed: "\u6682\u65E0\u7535\u8111\u63A8\u9001;\u7535\u8111\u7AEF\u5F00\u542F\u63A8\u9001\u540E,\u5386\u53F2\u901A\u77E5\u4F1A\u6C47\u603B\u5728\u8FD9\u91CC\u3002",
+    msgEmptyMine: "\u6682\u65E0\u6D88\u606F",
+    msgEmptyOfficial: "\u6682\u65E0\u516C\u544A",
+    msgGuestHint: "\u5F53\u524D\u663E\u793A\u5168\u5458\u516C\u544A;\u767B\u5F55\u5B98\u65B9\u8D26\u53F7\u540E\u53EF\u63A5\u6536\u53D1\u7ED9\u4F60\u7684\u5B9A\u5411\u6D88\u606F\u3002",
+    msgLoadFail: "\u901A\u77E5\u52A0\u8F7D\u5931\u8D25",
+    msgNoTitle: "(\u65E0\u6807\u9898)",
+    msgOfficial: "\u5B98\u65B9\u516C\u544A",
+    msgOpenLink: "\u67E5\u770B\u94FE\u63A5",
+    msgPersonal: "\u53D1\u7ED9\u6211\u7684",
+    msgStyleEvent: "\u6D3B\u52A8",
+    msgStyleUpdate: "\u7248\u672C\u66F4\u65B0",
+    msgStyleWarning: "\u5B89\u5168\u63D0\u9192",
+    msgTabFeed: "\u7535\u8111\u63A8\u9001",
+    noDevices: "\u6682\u65E0\u5DF2\u9A8C\u8BC1\u8BBE\u5907",
+    noDevicesHint: "\u624B\u673A\u626B\u7801\u6253\u5F00\u9762\u677F\u5E76\u901A\u8FC7\u52A8\u6001\u7801\u9A8C\u8BC1\u540E,\u8BBE\u5907\u4F1A\u663E\u793A\u5728\u8FD9\u91CC;\u672C\u673A\u76F4\u5F00\u7684\u9762\u677F\u4E0D\u8BA1\u5165\u3002",
+    noOnlineDevices: "\u5F53\u524D\u6CA1\u6709\u8BBE\u5907\u5728\u7EBF",
+    openFailed: "\u6253\u5F00\u9762\u677F\u5931\u8D25",
+    openPanel: "\u6253\u5F00\u9762\u677F",
+    opening: "\u6B63\u5728\u6253\u5F00\u2026",
+    pairAppTempNote: "\u624B\u673A App \u626B\u6B64\u7801\u53EA\u83B7\u5F97 1 \u5C0F\u65F6\u4E34\u65F6\u4F1A\u8BDD,\u4E0D\u4F1A\u957F\u671F\u7ED1\u5B9A;\u8981\u957F\u671F\u514D\u626B\u7801\u8BF7\u7528\u300CApp \u914D\u5BF9\u300D\u9875\u7B7E\u3002",
+    pairExpired: '\u914D\u5BF9\u5DF2\u8FC7\u671F,\u70B9"\u5237\u65B0\u4E8C\u7EF4\u7801"\u91CD\u65B0\u751F\u6210',
+    pairLeft: "\u5269\u4F59",
+    pairOnce: "\u4E00\u6B21\u6027\u914D\u5BF9\u94FE\u63A5",
+    pairStatic: "\u5F15\u5BFC\u94FE\u63A5(24 \u5C0F\u65F6\u6709\u6548)",
+    pairSwap: "\u6362\u4E00\u4E2A\u7801",
+    pairUses: "\u5DF2\u626B\u7801",
+    pairUsesLabel: "\u626B\u7801\u6B21\u6570",
+    pairUsesOne: "1 \u6B21(\u626B\u5B8C\u6362\u7801)",
+    pairUsesTimes: "\u6B21",
+    pluginUpdDesc: "\u5F53\u524D\u7248\u672C v{cur},\u5B98\u7F51\u5DF2\u53D1\u5E03 v{v}\u3002\u66F4\u65B0\u540E\u53EF\u83B7\u5F97\u6700\u65B0\u4FEE\u590D\u4E0E\u65B0\u529F\u80FD\u3002",
+    pluginUpdTitle: "\u53D1\u73B0\u63D2\u4EF6\u65B0\u7248\u672C v{v}",
+    pushComposerHint: "\u53D1\u9001\u540E,\u624B\u673A App \u4E0E\u672C\u673A\u901A\u77E5\u4E2D\u5FC3\u90FD\u4F1A\u5F39\u51FA\u8FD9\u6761\u6D88\u606F",
+    pushComposerTitle: "\u53D1\u9001\u6D88\u606F",
+    pushDesc: "\u628A\u8BBE\u5907\u8FDE\u5165\u3001\u88AB\u8E22\u3001\u9ED1\u540D\u5355\u30012FA\u3001\u914D\u5BF9\u7B49\u5B89\u5168\u4E8B\u4EF6,\u4EE5\u53CA\u7CFB\u7EDF\u6D88\u606F\u5B9E\u65F6\u63A8\u9001\u5230\u4F60\u7684\u624B\u673A\u3002",
+    pushEmpty: "\u6682\u65E0\u63A8\u9001\u3002\u5F00\u542F\u63A8\u9001\u540E,\u5B89\u5168\u4E8B\u4EF6\u4F1A\u663E\u793A\u5728\u8FD9\u91CC\u3002",
+    pushEnabledHint: "\u603B\u5F00\u5173:\u5F00\u542F\u540E\u624B\u673A\u53EF\u6536\u5230\u672C\u673A\u9762\u677F\u7684\u63A8\u9001\u6D88\u606F",
+    pushEnabledLabel: "\u63A5\u6536\u624B\u673A\u63A8\u9001",
+    pushGroupOfficial: "\u5B98\u65B9\u6D88\u606F",
+    pushGroupSecurity: "\u5B89\u5168\u52A8\u6001",
+    pushKindBan: "\u9ED1\u540D\u5355",
+    pushKindDev: "\u8BBE\u5907",
+    pushKindJoin: "\u8BBE\u5907\u8FDE\u5165",
+    pushKindKick: "\u8E22\u4E0B\u7EBF",
+    pushKindMsg: "\u6D88\u606F",
+    pushKindPair: "\u914D\u5BF9",
+    pushKindTest: "\u6D4B\u8BD5",
+    pushKindTotp: "2FA",
+    pushKindVerify: "\u9A8C\u8BC1",
+    pushMsgBodyLabel: "\u5185\u5BB9",
+    pushMsgBodyPh: "\u8F93\u5165\u8981\u63A8\u9001\u7684\u6D88\u606F\u2026",
+    pushMsgTitleLabel: "\u6807\u9898(\u53EF\u9009)",
+    pushMsgTitlePh: "\u4E0D\u586B\u5219\u53EA\u663E\u793A\u6D88\u606F\u5185\u5BB9",
+    pushOff: "\u672A\u5F00\u542F",
+    pushOn: "\u5DF2\u5F00\u542F",
+    pushPollFailed: "\u8BFB\u53D6\u63A8\u9001\u914D\u7F6E\u5931\u8D25",
+    pushRecent: "\u6700\u8FD1\u63A8\u9001",
+    pushRefresh: "\u5237\u65B0",
+    pushRefreshing: "\u5237\u65B0\u4E2D\u2026",
+    pushSaveFailed: "\u8BBE\u7F6E\u4FDD\u5B58\u5931\u8D25",
+    pushSend: "\u53D1\u9001",
+    pushSendFail: "\u6D88\u606F\u53D1\u9001\u5931\u8D25",
+    pushSendOff: "\u63A8\u9001\u5F00\u5173\u672A\u5F00\u542F,\u6D88\u606F\u672A\u53D1\u51FA",
+    pushSendOk: "\u6D88\u606F\u5DF2\u63A8\u9001",
+    pushSending: "\u53D1\u9001\u4E2D\u2026",
+    pushSystemHint: "\u8BBE\u5907\u8FDE\u5165 / \u88AB\u8E22 / \u9ED1\u540D\u5355 / 2FA / \u914D\u5BF9",
+    pushSystemLabel: "\u7CFB\u7EDF\u5B89\u5168\u4E8B\u4EF6",
+    pushTest: "\u53D1\u9001\u6D4B\u8BD5\u63A8\u9001",
+    pushTestBody: "\u8FD9\u662F\u4E00\u6761\u6765\u81EA DSH \u8FDC\u7A0B\u52A9\u624B\u7684\u6D4B\u8BD5\u63A8\u9001\u6D88\u606F",
+    pushTestFail: "\u6D4B\u8BD5\u63A8\u9001\u53D1\u9001\u5931\u8D25",
+    pushTestOk: "\u6D4B\u8BD5\u63A8\u9001\u5DF2\u53D1\u9001",
+    pushTestTitle: "\u6D4B\u8BD5\u63A8\u9001",
+    pushTesting: "\u53D1\u9001\u4E2D\u2026",
+    pushTitle: "\u6D88\u606F\u63A8\u9001",
+    qrAlt: "\u914D\u5BF9\u4E8C\u7EF4\u7801",
+    refresh: "\u5237\u65B0\u4E8C\u7EF4\u7801",
+    save: "\u4FDD\u5B58",
+    saved: "\u5DF2\u4FDD\u5B58",
+    saving: "\u4FDD\u5B58\u4E2D\u2026",
+    sdCurrent: "\u5F53\u524D {n} \u5929",
+    sdDay1: "1 \u5929",
+    sdDay30: "30 \u5929",
+    sdDay7: "7 \u5929",
+    sdHint: "\u65B0\u8BBE\u5907\u9A8C\u8BC1\u901A\u8FC7\u540E,\u514D\u91CD\u590D\u9A8C\u8BC1\u7684\u6709\u6548\u671F\u3002\u53EA\u5F71\u54CD\u4E4B\u540E\u65B0\u7B7E\u53D1\u7684\u4F1A\u8BDD;\u8981\u7ACB\u5373\u8BA9\u5168\u90E8\u8BBE\u5907\u91CD\u65B0\u9A8C\u8BC1,\u7528 2FA \u9875\u7684\u300C\u5168\u90E8\u8E22\u4E0B\u7EBF\u300D\u3002",
+    sdLoadFail: "\u8BFB\u53D6\u5931\u8D25(\u95F8\u673A\u672A\u8FD0\u884C?)",
+    sdLoading: "\u2026",
+    sdSaveFail: "\u4FDD\u5B58\u5931\u8D25",
+    sdTitle: "\u4F1A\u8BDD\u6709\u6548\u671F",
+    sigCancel: "\u53D6\u6D88",
+    sigConfirm: "\u518D\u786E\u8BA4\u4E00\u6B21:\u6240\u6709\u5E38\u7528\u8BBE\u5907\u90FD\u5DF2\u5347\u7EA7\u5230 v1.0.55+ \u5E76\u5B8C\u6210\u5BC6\u94A5\u7ED1\u5B9A?\u5F00\u542F\u8BEF\u4F24\u81EA\u5DF1\u65F6,\u56DE\u6765\u8FD9\u91CC\u5173\u6389\u5373\u53EF(\u7ACB\u5373\u751F\u6548)\u3002",
+    sigCounts: "\u8BBE\u5907 {d} \xB7 \u6301\u5BC6\u94A5 {k} \xB7 \u6301\u516C\u94A5 {p}",
+    sigDedupe: "\u4E00\u952E\u53BB\u91CD({n})",
+    sigDedupeDone: "\u5DF2\u5220\u9664 {n} \u53F0\u91CD\u590D\u6863\u6848",
+    sigDedupeHint: "\u540C\u673A\u91CD\u590D\u6863\u6848 {n} \u53F0:\u5220\u9664\u591A\u4F59\u6863\u6848(\u5E76\u505C\u6B62\u5176\u6388\u6743),\u53EA\u4FDD\u7559\u6700\u65B0\u4E00\u53F0",
+    sigDedupePart: "\u5DF2\u5220\u9664 {ok}/{n} \u53F0,\u5176\u4F59\u53EA\u505C\u6B62\u6388\u6743(\u5220\u6863\u9700\u65B0\u7248\u95F8\u673A+\u672C\u673A\u9762\u677F)",
+    sigDedupeYes: "\u786E\u8BA4\u53BB\u91CD",
+    sigDevs: "\u8BBE\u5907\u51ED\u8BC1",
+    sigFail: "\u5207\u6362\u5931\u8D25(\u9700 DSH \u91CD\u542F\u540E\u751F\u6548\u7684 host \u8DEF\u7531\u672A\u5C31\u7EEA?)",
+    sigFail2: "\u64CD\u4F5C\u5931\u8D25",
+    sigHasKeyB: "\u5BC6\u94A5",
+    sigHasPub: "\u516C\u94A5",
+    sigHint: "\u5224\u636E:\u8FD0\u884C\u65E5\u5FD7\u91CC\u300C\u5BBD\u5BB9\u671F:\u65E0\u7B7E\u540D\u8BF7\u6C42\u300D\u4E0D\u518D\u51FA\u73B0(\u4E8B\u4EF6 60s \u8282\u6D41,\u5173\u6389\u624B\u673A\u6D4F\u89C8\u5668\u540E\u53F0\u5237\u65B0\u518D\u7B49\u51E0\u5206\u949F\u518D\u770B)\u3002",
+    sigLoading: "\u2026",
+    sigNoKey: "\u65E0\u5BC6\u94A5",
+    sigOff: "\u5BBD\u5BB9\u671F",
+    sigOn: "\u5F3A\u5236",
+    sigRevoke: "\u505C\u6B62\u6388\u6743",
+    sigRevoked: "\u5DF2\u505C\u6B62\u6388\u6743,\u8BE5\u8BBE\u5907\u9700\u91CD\u65B0\u914D\u5BF9\u6216\u8F93\u52A8\u6001\u7801",
+    sigRevoking: "\u505C\u6B62\u4E2D\u2026",
+    sigSwitchHint: "\u5F00\u542F\u540E,\u65E0\u6709\u6548\u8BBE\u5907\u7B7E\u540D\u7684\u8BF7\u6C42\u4E00\u5F8B 401+\u5F15\u5BFC\u9875;\u6301 30 \u5929\u4F1A\u8BDD\u4F46\u672A\u7ED1\u5BC6\u94A5\u7684\u8BBE\u5907\u4F1A\u88AB\u62D2\u3002",
+    sigSwitchLabel: "\u5F00\u542F\u5F3A\u5236\u6821\u9A8C",
+    sigTitle: "\u5F3A\u5236\u8BBE\u5907\u7B7E\u540D",
+    sigYes: "\u786E\u8BA4\u5F00\u542F",
+    startCtl: "\u5F00\u59CB\u63A7\u5236",
+    startFailed: "\u542F\u52A8\u5931\u8D25:",
+    starting: "\u6B63\u5728\u542F\u52A8\u96A7\u9053\u2026",
+    statusLoading: "\u6B63\u5728\u751F\u6210\u4E8C\u7EF4\u7801\u2026",
+    statusNoSecret: '\u96A7\u9053\u672A\u5C31\u7EEA:\u70B9\u4E0B\u65B9"\u5F00\u59CB\u63A7\u5236"\u542F\u52A8\u672C\u673A\u7A7F\u900F,\u51E0\u79D2\u540E\u81EA\u52A8\u51FA\u4E8C\u7EF4\u7801',
+    statusReady: "\u96A7\u9053\u5C31\u7EEA,\u626B\u7801\u5373\u53EF\u6253\u5F00\u9762\u677F",
+    statusTunnelBuilding: "\u96A7\u9053\u6B63\u5728\u5EFA\u7ACB,\u51E0\u79D2\u540E\u81EA\u52A8\u51FA\u4E8C\u7EF4\u7801(\u65E0\u9700\u518D\u70B9\u300C\u5F00\u59CB\u63A7\u5236\u300D)",
+    statusTunnelStarting: "\u96A7\u9053\u6B63\u5728\u5EFA\u7ACB,\u8BF7\u7A0D\u5019\u51E0\u79D2\u540E\u5237\u65B0\u4E8C\u7EF4\u7801",
+    stopCtl: "\u505C\u6B62\u63A7\u5236",
+    stopping: "\u6B63\u5728\u505C\u6B62\u2026",
+    subtitle: "\u624B\u673A\u626B\u7801\u6216\u590D\u5236\u94FE\u63A5,\u76F4\u63A5\u6253\u5F00\u672C\u673A\u52A9\u624B\u9762\u677F",
+    sysCached: "\u7F13\u5B58",
+    sysFail: "\u8BFB\u53D6\u5931\u8D25(\u95F8\u673A\u672A\u8FD0\u884C?)",
+    sysFree: "\u4F59",
+    sysHint: "\u6570\u636E\u6765\u81EA\u672C\u673A\u95F8\u673A,\u7EA6 10 \u79D2\u7F13\u5B58\u3002",
+    sysLoading: "\u8BFB\u53D6\u4E2D\u2026",
+    sysMem: "\u5185\u5B58",
+    sysTitle: "\u4E3B\u673A\u72B6\u6001",
+    tab: "DSH \u8FDC\u7A0B\u52A9\u624B",
+    tab2fa: "2FA",
+    tabApp: "App \u914D\u5BF9",
+    tabBan: "\u9ED1\u540D\u5355",
+    tabConnect: "\u8FDE\u63A5",
+    tabDevices: "\u8BBE\u5907",
+    tabLog: "\u65E5\u5FD7",
+    tabPush: "\u63A8\u9001",
+    ticketAddImage: "\u6DFB\u52A0\u56FE\u7247",
+    ticketAll: "\u5168\u90E8",
+    ticketAttachRemove: "\u79FB\u9664",
+    ticketBack: "\u8FD4\u56DE\u5217\u8868",
+    ticketBodyLabel: "\u6B63\u6587",
+    ticketBodyPh: "\u8BE6\u7EC6\u63CF\u8FF0\u73B0\u8C61\u3001\u64CD\u4F5C\u6B65\u9AA4\u4E0E\u671F\u671B\u7ED3\u679C(2000 \u5B57\u4EE5\u5185)",
+    ticketCatAccount: "\u8D26\u53F7/\u5145\u503C\u95EE\u9898",
+    ticketCatBug: "Bug/\u6545\u969C",
+    ticketCatConnect: "\u8FDE\u63A5/\u8BBF\u95EE\u95EE\u9898",
+    ticketCatFeature: "\u529F\u80FD\u5EFA\u8BAE",
+    ticketCatOther: "\u5176\u4ED6",
+    ticketCategory: "\u5206\u7C7B",
+    ticketClose: "\u5173\u95ED\u5DE5\u5355",
+    ticketCloseConfirm: "\u786E\u8BA4\u5173\u95ED",
+    ticketCloseOk: "\u5DE5\u5355\u5DF2\u5173\u95ED",
+    ticketClosedNote: "\u5DE5\u5355\u5DF2\u5173\u95ED,\u5982\u9700\u7EE7\u7EED\u6C9F\u901A\u8BF7\u91CD\u65B0\u63D0\u4EA4\u5DE5\u5355\u3002",
+    ticketClosing: "\u5173\u95ED\u4E2D\u2026",
+    ticketCopyContent: "\u590D\u5236\u65E5\u5FD7\u5185\u5BB9",
+    ticketCopyContentDesc: "\u628A\u5DF2\u6253\u7801\u7684\u5168\u6587\u590D\u5236\u5230\u526A\u8D34\u677F\uFF0C\u53EF\u76F4\u63A5\u7C98\u8D34\u7ED9\u522B\u4EBA\u3002",
+    ticketCopyFail: "\u590D\u5236\u5931\u8D25\uFF0C\u8BF7\u6253\u5F00\u5BFC\u51FA\u7684 txt \u624B\u52A8\u590D\u5236\u3002",
+    ticketCopyOk: "\u65E5\u5FD7\u5185\u5BB9\u5DF2\u590D\u5236\u5230\u526A\u8D34\u677F",
+    ticketCopyPath: "\u590D\u5236\u8DEF\u5F84",
+    ticketCopyPathOk: "\u8DEF\u5F84\u5DF2\u590D\u5236",
+    ticketDestTitle: "\u5BFC\u51FA\u53BB\u5411",
+    ticketDetailEmpty: "\u6682\u65E0\u5BF9\u8BDD\u8BB0\u5F55",
+    ticketDiagAttachedOff: "\u672A\u9644\u5E26",
+    ticketDiagAttachedOk: "\u8BCA\u65AD\u65E5\u5FD7\u5DF2\u9644\u5E26",
+    ticketDiagAttachedOn: "\u5DF2\u9644\u5E26",
+    ticketDiagConfirm: "\u9644\u5E26\u6B64\u65E5\u5FD7",
+    ticketDiagConsent: "\u6211\u5DF2\u9884\u89C8\u4E0A\u65B9\u8BCA\u65AD\u65E5\u5FD7\uFF0C\u786E\u8BA4\u4E0D\u542B\u654F\u611F\u4FE1\u606F\uFF0C\u540C\u610F\u968F\u672C\u5DE5\u5355\u4E0A\u4F20",
+    ticketDiagDesc: "\u9644\u5E26\u8FD0\u884C\u73AF\u5883\u3001\u95F8\u673A/\u96A7\u9053\u72B6\u6001\u4E0E\u672C\u673A\u8FD0\u884C\u65E5\u5FD7\uFF0C\u80FD\u663E\u8457\u52A0\u5FEB\u6392\u969C\u3002\u5185\u5BB9\u4F1A\u5148\u7ED9\u4F60\u5B8C\u6574\u9884\u89C8\uFF0C\u5E76\u81EA\u52A8\u6253\u7801 token\u3001Cookie\u3001\u7B7E\u540D\u4E0E IP\u3002",
+    ticketDiagDetailBadge: "\u5DF2\u9644\u5E26",
+    ticketDiagEmptyLogs: "\uFF08\u672C\u673A\u6682\u65E0\u53EF\u8BFB\u7684\u8FD0\u884C\u65E5\u5FD7\uFF0C\u4EC5\u9644\u5E26\u73AF\u5883\u4E0E\u95F8\u673A\u72B6\u6001\uFF09",
+    ticketDiagExport: "\u4E0B\u8F7D\u5B8C\u6574\u65E5\u5FD7 (txt)",
+    ticketDiagLegal: "\u65E5\u5FD7\u4EC5\u5728\u4F60\u52FE\u9009\u786E\u8BA4\u540E\u4E0A\u4F20\uFF0C\u53EA\u7528\u4E8E\u672C\u5DE5\u5355\u6392\u969C\uFF0C\u5DE5\u5355\u5220\u9664\u65F6\u4E00\u5E76\u5220\u9664\u3002",
+    ticketDiagLogsUnit: " \u4E2A\u65E5\u5FD7\u6587\u4EF6",
+    ticketDiagPreTip: "\u4EE5\u4E0B\u662F\u5C06\u968F\u5DE5\u5355\u4E0A\u4F20\u7684\u5B8C\u6574\u5185\u5BB9\uFF08\u5DF2\u81EA\u52A8\u6253\u7801\uFF09\u3002\u8BF7\u786E\u8BA4\u6CA1\u6709\u4F60\u4E0D\u5E0C\u671B\u4E0A\u4F20\u7684\u4FE1\u606F\u3002",
+    ticketDiagPreview: "\u751F\u6210\u5E76\u9884\u89C8",
+    ticketDiagReading: "\u6B63\u5728\u8BFB\u53D6\u2026",
+    ticketDiagSummary: "\u8BCA\u65AD\u65E5\u5FD7\u91C7\u96C6\u4E8E",
+    ticketDiagTitle: "\u8BCA\u65AD\u65E5\u5FD7\uFF08\u53EF\u9009\uFF09",
+    ticketDiagTruncated: "\u5185\u5BB9\u8F83\u957F\u5DF2\u622A\u65AD",
+    ticketDiagUploading: "\u4E0A\u4F20\u65E5\u5FD7\u2026",
+    ticketExportAgain: "\u91CD\u65B0\u5BFC\u51FA",
+    ticketExportDo: "\u751F\u6210\u5E76\u5BFC\u51FA\u8BCA\u65AD\u65E5\u5FD7",
+    ticketExportDone: "\u5DF2\u5BFC\u51FA\u5230\uFF1A",
+    ticketExportHostOld: "\u63D2\u4EF6\u5BBF\u4E3B\u8FD8\u662F\u65E7\u7248\u672C\uFF08\u65B0\u529F\u80FD\u8981\u5B8C\u5168\u91CD\u542F DSH \u624D\u751F\u6548\uFF09\u3002\u8BF7\u5F7B\u5E95\u9000\u51FA DSH \u518D\u91CD\u65B0\u6253\u5F00\uFF0C\u7136\u540E\u91CD\u8BD5\u3002",
+    ticketExportNote: "\u65E5\u5FD7\u53EA\u5728\u672C\u673A\u751F\u6210\u3001\u4E0D\u4F1A\u81EA\u52A8\u4E0A\u4F20\uFF1B\u4F55\u65F6\u4E0A\u4F20\u3001\u4E0A\u4F20\u54EA\u4E00\u7248\u5B8C\u5168\u7531\u4F60\u5728\u7F51\u9875\u7AEF\u51B3\u5B9A\u3002",
+    ticketExportSubtitle: "\u5BFC\u51FA\u672C\u673A\u8BCA\u65AD\u65E5\u5FD7\uFF08\u81EA\u52A8\u6253\u7801\uFF09\uFF0C\u7136\u540E\u9009\u62E9\u65E5\u5FD7\u53BB\u5411\u3002",
+    ticketExporting: "\u6B63\u5728\u5BFC\u51FA\u2026",
+    ticketFollow: "\u53D1\u9001\u8FFD\u95EE",
+    ticketFollowPh: "\u8FFD\u95EE\u5185\u5BB9(1000 \u5B57\u4EE5\u5185)",
+    ticketFollowRequired: "\u8BF7\u8F93\u5165\u8FFD\u95EE\u5185\u5BB9",
+    ticketGoLogin: "\u53BB\u8D26\u53F7\u767B\u5F55",
+    ticketImgSize: "\u5355\u5F20\u56FE\u7247\u4E0D\u80FD\u8D85\u8FC7 5MB",
+    ticketImgType: "\u4EC5\u652F\u6301 jpg/png/webp/gif \u56FE\u7247",
+    ticketListEmpty: "\u6682\u65E0\u5DE5\u5355,\u70B9\u300C\u63D0\u4EA4\u5DE5\u5355\u300D\u53CD\u9988\u95EE\u9898\u6216\u5EFA\u8BAE\u3002",
+    ticketLoading: "\u52A0\u8F7D\u4E2D\u2026",
+    ticketLogFile: "\u8FD0\u884C\u65E5\u5FD7",
+    ticketNoContent: "\u65E5\u5FD7\u8FD8\u6CA1\u751F\u6210\uFF0C\u8BF7\u5148\u300C\u751F\u6210\u5E76\u5BFC\u51FA\u8BCA\u65AD\u65E5\u5FD7\u300D\u3002",
+    ticketNotLogin: "\u8BF7\u5148\u767B\u5F55\u5B98\u65B9\u8D26\u53F7",
+    ticketNotLoginDesc: "\u5DE5\u5355\u53CD\u9988\u9700\u8981\u767B\u5F55\u5B98\u65B9\u8D26\u53F7,\u63D0\u4EA4\u7684\u95EE\u9898\u4F1A\u7ED1\u5B9A\u5230\u4F60\u7684\u8D26\u53F7\u3002\u70B9\u51FB\u4E0B\u65B9\u6309\u94AE\u524D\u5F80\u767B\u5F55\u3002",
+    ticketOpenFolder: "\u6253\u5F00\u6240\u5728\u6587\u4EF6\u5939",
+    ticketOpenWeb: "\u6253\u5F00\u7F51\u9875\u7248\u5DE5\u5355",
+    ticketOpenWebDesc: "\u63A8\u8350\uFF1A\u767B\u5F55\u540E\u5728\u7F51\u9875\u7AEF\u63D0\u4EA4\u5DE5\u5355\uFF0C\u5E76\u628A\u8FD9\u4EFD txt \u4F5C\u4E3A\u300C\u8FD0\u884C\u65E5\u5FD7\u300D\u4E0A\u4F20\u3002",
+    ticketOpening: "\u6B63\u5728\u6253\u5F00\u2026",
+    ticketPosting: "\u53D1\u9001\u4E2D\u2026",
+    ticketRoleAdmin: "\u5B98\u65B9",
+    ticketRolePlayer: "\u6211",
+    ticketSaveGo: "\u4FDD\u5B58\u5230\u8FD9\u91CC",
+    ticketSaveOk: "\u5DF2\u53E6\u5B58\u5230\uFF1A",
+    ticketSaveOther: "\u5B58\u5230\u5176\u4ED6\u6587\u4EF6\u5939",
+    ticketSaveOtherDesc: "\u628A\u8FD9\u4EFD\u65E5\u5FD7\u518D\u5B58\u4E00\u4EFD\u5230\u4F60\u9009\u7684\u6587\u4EF6\u5939\u3002",
+    ticketSavePathPh: "\u7C98\u8D34\u6587\u4EF6\u5939\u5B8C\u6574\u8DEF\u5F84\uFF0C\u5982 C:\\Users\\\u4F60\\Documents",
+    ticketSaving: "\u6B63\u5728\u4FDD\u5B58\u2026",
+    ticketStatusClosed: "\u5DF2\u5173\u95ED",
+    ticketStatusCompleted: "\u5DF2\u5B8C\u6210",
+    ticketStatusPending: "\u5F85\u5904\u7406",
+    ticketStatusProcessing: "\u5904\u7406\u4E2D",
+    ticketStatusReplied: "\u5DF2\u56DE\u590D",
+    ticketSubmit: "\u63D0\u4EA4\u5DE5\u5355",
+    ticketSubmitOk: "\u63D0\u4EA4\u6210\u529F",
+    ticketSubmitRequired: "\u8BF7\u586B\u5199\u6807\u9898\u548C\u6B63\u6587",
+    ticketSubmitting: "\u63D0\u4EA4\u4E2D\u2026",
+    ticketSubtitle: "\u5411\u5B98\u65B9\u53CD\u9988\u95EE\u9898\u3001\u5EFA\u8BAE\u6216\u54A8\u8BE2;\u767B\u5F55\u5B98\u65B9\u8D26\u53F7\u540E\u63D0\u4EA4\u4F1A\u7ED1\u5B9A\u5230\u4F60\u7684\u8D26\u53F7\u3002",
+    ticketTabList: "\u6211\u7684\u5DE5\u5355",
+    ticketTabNew: "\u63D0\u4EA4\u5DE5\u5355",
+    ticketTitleLabel: "\u6807\u9898",
+    ticketTitlePh: "\u4E00\u53E5\u8BDD\u6982\u62EC\u95EE\u9898(80 \u5B57\u4EE5\u5185)",
+    ticketUnread: "\u672A\u8BFB",
+    ticketUploading: "\u4E0A\u4F20\u4E2D\u2026",
+    tickets: "\u5DE5\u5355\u53CD\u9988",
+    totpAppHint: "\u624B\u673A\u7AEF\u9700\u8981\u5B89\u88C5\u9A8C\u8BC1\u5668 App \u751F\u6210\u52A8\u6001\u7801,\u63A8\u8350\u5FAE\u8F6F\u5B98\u65B9 Microsoft Authenticator:",
+    totpAppLink: "\u5FAE\u8F6F\u5B98\u7F51\u4E0B\u8F7D",
+    totpBind: "2FA \u7ED1\u5B9A\u4E8C\u7EF4\u7801",
+    totpDisable: "\u7981\u7528 2FA",
+    totpEnable: "\u542F\u7528 2FA",
+    totpHint: "\u542F\u7528\u540E,\u6240\u6709\u8BBE\u5907\u6253\u5F00\u9762\u677F\u524D\u5FC5\u987B\u5148\u8F93\u5165\u9A8C\u8BC1\u5668 6 \u4F4D\u52A8\u6001\u7801(RFC 6238);\u8FDE\u9519 5 \u6B21\u51BB\u7ED3 15 \u5206\u949F,\u540C\u7801\u9632\u91CD\u653E\u3002\u7ED1\u5B9A\u65B9\u5F0F:\u7528\u624B\u673A\u9A8C\u8BC1\u5668\u626B\u63CF\u4E0B\u65B9\u4E8C\u7EF4\u7801\u6216\u624B\u52A8\u8F93\u5165\u5BC6\u94A5\u3002",
+    totpHintShort: "\u5F00\u542F\u540E,\u624B\u673A\u6253\u5F00\u9762\u677F\u9700\u5148\u8F93\u5165\u9A8C\u8BC1\u5668 6 \u4F4D\u52A8\u6001\u7801;\u8FDE\u9519 5 \u6B21\u51BB\u7ED3 15 \u5206\u949F\u3002",
+    totpKick: "\u5168\u90E8\u8E22\u4E0B\u7EBF",
+    totpOff: "\u672A\u542F\u7528",
+    totpOn: "\u5DF2\u542F\u7528",
+    totpReset: "\u91CD\u7F6E\u5BC6\u94A5",
+    totpSecretLabel: "\u5BC6\u94A5(\u624B\u52A8\u8F93\u5165\u7528)",
+    totpTitle: "\u4E24\u6B65\u9A8C\u8BC1 (2FA)",
+    updBanner: "App \u65B0\u7248\u672C v{v} \u5DF2\u53D1\u5E03",
+    updateApplyBtn: "\u4E00\u952E\u66F4\u65B0\u5230 v{v}",
+    updateApplyDone: "\u5DF2\u66F4\u65B0\u5230 v{v}\uFF0C\u91CD\u542F DSH \u540E\u751F\u6548",
+    updateApplyTip: "\u81EA\u52A8\u4E0B\u8F7D\u5B98\u65B9 zip \u8986\u76D6\u5F53\u524D\u63D2\u4EF6\u76EE\u5F55\uFF08\u4F1A\u5148\u505C\u6B62\u96A7\u9053\uFF09\uFF0C\u91CD\u542F DSH \u5373\u5B8C\u6210\u66F4\u65B0\uFF1B\u4EC5\u9002\u7528\u4E8E\u89E3\u538B\u76EE\u5F55\u5B89\u88C5",
+    updateApplying: "\u6B63\u5728\u66F4\u65B0\uFF08\u4E0B\u8F7D\u5E76\u8986\u76D6\uFF0C\u52FF\u5173\u95ED\u9762\u677F\uFF09\u2026",
+    updateCheck: "\u68C0\u67E5\u66F4\u65B0",
+    updateChecking: "\u68C0\u67E5\u4E2D\u2026",
+    updateCur: "\u5F53\u524D\u7248\u672C",
+    updateDownload: "\u4E0B\u8F7D\u65B0\u7248\u672C",
+    updateDownloadTip: "\u5728\u6D4F\u89C8\u5668\u6253\u5F00\u5B98\u65B9 zip \u76F4\u94FE\u624B\u52A8\u4E0B\u8F7D\uFF08\u7EA6 6.4 MB\uFF0C\u8D70\u5B98\u7F51\u670D\u52A1\u5668\uFF09\uFF1B\u4E00\u952E\u66F4\u65B0\u5931\u8D25\u65F6\u7684\u5907\u7528\u65B9\u5F0F",
+    updateFailed: "\u66F4\u65B0\u68C0\u67E5\u5931\u8D25",
+    updateFound: "\u53D1\u73B0\u65B0\u7248\u672C v{v}",
+    updateGuideLocal: "\u66F4\u65B0\u65B9\u6CD5\uFF1A\u4E0B\u8F7D\u65B0 zip \u89E3\u538B\u540E\u8986\u76D6\u63D2\u4EF6\u76EE\u5F55\uFF08{dir}\uFF09\uFF0C\u91CD\u542F DSH \u751F\u6548\uFF1B\u82E5\u8986\u76D6\u540E\u96A7\u9053\u8D77\u4E0D\u6765\uFF0C\u5148\u53CC\u51FB\u76EE\u5F55\u91CC\u7684 fix-antivirus.bat \u89E3\u9664\u6740\u8F6F\u62E6\u622A",
+    updateGuidePackage: "\u66F4\u65B0\u65B9\u6CD5\uFF1A\u547D\u4EE4\u884C\u6267\u884C {cmd}\uFF0C\u91CD\u542F DSH \u751F\u6548",
+    updateGuideTestNote: "\uFF08\u6D4B\u8BD5\u526F\u672C\uFF1A\u4E00\u952E\u66F4\u65B0\u5DF2\u7981\u7528\u2014\u2014\u8986\u76D6\u5DE5\u4F5C\u533A\u4F1A\u4E22\u5F00\u53D1\u6001\uFF0C\u8BF7\u7528\u53D1\u5E03\u5DE5\u5177\u540C\u6B65\u6B63\u5F0F\u7248\uFF09",
+    updateIgnore: "\u5FFD\u7565\u6B64\u7248\u672C",
+    updateIgnoreTip: "\u672C\u7248\u672C\u4E0D\u518D\u63D0\u9192\uFF1B\u5B98\u7F51\u53D1\u5E03\u66F4\u65B0\u7248\u672C\u540E\u4F1A\u91CD\u65B0\u63D0\u793A",
+    updateLst: "\u6700\u65B0\u7248\u672C",
+    updateNotesTitle: "\u66F4\u65B0\u8BF4\u660E",
+    updateRecheck: "\u91CD\u65B0\u68C0\u67E5",
+    updateRecheckTip: "\u91CD\u65B0\u5411\u5B98\u65B9\u66F4\u65B0\u6E90\u67E5\u8BE2\u6700\u65B0\u7248\u672C\uFF08\u6570\u636E\u6E90\uFF1AGitHub Release\uFF0C\u5B98\u7F51\u670D\u52A1\u5668\u6BCF\u5C0F\u65F6\u540C\u6B65\uFF0C\u56FD\u5185\u76F4\u8FDE\uFF09",
+    updateUpToDate: "\u5DF2\u662F\u6700\u65B0\u7248\u672C",
+    configTestAuthHint: "frps \u670D\u52A1\u7684 token \u4E0E\u8FD9\u91CC\u586B\u5199\u7684\u4E0D\u4E00\u81F4:\u6838\u5BF9 frps.toml \u7684 auth.token \u4E0E\u914D\u7F6E\u9762\u677F\u91CC\u7684 token \u662F\u5426\u5B8C\u5168\u76F8\u540C(\u6CE8\u610F\u9996\u5C3E\u7A7A\u683C)\u3002",
+    configTestAuthTitle: "\u274C \u670D\u52A1\u5668\u53EF\u8FBE,\u4F46 token \u88AB\u62D2\u7EDD",
+    configTestBtn: "\u6D4B\u8BD5\u8FDE\u63A5",
+    configTestDnsHint: "\u57DF\u540D\u4E0D\u5B58\u5728\u6216\u8FD8\u6CA1\u751F\u6548:\u68C0\u67E5\u62FC\u5199\u3001DNS \u89E3\u6790(A \u8BB0\u5F55)\u662F\u5426\u5DF2\u914D\u7F6E,\u6216\u76F4\u63A5\u6539\u7528\u670D\u52A1\u5668 IP \u6D4B\u8BD5\u3002",
+    configTestDnsTitle: "\u274C \u57DF\u540D\u89E3\u6790\u5931\u8D25:\u300C{h}\u300D",
+    configTestErrTitle: "\u274C \u6D4B\u8BD5\u5931\u8D25",
+    configTestKcpHint: "\u63D2\u4EF6\u7684\u96A7\u9053\u8D70 KCP(UDP)\u3002\u9700\u8981\u5728 frps.toml \u91CC\u52A0 kcpBindPort = <\u7AEF\u53E3>(\u53EF\u4E0E bindPort \u540C\u53F7,TCP/UDP \u4E0D\u540C\u534F\u8BAE\u4E0D\u51B2\u7A81),\u5E76\u5728\u4E91\u5B89\u5168\u7EC4\u653E\u884C\u540C\u7AEF\u53E3\u7684 UDP\u3002",
+    configTestKcpTitle: "\u26A0\uFE0F frps \u53EF\u8FBE,\u4F46 KCP(UDP)\u8FDE\u4E0D\u901A",
+    configTestOkHint: "\u5F53\u524D\u914D\u7F6E\u53EF\u4EE5\u6B63\u5E38\u5EFA\u7ACB\u96A7\u9053,\u70B9\u300C\u4FDD\u5B58\u300D\u540E\u5373\u53EF\u4F7F\u7528\u3002",
+    configTestOkTitle: "\u2705 \u8FDE\u63A5\u6210\u529F:frps \u53EF\u8FBE,token \u6709\u6548",
+    configTestProtoHint: "\u81EA\u5EFA frps \u4E0E\u63A2\u9488 frpc({v})\u7248\u672C\u5DEE\u8DDD\u8FC7\u5927,\u6216 frps \u5F3A\u5236\u4E86\u4E0D\u540C TLS \u914D\u7F6E:\u5EFA\u8BAE\u628A frps \u5347\u7EA7\u5230 0.52+ \u7684\u540C\u4EE3\u7248\u672C\u518D\u8BD5\u3002",
+    configTestProtoTitle: "\u26A0\uFE0F \u8FDE\u4E0A\u4E86\u4F46\u63E1\u624B\u5931\u8D25(\u7591\u4F3C frps \u7248\u672C\u6216 TLS \u914D\u7F6E\u4E0D\u517C\u5BB9)",
+    configTestRefusedHint: "frps \u53EF\u80FD\u6CA1\u5728\u8FD0\u884C,\u6216\u7AEF\u53E3\u4E0D\u5BF9:\u786E\u8BA4\u670D\u52A1\u5668\u4E0A frps \u5DF2\u542F\u52A8,bindPort/kcpBindPort \u4E0E\u8FD9\u91CC\u586B\u7684\u7AEF\u53E3\u4E00\u81F4\u3002",
+    configTestRefusedTitle: "\u274C \u8FDE\u63A5\u88AB\u62D2\u7EDD(\u7AEF\u53E3\u672A\u5F00\u653E)",
+    configTestToolHint: "frpc.exe \u53EF\u80FD\u88AB\u5B89\u5168\u8F6F\u4EF6\u9694\u79BB:\u5148\u8FD0\u884C\u63D2\u4EF6\u76EE\u5F55\u91CC\u7684 fix-antivirus.bat,\u518D\u91CD\u8BD5\u3002",
+    configTestToolTitle: "\u274C frpc \u63A2\u9488\u65E0\u6CD5\u542F\u52A8",
+    configTestUnreachHint: "\u5730\u5740\u6216\u7AEF\u53E3\u586B\u9519\u3001frps \u6CA1\u5728\u8FD0\u884C\u3001\u6216\u9632\u706B\u5899/\u4E91\u5B89\u5168\u7EC4\u62E6\u622A:\u5148\u5728\u670D\u52A1\u5668\u4E0A\u786E\u8BA4 frps \u8FDB\u7A0B\u6D3B\u7740,\u518D\u68C0\u67E5\u5B89\u5168\u7EC4\u662F\u5426\u653E\u884C\u8BE5\u7AEF\u53E3\u7684 TCP+UDP\u3002",
+    configTestUnreachTitle: "\u274C \u670D\u52A1\u5668\u4E0D\u53EF\u8FBE(TCP \u4E0E UDP \u90FD\u8FDE\u4E0D\u4E0A)",
+    configTestVer: "\u63A2\u9488 frpc v{v}(\u81EA\u5EFA frps \u4E0D\u8981\u6C42\u4E0E\u5BA2\u6237\u7AEF\u7248\u672C\u5B8C\u5168\u4E00\u81F4,\u5EFA\u8BAE\u540C\u4EE3\u76F8\u8FD1)",
+    configTesting: "\u6D4B\u8BD5\u4E2D\u2026"
+  }
+};
+
+// locale/en.json
+var en_default = {
+  meta: {
+    description: "Securely tunnel this DeepSeek assistant web panel to your phone or any browser for remote control, anywhere.",
+    title: "DshRemote (Test)"
+  },
+  panel: {
+    about: "About",
+    aboutAccount: "Sign in",
+    aboutAccountLogged: "Signed in",
+    aboutApp: "App Download",
+    aboutDesc: "Securely tunnel this DeepSeek assistant web panel to your phone or any browser for remote control, anywhere.",
+    aboutGithub: "GitHub",
+    aboutQq: "QQ Group",
+    aboutWebsite: "Website",
+    appCopyLink: "Copy pairing link",
+    appFailed: "Failed to generate pairing code",
+    appLoading: "Generating long-term pairing code\u2026",
+    appNoQr: "Long-term pairing code unavailable",
+    appOnceHint: 'This is a long-term pairing code: the app registers the device and saves its login, then reconnects without scanning. Scanning the one-time QR on the "Connect" tab only grants a 1-hour temporary session, not a persistent binding.',
+    appQrAlt: "Long-term pairing QR code",
+    appReady: "Long-term pairing code ready",
+    appRefresh: "Refresh pairing code",
+    appSubtitle: "Scan once to pair; the app reconnects without scanning",
+    banEmpty: 'No banned IPs. Click "Ban" on a device to add.',
+    banTitle: "IP Blacklist",
+    cancel: "Cancel",
+    close: "Close",
+    config: "Settings",
+    configAcctCopied: "Copied",
+    configAcctCopy: "Copy link",
+    configAcctLoadFail: "Official server unreachable, please try again later.",
+    configAcctLoggedIn: "Signed in",
+    configAcctLoggedOut: "Signed out (tunnel will disconnect; sign in again to restore)",
+    configAcctLoggingOut: "Signing out\u2026",
+    configAcctLogout: "Sign out",
+    configAcctOauthBtn: "Sign in / Register",
+    configAcctOauthCancel: "Cancel",
+    configAcctOauthDone: "Authorized \u2014 applying your account and dedicated port\u2026",
+    configAcctOauthExpired: "Authorization expired, please start again.",
+    configAcctOauthFail: "Authorization failed:",
+    configAcctOauthHint: "Your browser will open the official site to sign in / register, then come back automatically",
+    configAcctOauthNetwork: "Official server unreachable, please try again later.",
+    configAcctOauthOpenAgain: "Reopen approval page",
+    configAcctOauthOpenBrowser: 'Browser opened: sign in to your account on the site and click "Approve". If it did not open, use the button below.',
+    configAcctOauthOpenFail: "Could not open your browser automatically \u2014 open the approval page via the link below.",
+    configAcctOauthOpening: "Opening browser\u2026",
+    configAcctOauthWait: "Waiting for approval\u2026",
+    configAcctPort: "Dedicated port",
+    configAcctRestartFail: 'Signed in, but tunnel restart failed: press "Start" to launch it manually.',
+    configAcctTitle: "Official account",
+    configHost: "Server address (host)",
+    configHostPh: "e.g. frps.example.com",
+    configHostRequired: "Server address is required",
+    configOfficial: "Official server",
+    configOfficialHint: "Register / sign in to your official account \u2014 works out of the box",
+    configOfficialNote: "Official server: sign in (or register) and a dedicated entry is assigned automatically \u2014 no server details to fill in.",
+    configPort: "frps port",
+    configRemotePort: "Remote port (optional)",
+    configSelfhost: "Self-hosted server",
+    configSelfhostHint: "Use your own frps server",
+    configSubtitle: "Connect to the official server or your own frps server",
+    configToken: "FRP token",
+    configTokenKeep: "Saved (leave blank to keep)",
+    configTokenNote: "Token is stored only in local browserctl_secrets.json (gitignored, never committed or uploaded).",
+    configTokenPh: "Enter the frps auth token",
+    copied: "Copied",
+    copyLink: "Copy link",
+    copySecret: "Copy secret",
+    deviceKick: "Kick",
+    deviceSeen: "Active:",
+    devicesOnline: "{n} online",
+    devicesTitle: "Online devices",
+    elevateHint: "If antivirus blocked frpc.exe or permissions got in the way, retry with administrator rights below (Windows will show a UAC prompt).",
+    elevateStart: "Start as administrator",
+    elevateStop: "Stop as administrator",
+    elevateStopHint: "Stop did not take effect: these processes may be running as administrator.",
+    elevating: "Waiting for elevation\u2026",
+    legalAck: "Got it",
+    legalMeta: "Effective {d} \xB7 Version {v}",
+    legalPrivacy: "Privacy Policy",
+    legalTerms: "User Agreement",
+    linkCopied: "Copied",
+    linkCopy: "Copy link",
+    linkNote: 'Paired devices appear in the "App pairing" tab and can be unpaired anytime; never share the pairing code with others.',
+    linkOpenSite: "Open site",
+    linkStep1: "Open the official site above in the phone browser (sign-in optional; this entry never changes, no matter how ports rotate)",
+    linkStep2: 'On the computer, switch to the "App pairing" tab and show the long-term pairing code (it rotates automatically after each scan)',
+    linkStep3: "Scan it with the iPhone camera (not WeChat): the browser registers and binds the device, then opens the panel verification-free for 30 days",
+    linkStep4: 'On the panel page, tap Share \u2192 "Add to Home Screen" to keep the entry permanently; after the 30-day window, scan a fresh code to renew',
+    linkStepsTitle: "Binding steps",
+    linkSubtitle: 'For devices without the app (iPhone / iPad): open the official site, then scan the long-term pairing code from the "App pairing" tab \u2014 one scan registers the device for 30 days of verification-free access; then "Add to Home Screen" to use it like an app. No PWA invite link needed.',
+    linkTitle: "iOS / No-App devices",
+    linkWebTag: "Web pairing",
+    logEmpty: "No events yet. Device verifications, kicks and 2FA toggles are recorded here.",
+    logTabAll: "All",
+    logTabBan: "Blacklist",
+    logTabKick: "Kick",
+    logTabLogin: "Login",
+    logTabPair: "Pairing",
+    logTabSettings: "Settings",
+    logTabSys: "System",
+    logTabTotp: "2FA",
+    logTabUnsigned: "Unsigned",
+    logTitle: "Event log",
+    loginBtn: "Sign in",
+    loginEmail: "Email",
+    loginLoggingIn: "Signing in\u2026",
+    loginOr: "or",
+    loginPassword: "Password",
+    loginPwdTitle: "Sign in with password",
+    loginRequired: "Sign in required",
+    loginRequiredDesc: "Using the official server requires signing in first; a dedicated entry is assigned after login. Tap below to sign in.",
+    msgBack: "Back to list",
+    msgCenter: "Notifications",
+    msgEmpty: "No notifications",
+    msgEmptyFeed: "No pushes yet. Once push is enabled on this PC, its notifications will be collected here.",
+    msgEmptyMine: "No messages",
+    msgEmptyOfficial: "No announcements",
+    msgGuestHint: "Showing public announcements; sign in to the official account to receive direct messages.",
+    msgLoadFail: "Failed to load notifications",
+    msgNoTitle: "(no title)",
+    msgOfficial: "Announcement",
+    msgOpenLink: "Open link",
+    msgPersonal: "For you",
+    msgStyleEvent: "Event",
+    msgStyleUpdate: "Update",
+    msgStyleWarning: "Security notice",
+    msgTabFeed: "From this PC",
+    noDevices: "No verified devices yet",
+    noDevicesHint: "Devices appear here after opening the panel via the QR link and passing the 2FA code; locally opened panels are not counted.",
+    noOnlineDevices: "No devices online right now",
+    openFailed: "Failed to open panel",
+    openPanel: "Open panel",
+    opening: "Opening\u2026",
+    pairAppTempNote: 'Scanning this code with the app grants only a 1-hour temporary session; for long-term pairing use the "App pairing" tab.',
+    pairExpired: "Pairing expired \u2014 refresh to generate a new one",
+    pairLeft: "expires in",
+    pairOnce: "One-time pairing link",
+    pairStatic: "Bootstrap link (valid for 24 hours)",
+    pairSwap: "New code",
+    pairUses: "used",
+    pairUsesLabel: "Uses",
+    pairUsesOne: "1 use (rotate after scan)",
+    pairUsesTimes: "uses",
+    pluginUpdDesc: "You are on v{cur}; v{v} has been released with the latest fixes and features.",
+    pluginUpdTitle: "New plugin version v{v}",
+    pushComposerHint: "The message pops up on the phone App and in this PC's notification centre",
+    pushComposerTitle: "Send a message",
+    pushDesc: "Realtime push of security events \u2014 device connect / kick / blacklist / 2FA / pairing \u2014 plus system messages to your phone.",
+    pushEmpty: "No pushes yet. Security events will appear here once push is enabled.",
+    pushEnabledHint: "Master switch: receive push from this panel on your phone",
+    pushEnabledLabel: "Receive phone push",
+    pushGroupOfficial: "Official",
+    pushGroupSecurity: "Security activity",
+    pushKindBan: "Ban",
+    pushKindDev: "Device",
+    pushKindJoin: "Connect",
+    pushKindKick: "Kick",
+    pushKindMsg: "Message",
+    pushKindPair: "Pair",
+    pushKindTest: "Test",
+    pushKindTotp: "2FA",
+    pushKindVerify: "Verify",
+    pushMsgBodyLabel: "Content",
+    pushMsgBodyPh: "Type the message to push\u2026",
+    pushMsgTitleLabel: "Title (optional)",
+    pushMsgTitlePh: "Leave empty to show the message only",
+    pushOff: "Off",
+    pushOn: "On",
+    pushPollFailed: "Failed to load push config",
+    pushRecent: "Recent pushes",
+    pushRefresh: "Refresh",
+    pushRefreshing: "Refreshing\u2026",
+    pushSaveFailed: "Failed to save settings",
+    pushSend: "Send",
+    pushSendFail: "Failed to send message",
+    pushSendOff: "Push is off \u2014 message not sent",
+    pushSendOk: "Message pushed",
+    pushSending: "Sending\u2026",
+    pushSystemHint: "Device connect / kick / blacklist / 2FA / pairing",
+    pushSystemLabel: "Security events",
+    pushTest: "Send test push",
+    pushTestBody: "This is a test push from DSH Remote Assistant",
+    pushTestFail: "Failed to send test push",
+    pushTestOk: "Test push sent",
+    pushTestTitle: "Test push",
+    pushTesting: "Sending\u2026",
+    pushTitle: "Push Notifications",
+    qrAlt: "Pairing QR code",
+    refresh: "Refresh QR",
+    save: "Save",
+    saved: "Saved",
+    saving: "Saving\u2026",
+    sdCurrent: "Currently {n} days",
+    sdDay1: "1 day",
+    sdDay30: "30 days",
+    sdDay7: "7 days",
+    sdHint: 'How long a verified device stays trusted. Only affects sessions issued afterwards; to force all devices to re-verify now, use "Kick all devices" on the 2FA tab.',
+    sdLoadFail: "Load failed (gate not running?)",
+    sdLoading: "\u2026",
+    sdSaveFail: "Save failed",
+    sdTitle: "Session lifetime",
+    sigCancel: "Cancel",
+    sigConfirm: "Confirm once more: all regular devices are on v1.0.55+ with keys bound? If this locks you out, come back here to switch it off (effective immediately).",
+    sigCounts: "Devices {d} \xB7 With key {k} \xB7 With pubkey {p}",
+    sigDedupe: "Dedupe ({n})",
+    sigDedupeDone: "Removed {n} duplicate records",
+    sigDedupeHint: "{n} duplicate records of the same device: delete the extras (and revoke them), keep the latest",
+    sigDedupePart: "Removed {ok}/{n}; the rest were only revoked (deletion needs the new gate + local panel)",
+    sigDedupeYes: "Confirm dedupe",
+    sigDevs: "Device credentials",
+    sigFail: "Switch failed (host route not ready? needs DSH restart)",
+    sigFail2: "Operation failed",
+    sigHasKeyB: "Key",
+    sigHasPub: "PubKey",
+    sigHint: 'Criterion: "grace: unsigned request" stops appearing in the run log (events are throttled to 60s; close background phone browser tabs and wait a few minutes before judging).',
+    sigLoading: "\u2026",
+    sigNoKey: "No key",
+    sigOff: "Grace period",
+    sigOn: "Enforced",
+    sigRevoke: "Revoke",
+    sigRevoked: "Revoked; the device must re-pair or verify with a code",
+    sigRevoking: "Revoking\u2026",
+    sigSwitchHint: "When enabled, requests without a valid device signature are rejected with 401 + onboarding page; devices holding a 30-day session but no bound key are refused.",
+    sigSwitchLabel: "Enable enforcement",
+    sigTitle: "Enforce device signatures",
+    sigYes: "Confirm",
+    startCtl: "Start control",
+    startFailed: "Start failed:",
+    starting: "Starting tunnel\u2026",
+    statusLoading: "Generating QR code\u2026",
+    statusNoSecret: 'Tunnel not ready: click "Start control" below, QR appears in a few seconds',
+    statusReady: "Tunnel ready \u2014 scan to open the panel",
+    statusTunnelBuilding: "Tunnel is starting \u2014 the QR appears automatically in a few seconds (no need to click Start again)",
+    statusTunnelStarting: "Tunnel starting; refresh the QR in a few seconds",
+    stopCtl: "Stop control",
+    stopping: "Stopping\u2026",
+    subtitle: "Scan or copy the link to open this panel from any device",
+    sysCached: "cached",
+    sysFail: "Load failed (gate not running?)",
+    sysFree: "free",
+    sysHint: "Sampled by the local gate, ~10s cache.",
+    sysLoading: "Loading\u2026",
+    sysMem: "Memory",
+    sysTitle: "Host status",
+    tab: "DshRemote",
+    tab2fa: "2FA",
+    tabApp: "App Pairing",
+    tabBan: "Blacklist",
+    tabConnect: "Connect",
+    tabDevices: "Devices",
+    tabLog: "Log",
+    tabPush: "Push",
+    ticketAddImage: "Add image",
+    ticketAll: "All",
+    ticketAttachRemove: "Remove",
+    ticketBack: "Back",
+    ticketBodyLabel: "Details",
+    ticketBodyPh: "Describe the symptom, steps to reproduce and expected result (max 2000 chars)",
+    ticketCatAccount: "Account / billing",
+    ticketCatBug: "Bug / malfunction",
+    ticketCatConnect: "Connection / access",
+    ticketCatFeature: "Feature request",
+    ticketCatOther: "Other",
+    ticketCategory: "Category",
+    ticketClose: "Close ticket",
+    ticketCloseConfirm: "Confirm close",
+    ticketCloseOk: "Ticket closed",
+    ticketClosedNote: "This ticket is closed. Submit a new ticket to continue.",
+    ticketClosing: "Closing\u2026",
+    ticketCopyContent: "Copy log content",
+    ticketCopyContentDesc: "Copy the redacted full text to the clipboard for pasting into a chat.",
+    ticketCopyFail: "Copy failed \u2014 open the exported txt and copy manually.",
+    ticketCopyOk: "Log content copied to clipboard",
+    ticketCopyPath: "Copy path",
+    ticketCopyPathOk: "Path copied",
+    ticketDestTitle: "Where the log goes",
+    ticketDetailEmpty: "No messages yet",
+    ticketDiagAttachedOff: "Not attached",
+    ticketDiagAttachedOk: "Diagnostics attached",
+    ticketDiagAttachedOn: "Attached",
+    ticketDiagConfirm: "Attach",
+    ticketDiagConsent: "I have previewed the diagnostics above, confirmed there is no sensitive information, and agree to upload it with this ticket",
+    ticketDiagDesc: "Attach the runtime environment, gate/tunnel state and local logs to speed up troubleshooting. You will see the full content before uploading; tokens, cookies, signatures and IPs are redacted automatically.",
+    ticketDiagDetailBadge: "Attached",
+    ticketDiagEmptyLogs: "(No readable local log files \u2014 environment and gate state only)",
+    ticketDiagExport: "Download full log (txt)",
+    ticketDiagLegal: "Logs are only uploaded after you tick the box, are used solely to troubleshoot this ticket, and are deleted together with the ticket.",
+    ticketDiagLogsUnit: " log file(s)",
+    ticketDiagPreTip: "This is the exact content that will be uploaded (already redacted). Please make sure it contains nothing you do not want to share.",
+    ticketDiagPreview: "Generate & preview",
+    ticketDiagReading: "Reading\u2026",
+    ticketDiagSummary: "Collected at",
+    ticketDiagTitle: "Diagnostics (optional)",
+    ticketDiagTruncated: "truncated",
+    ticketDiagUploading: "Uploading\u2026",
+    ticketExportAgain: "Export again",
+    ticketExportDo: "Export diagnostic logs",
+    ticketExportDone: "Exported to:",
+    ticketExportHostOld: "The plugin host is still the old version (this feature needs a full DSH restart). Quit DSH completely, reopen it, then try again.",
+    ticketExportNote: "Logs are generated locally and never uploaded automatically; you decide what to upload on the web.",
+    ticketExportSubtitle: "Export the local diagnostic log (auto-redacted), then choose where it goes.",
+    ticketExporting: "Exporting\u2026",
+    ticketFollow: "Send message",
+    ticketFollowPh: "Follow-up message (max 1000 chars)",
+    ticketFollowRequired: "Please enter a message",
+    ticketGoLogin: "Sign in",
+    ticketImgSize: "Each image must be 5MB or smaller",
+    ticketImgType: "Only jpg/png/webp/gif images are supported",
+    ticketListEmpty: 'No tickets yet. Tap "New Ticket" to report an issue or suggestion.',
+    ticketLoading: "Loading\u2026",
+    ticketLogFile: "Log",
+    ticketNoContent: 'Log not generated yet \u2014 click "Export diagnostic logs" first.',
+    ticketNotLogin: "Please sign in first",
+    ticketNotLoginDesc: "Ticket feedback requires an official account so replies can reach you. Use the button below to sign in.",
+    ticketOpenFolder: "Open folder",
+    ticketOpenWeb: "Open web ticket page",
+    ticketOpenWebDesc: "Recommended: sign in, submit the ticket on the web and upload this txt as a log file.",
+    ticketOpening: "Opening\u2026",
+    ticketPosting: "Sending\u2026",
+    ticketRoleAdmin: "Support",
+    ticketRolePlayer: "Me",
+    ticketSaveGo: "Save here",
+    ticketSaveOk: "Saved to: ",
+    ticketSaveOther: "Save to another folder",
+    ticketSaveOtherDesc: "Keep another copy of this log in a folder you choose.",
+    ticketSavePathPh: "Paste a full folder path, e.g. C:\\Users\\you\\Documents",
+    ticketSaving: "Saving\u2026",
+    ticketStatusClosed: "Closed",
+    ticketStatusCompleted: "Completed",
+    ticketStatusPending: "Pending",
+    ticketStatusProcessing: "In progress",
+    ticketStatusReplied: "Replied",
+    ticketSubmit: "Submit ticket",
+    ticketSubmitOk: "Submitted",
+    ticketSubmitRequired: "Please fill in both title and details",
+    ticketSubmitting: "Submitting\u2026",
+    ticketSubtitle: "Report issues, suggestions or questions to the official server. Requires an official account.",
+    ticketTabList: "My Tickets",
+    ticketTabNew: "New Ticket",
+    ticketTitleLabel: "Title",
+    ticketTitlePh: "One-line summary (max 80 chars)",
+    ticketUnread: "Unread",
+    ticketUploading: "Uploading\u2026",
+    tickets: "Ticket Feedback",
+    totpAppHint: "An authenticator app on the phone generates the codes; Microsoft Authenticator is recommended:",
+    totpAppLink: "Get it from Microsoft",
+    totpBind: "2FA binding QR code",
+    totpDisable: "Disable 2FA",
+    totpEnable: "Enable 2FA",
+    totpHint: "When enabled, every device must pass a 6-digit authenticator code (RFC 6238) before opening the panel; 5 wrong tries lock for 15 minutes; replayed codes are rejected.",
+    totpHintShort: "Devices must enter a 6-digit code to open the panel; 5 wrong tries lock for 15 minutes.",
+    totpKick: "Kick all devices",
+    totpOff: "Disabled",
+    totpOn: "Enabled",
+    totpReset: "Reset secret",
+    totpSecretLabel: "Secret (manual entry)",
+    totpTitle: "Two-Factor Auth (2FA)",
+    updBanner: "New App version v{v} released",
+    updateApplyBtn: "Update to v{v}",
+    updateApplyDone: "Updated to v{v}; restart DSH to apply",
+    updateApplyTip: "Downloads the official zip and overwrites this plugin folder (the tunnel stops first). Restart DSH to finish; works for extracted-folder installs only",
+    updateApplying: "Updating (downloading & overwriting)\u2026",
+    updateCheck: "Check for updates",
+    updateChecking: "Checking\u2026",
+    updateCur: "Current version",
+    updateDownload: "Download",
+    updateDownloadTip: "Open the official zip direct link in your browser (about 6.4 MB) as a manual fallback",
+    updateFailed: "Update check failed",
+    updateFound: "New version v{v} available",
+    updateGuideLocal: "To update: download the new zip, extract it over the plugin folder ({dir}), then restart DSH. If the tunnel fails afterwards, run fix-antivirus.bat in the folder first",
+    updateGuidePackage: 'To update: run "{cmd}" in a terminal, then restart DSH',
+    updateGuideTestNote: " (test copy: one-click update is disabled here \u2014 use the release tool to sync)",
+    updateIgnore: "Ignore this version",
+    updateIgnoreTip: "Skip reminders for this version; newer releases will notify again",
+    updateLst: "Latest version",
+    updateNotesTitle: "Release notes",
+    updateRecheck: "Check again",
+    updateRecheckTip: "Query the official update source again (GitHub Release, mirrored hourly by the website server)",
+    updateUpToDate: "You are up to date",
+    configTestAuthHint: "The frps token does not match what you typed: check auth.token in frps.toml against the token field here (watch for stray spaces).",
+    configTestAuthTitle: "\u274C Server reachable, but the token was rejected",
+    configTestBtn: "Test connection",
+    configTestDnsHint: "The domain does not resolve yet: check the spelling and the DNS A record, or test with the server IP directly.",
+    configTestDnsTitle: '\u274C DNS lookup failed: "{h}"',
+    configTestErrTitle: "\u274C Test failed",
+    configTestKcpHint: "The plugin tunnel uses KCP (UDP). Add kcpBindPort = <port> to frps.toml (may equal bindPort; TCP/UDP do not conflict) and allow the same port over UDP in your security group.",
+    configTestKcpTitle: "\u26A0\uFE0F frps reachable, but KCP (UDP) fails",
+    configTestOkHint: "This configuration can establish the tunnel; click Save to use it.",
+    configTestOkTitle: "\u2705 Connection OK: frps reachable, token valid",
+    configTestProtoHint: "Your frps is too far from probe frpc ({v}) or enforces different TLS settings: upgrade frps to a same-generation release (0.52+) and retry.",
+    configTestProtoTitle: "\u26A0\uFE0F Connected but handshake failed (possible frps version or TLS mismatch)",
+    configTestRefusedHint: "frps may not be running, or the port is wrong: make sure frps is up and its bindPort/kcpBindPort matches the port here.",
+    configTestRefusedTitle: "\u274C Connection refused (port not open)",
+    configTestToolHint: "frpc.exe may be quarantined by antivirus: run fix-antivirus.bat from the plugin folder first, then retry.",
+    configTestToolTitle: "\u274C Failed to launch the frpc probe",
+    configTestUnreachHint: "Wrong address/port, frps down, or a firewall/security-group block: confirm the frps process on the server, then allow this port (TCP+UDP) in your cloud security group.",
+    configTestUnreachTitle: "\u274C Server unreachable (both TCP and UDP failed)",
+    configTestVer: "Probe frpc v{v} (a self-hosted frps does not need the exact same version; keep it in the same generation)",
+    configTesting: "Testing\u2026"
+  }
+};
+
+// src/client.jsx
 var import_jsx_runtime = require("react/jsx-runtime");
+var BTN_SOFT_SKIP = /^dshBrowserCtl(Header|Launcher)/;
+var Button = (0, import_react.forwardRef)(function Button2({ variant = "ghost", className, children, ...rest }, ref) {
+  const soft = children != null && (variant === "ghost" || variant === "secondary") && !(typeof className === "string" && BTN_SOFT_SKIP.test(className));
+  return /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+    import_dsh_client_ui_primitives.Button,
+    {
+      ref,
+      ...rest,
+      variant: variant === "secondary" ? "ghost" : variant,
+      className: soft ? "dshBrowserCtlBtnSoft" + (className ? " " + className : "") : className,
+      children
+    }
+  );
+});
 var NS = "browserctl";
-var STYLE_ID = "browserctl/styles";
 var IS_TEST = /-test$/.test(NS);
-var VERSION = true ? "1.0.85" : "dev";
+var STYLE_ID = NS + "/styles";
+var VERSION = true ? "1.0.87" : "dev";
 var ABOUT_LINKS = {
   website: "https://remote.ymzcc.com/dsh-remote/",
   github: "https://github.com/Memorial-coder/dsh-remote-plugin",
   app: "https://github.com/Memorial-coder/dsh-remote-plugin/releases/latest",
   qq: "https://qm.qq.com/q/K6RXqOKLAu"
 };
-var MS_AUTHENTICATOR_URL = "https://www.microsoft.com/zh-cn/security/authenticator/mobile-app";
 var PLUGIN_ADD_CMD = "dsh plugin add github:Memorial-coder/dsh-remote-plugin";
+var MS_AUTHENTICATOR_URL = "https://www.microsoft.com/zh-cn/security/authenticator/mobile-app";
 function lsGet(k) {
   try {
     return window.localStorage.getItem(k) || "";
@@ -69,6 +893,32 @@ function fmtMsgTime(ts) {
   const d = new Date(t);
   const p = (n) => (n < 10 ? "0" : "") + n;
   return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) + " " + p(d.getHours()) + ":" + p(d.getMinutes());
+}
+var DEEPLINK_HASH_KEY = "dshremote-open";
+var DEEPLINK_SID_RE = /^[A-Za-z0-9_-]{1,120}$/;
+function consumeOpenSessionHash(openSession) {
+  try {
+    const h = String(typeof location !== "undefined" && location.hash || "");
+    if (!h || h.length < DEEPLINK_HASH_KEY.length + 2) return;
+    const m = new RegExp("[#&]" + DEEPLINK_HASH_KEY + "=([^&]+)").exec(h);
+    if (!m) return;
+    const raw = decodeURIComponent(m[1] || "");
+    const sid = raw.startsWith("dshsession:") ? raw.slice(11) : raw;
+    try {
+      history.replaceState(null, "", location.pathname + location.search);
+    } catch (e) {
+    }
+    if (!sid || !DEEPLINK_SID_RE.test(sid)) return;
+    const tryOpen = (delay) => setTimeout(() => {
+      try {
+        openSession(sid);
+      } catch (e) {
+      }
+    }, delay);
+    tryOpen(0);
+    tryOpen(1500);
+  } catch (e) {
+  }
 }
 function apiPrefix() {
   try {
@@ -567,6 +1417,43 @@ var css = `
   flex-wrap: wrap;
   justify-content: center;
 }
+/* ---------- \u6587\u5B57\u6309\u94AE\u7EDF\u4E00\u8F6F\u5E95(2026-11-25) ----------
+   primitives Button \u65E0 secondary \u53D8\u4F53,ghost/secondary \u6587\u5B57\u6309\u94AE\u6B64\u524D=\u900F\u660E\u5E95,
+   \u548C\u8BF4\u660E\u6587\u5B57\u6DF7\u5728\u4E00\u8D77\u5206\u4E0D\u6E05\u662F\u6309\u94AE\u3002\u7EDF\u4E00\u8865:\u7070\u5E95+\u7EC6\u63CF\u8FB9,\u60AC\u505C/\u6309\u4E0B\u52A0\u6DF1;
+   primary(\u767D\u5E95)\u4E0E\u56FE\u6807\u6309\u94AE\u4E0D\u53D7\u5F71\u54CD(\u5305\u88C5\u5668\u53EA\u7ED9\u6587\u5B57\u7C7B\u6309\u94AE\u52A0 dshBrowserCtlBtnSoft)\u3002 */
+.dshBrowserCtlBtnSoft {
+  background: var(--dsw-alias-fill-control-secondary, rgba(255, 255, 255, 0.08)) !important;
+  box-shadow: inset 0 0 0 var(--dsh-hairline-width, 0.5px) var(--dsw-alias-border-l3, rgba(255, 255, 255, 0.16));
+  color: var(--dsw-alias-label-primary, inherit);
+}
+.dshBrowserCtlBtnSoft:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover, rgba(255, 255, 255, 0.14)) !important;
+}
+.dshBrowserCtlBtnSoft:active:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-active, rgba(255, 255, 255, 0.18)) !important;
+}
+/* \u5361\u7247\u5185\u5C0F\u6587\u5B57\u6309\u94AE(\u7B7E\u540D\u5065\u5EB7\u884C\u7684\u300C\u5237\u65B0/\u91CD\u542F\u95F8\u673A\u300D\u7B49):\u540C\u6837\u7ED9\u5E95,\u522B\u6DF7\u8FDB\u6B63\u6587 */
+.dshBrowserCtlMiniBtn {
+  appearance: none;
+  border: 1px solid var(--dsw-alias-border-l2, #2a2c33);
+  background: var(--dsw-alias-fill-control-secondary, rgba(255, 255, 255, 0.08));
+  color: var(--dsw-alias-label-secondary, #a6aab2);
+  font: inherit;
+  font-size: 11px;
+  line-height: 16px;
+  padding: 2px 8px;
+  border-radius: 7px;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.dshBrowserCtlMiniBtn:hover:not(:disabled) {
+  color: var(--dsw-alias-label-primary, inherit);
+  background: var(--dsw-alias-interactive-bg-hover, rgba(255, 255, 255, 0.14));
+}
+.dshBrowserCtlMiniBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 .dshBrowserCtlCard {
   border: 1px solid var(--dsw-alias-border-l2, #2a2c33);
   border-radius: 12px;
@@ -945,6 +1832,36 @@ var css = `
   padding: 2px 0;
 }
 /* \u8FD0\u884C\u65E5\u5FD7:\u53EF\u6298\u53E0,\u6700\u591A\u663E\u793A\u4E00\u5C4F,\u5185\u90E8\u6EDA\u52A8 */
+/* \u5206\u7C7B\u9875\u7B7E(2026-11-16):\u6A2A\u5411\u53EF\u6362\u884C\u7684\u5C0F chip,\u9009\u4E2D\u9AD8\u4EAE;\u8BA1\u6570\u7528\u5F31\u5316\u8272 */
+.dshBrowserCtlLogTabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding-bottom: 6px;
+}
+.dshBrowserCtlLogTab {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--dsw-alias-border-l1, rgba(255,255,255,0.08));
+  background: transparent;
+  color: var(--dsw-alias-label-secondary, #a6aab2);
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 1;
+  padding: 5px 9px;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.dshBrowserCtlLogTab:hover { color: var(--dsw-alias-label-primary, #fff); }
+.dshBrowserCtlLogTab[data-on='true'] {
+  background: var(--dsw-alias-fill-control-active, rgba(255,255,255,0.12));
+  color: var(--dsw-alias-label-primary, #fff);
+}
+.dshBrowserCtlLogTabN {
+  font-size: 10px;
+  color: var(--dsw-alias-label-tertiary, #8b8f98);
+}
 .dshBrowserCtlLogBody {
   max-height: 168px;
   overflow-y: auto;
@@ -1080,6 +1997,17 @@ div[data-slot='sidebar.footer.action'] > * {
   gap: 10px;
   justify-content: flex-end;
 }
+/* \u63D2\u4EF6\u65B0\u7248\u672C\u63D0\u793A\u5F39\u7A97\u91CC\u7684\u66F4\u65B0\u8BF4\u660E\u5217\u8868 */
+.dshBrowserCtlUpdNotes {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--dsw-alias-label-secondary, #cfd3d6);
+}
 /* \u68C0\u67E5\u66F4\u65B0:42px \u4E09\u6001\u6309\u94AE + \u7248\u672C\u5BF9\u6BD4 + \u4E0B\u8F7D + \u66F4\u65B0\u8BF4\u660E */
 .dshBrowserCtlAboutUpdate {
   display: flex;
@@ -1117,6 +2045,13 @@ div[data-slot='sidebar.footer.action'] > * {
   line-height: 18px;
   color: var(--dsw-alias-label-secondary, #a6aab2);
 }
+.dshBrowserCtlAboutUpdateGuide {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-secondary, #a6aab2);
+  word-break: break-all;
+}
 .dshBrowserCtlAboutUpdateNotes {
   margin: 0;
   padding-left: 18px;
@@ -1127,22 +2062,19 @@ div[data-slot='sidebar.footer.action'] > * {
   line-height: 17px;
   color: var(--dsw-alias-label-secondary, #a6aab2);
 }
-.dshBrowserCtlAboutUpdateGuide {
-  margin: 8px 0 0;
-  font-size: 12px;
-  line-height: 18px;
-  color: var(--dsw-alias-label-secondary, #a6aab2);
-  word-break: break-all;
+/* \u66F4\u65B0\u533A\u5206\u9694\u7EBF:\u628A\u300C\u7248\u672C\u5BF9\u6BD4+\u6309\u94AE\u300D\u548C\u300C\u66F4\u65B0\u65B9\u6CD5/\u66F4\u65B0\u8BF4\u660E\u300D\u4E24\u644A\u4FE1\u606F\u9694\u5F00(2026-11-25) */
+.dshBrowserCtlAboutUpdateSep {
+  height: 1px;
+  margin: 2px 0;
+  background: var(--dsw-alias-border-l2, #2a2c33);
 }
-.dshBrowserCtlUpdNotes {
+/* \u300C\u66F4\u65B0\u8BF4\u660E\u300D\u5C0F\u8282\u6807\u9898:\u6BD4\u6B63\u6587\u8BF4\u660E\u5B57\u91CD\u9AD8\u4E00\u7EA7,\u8BFB\u5F97\u51FA\u8FD9\u662F\u6807\u9898\u4E0D\u662F\u4ECB\u7ECD */
+.dshBrowserCtlAboutUpdateLabel {
   margin: 0;
-  padding-left: 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
   font-size: 12px;
-  line-height: 1.6;
-  color: var(--dsw-alias-label-secondary, #cfd3d6);
+  line-height: 17px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary, inherit);
 }
 .dshBrowserCtlAboutUpdateErr {
   margin: 0;
@@ -1534,6 +2466,16 @@ div[data-slot='sidebar.footer.action'] > * {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  overflow-y: auto;
+  max-height: 320px;
+}
+/* \u901A\u77E5\u5206\u7EC4\u6807\u9898(2026-11-16):\u5B98\u65B9\u6D88\u606F / \u5B89\u5168\u52A8\u6001 */
+.dshBrowserCtlPushGroupHead {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-tertiary, #8b8f98);
+  padding: 4px 2px 0;
 }
 .dshBrowserCtlPushRow {
   display: flex;
@@ -1585,7 +2527,26 @@ div[data-slot='sidebar.footer.action'] > * {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* ---------- \u9876\u680F\u300C\u901A\u77E5\u4E2D\u5FC3\u300D\u94C3\u94DB + \u4E0B\u62C9\u5217\u8868 ---------- */
+/* \u65B0\u7248\u672C\u63D0\u9192\u6A2A\u5E45:\u9762\u677F\u9876\u90E8,\u53D1\u5E03\u65B0\u7248\u672C\u540E\u51FA\u73B0 */
+.dshBrowserCtlUpdBanner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  margin: 8px 10px 0;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: rgba(10, 132, 255, 0.12);
+  border: 1px solid rgba(10, 132, 255, 0.35);
+}
+.dshBrowserCtlUpdBannerText {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary, inherit);
+}
+/* \u5173\u4E8E\u6309\u94AE\u4E0A\u7684\u65B0\u7248\u672C\u5C0F\u7EA2\u70B9 */
 .dshBrowserCtlAboutBtn { position: relative; display: inline-flex; }
 .dshBrowserCtlBadgeDot {
   position: absolute;
@@ -1601,7 +2562,8 @@ div[data-slot='sidebar.footer.action'] > * {
 /* ---------- \u9876\u680F\u300C\u901A\u77E5\u4E2D\u5FC3\u300D\u4E0B\u62C9(\u94C3\u94DB) ----------
    2026-11-23 \u4E09\u5206\u6BB5\u6539\u7248:\u4E0E\u624B\u673A\u6D88\u606F\u4E2D\u5FC3(home.html msg-tabs)\u540C\u6784\u2014\u2014
    \u5B98\u65B9\u516C\u544A / \u53D1\u7ED9\u6211 / \u7535\u8111\u63A8\u9001 \u5404\u81EA\u5206\u6BB5,\u884C=\u5FBD\u6807+\u77ED\u65F6\u95F4+\u6807\u9898(\u4E24\u884C)+\u6B63\u6587\u4E00\u884C\u6458\u8981,
-   \u70B9\u6574\u884C\u8FDB\u8BE6\u60C5 pane(\u8FD4\u56DE\u952E\u56DE\u5217\u8868)\u3002 */
+   \u70B9\u6574\u884C\u8FDB\u8BE6\u60C5 pane(\u8FD4\u56DE\u952E\u56DE\u5217\u8868)\u3002\u6B64\u524D\u5DE5\u4F5C\u533A\u526F\u672C\u6F0F\u5E26\u8FD9\u7EC4 CSS(\u6B63\u5F0F\u7248\u955C\u50CF\u6709),
+   \u6D4B\u8BD5\u526F\u672C\u7684\u4E0B\u62C9\u4E00\u76F4\u88F8\u5954,\u8FD9\u6B21\u968F\u6539\u7248\u4E00\u5E76\u8865\u9F50\u3002 */
 .dshBrowserCtlMsgMask {
   position: fixed;
   inset: 0;
@@ -1912,7 +2874,7 @@ div[data-slot='sidebar.footer.action'] > * {
   background: var(--dsw-alias-bg-layer-2, rgba(255, 255, 255, 0.06));
   text-decoration: none;
 }
-/* ---------- \u5DE5\u5355\u53CD\u9988\u5F39\u7A97(\u5BFC\u51FA\u65E5\u5FD7 \u2192 \u9009\u53BB\u5411) ---------- */
+/* ---------- \u5DE5\u5355\u53CD\u9988\u5F39\u7A97 ---------- */
 .dshBrowserCtlPanelTicket { width: min(600px, 94vw); overflow: hidden; }
 .dshBrowserCtlTicketBody {
   display: flex;
@@ -1926,6 +2888,72 @@ div[data-slot='sidebar.footer.action'] > * {
   padding-right: 2px;
 }
 .dshBrowserCtlTicketBody > * { flex: 0 0 auto; }
+.dshBrowserCtlTicketLogin { display: flex; flex-direction: column; gap: 12px; padding: 6px 2px; }
+.dshBrowserCtlTicketLoginTitle { margin: 0; font-size: 14px; font-weight: 600; }
+.dshBrowserCtlTicketLoginDesc { margin: 0; font-size: 12.5px; line-height: 19px; color: var(--dsw-alias-label-secondary, #a6aab2); }
+.dshBrowserCtlTicketChips { display: flex; flex-wrap: wrap; gap: 6px; }
+.dshBrowserCtlTicketChip {
+  appearance: none;
+  border: 1px solid var(--dsw-alias-border-l2, #2a2c33);
+  background: var(--dsw-alias-bg-layer-1, rgba(255,255,255,0.03));
+  color: var(--dsw-alias-label-secondary, #a6aab2);
+  border-radius: 999px;
+  padding: 5px 11px;
+  font: inherit;
+  font-size: 12px;
+  line-height: 16px;
+  cursor: pointer;
+  transition: background .15s ease, color .15s ease;
+}
+.dshBrowserCtlTicketChip[data-active='true'] {
+  background: var(--dsw-alias-state-info-primary, #4da3ff);
+  border-color: transparent;
+  color: #fff;
+}
+.dshBrowserCtlTicketChip:disabled { opacity: .5; cursor: default; }
+.dshBrowserCtlTicketList { display: flex; flex-direction: column; gap: 8px; }
+.dshBrowserCtlTicketCard {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: left;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 11px 12px;
+  border: 1px solid var(--dsw-alias-border-l2, #2a2c33);
+  border-radius: 10px;
+  background: var(--dsw-alias-bg-layer-1, rgba(255,255,255,0.03));
+  color: var(--dsw-alias-label-primary, inherit);
+  font: inherit;
+  cursor: pointer;
+  transition: background .15s ease;
+}
+.dshBrowserCtlTicketCard:hover { background: var(--dsw-alias-bg-layer-2, rgba(255,255,255,0.06)); }
+.dshBrowserCtlTicketCard:disabled { cursor: default; opacity: .7; }
+.dshBrowserCtlTicketCardTop { display: flex; align-items: center; gap: 8px; }
+.dshBrowserCtlTicketCardTitle { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dshBrowserCtlTicketUnread { width: 8px; height: 8px; border-radius: 50%; background: #ff4d4f; flex: none; }
+.dshBrowserCtlTicketMeta { display: flex; align-items: center; gap: 8px; font-size: 11.5px; line-height: 16px; color: var(--dsw-alias-label-tertiary, #8b8f98); }
+.dshBrowserCtlTicketMetaTime { margin-left: auto; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.dshBrowserCtlTicketStatus {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 500;
+  background: rgba(255,255,255,0.07);
+  color: var(--dsw-alias-label-secondary, #a6aab2);
+  flex: none;
+}
+.dshBrowserCtlTicketStatus[data-status='pending'] { background: rgba(230,145,56,0.16); color: #e69138; }
+.dshBrowserCtlTicketStatus[data-status='processing'] { background: rgba(77,163,255,0.16); color: #4da3ff; }
+.dshBrowserCtlTicketStatus[data-status='replied'] { background: rgba(52,179,113,0.16); color: #34b371; }
+.dshBrowserCtlTicketStatus[data-status='completed'] { background: rgba(52,179,113,0.22); color: #34b371; }
+.dshBrowserCtlTicketStatus[data-status='closed'] { background: rgba(139,143,152,0.18); color: #8b8f98; }
+.dshBrowserCtlTicketForm { display: flex; flex-direction: column; gap: 12px; }
+.dshBrowserCtlTicketField { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--dsw-alias-label-secondary, #a6aab2); }
 .dshBrowserCtlTicketInput {
   width: 100%;
   box-sizing: border-box;
@@ -1940,6 +2968,94 @@ div[data-slot='sidebar.footer.action'] > * {
   outline: none;
 }
 .dshBrowserCtlTicketInput:focus { border-color: var(--dsw-alias-state-success-primary, #34b371); }
+.dshBrowserCtlTicketTextarea { min-height: 92px; resize: vertical; }
+.dshBrowserCtlTicketAttachRow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.dshBrowserCtlTicketAttach {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: 1px solid var(--dsw-alias-border-l2, #2a2c33);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-1, rgba(255,255,255,0.03));
+  font-size: 11.5px;
+  max-width: 100%;
+}
+.dshBrowserCtlTicketThumb { width: 26px; height: 26px; object-fit: cover; border-radius: 5px; flex: none; }
+.dshBrowserCtlTicketAttachName { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dsw-alias-label-secondary, #a6aab2); }
+.dshBrowserCtlTicketAttachRemove {
+  appearance: none; border: none; background: none; padding: 0 2px; margin: 0;
+  color: var(--dsw-alias-state-error-primary, #e5655c); font: inherit; font-size: 11.5px; cursor: pointer;
+}
+.dshBrowserCtlTicketBtn { height: 42px !important; margin: 4px 0 !important; }
+.dshBrowserCtlTicketDetailHead { display: flex; align-items: flex-start; gap: 6px; }
+.dshBrowserCtlTicketDetailInfo { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; }
+.dshBrowserCtlTicketDetailTitle { font-size: 14px; font-weight: 600; line-height: 20px; word-break: break-word; }
+.dshBrowserCtlTicketDetailSub { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 11.5px; line-height: 16px; color: var(--dsw-alias-label-tertiary, #8b8f98); }
+.dshBrowserCtlTicketTimeline { display: flex; flex-direction: column; gap: 8px; }
+.dshBrowserCtlTicketPost {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 9px 11px;
+  border-radius: 9px;
+  border: 1px solid var(--dsw-alias-border-l1, rgba(255,255,255,0.06));
+  background: var(--dsw-alias-bg-layer-1, rgba(255,255,255,0.03));
+}
+.dshBrowserCtlTicketPost[data-role='admin'] {
+  border-color: rgba(77,163,255,0.32);
+  background: rgba(77,163,255,0.08);
+}
+.dshBrowserCtlTicketPostHead { display: flex; align-items: center; gap: 8px; font-size: 11px; line-height: 15px; color: var(--dsw-alias-label-tertiary, #8b8f98); }
+.dshBrowserCtlTicketPostHead > :first-child { font-weight: 600; color: var(--dsw-alias-label-secondary, #a6aab2); }
+.dshBrowserCtlTicketPostBody { margin: 0; font-size: 12.5px; line-height: 19px; color: var(--dsw-alias-label-primary, inherit); white-space: pre-wrap; word-break: break-word; }
+.dshBrowserCtlTicketPostImgs { display: flex; flex-wrap: wrap; gap: 6px; }
+.dshBrowserCtlTicketPostImg { width: 64px; height: 64px; object-fit: cover; border-radius: 7px; border: 1px solid var(--dsw-alias-border-l2, #2a2c33); display: block; }
+.dshBrowserCtlTicketFollow { display: flex; flex-direction: column; gap: 10px; margin-top: 2px; }
+/* ---- \u8BCA\u65AD\u65E5\u5FD7\uFF08\u53EF\u9009\uFF09\uFF1A\u9884\u89C8 + \u52FE\u9009\u786E\u8BA4 ---- */
+.dshBrowserCtlTicketDiag {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 11px 12px;
+  border: 1px solid var(--dsw-alias-border-l2, #2a2c33);
+  border-radius: 10px;
+  background: var(--dsw-alias-bg-layer-1, rgba(255,255,255,0.03));
+}
+.dshBrowserCtlTicketDiagHead { display: flex; align-items: center; gap: 8px; }
+.dshBrowserCtlTicketDiagTitle { flex: 1; min-width: 0; font-size: 12.5px; font-weight: 600; line-height: 18px; }
+.dshBrowserCtlTicketDiagBadge {
+  flex: none; padding: 1px 7px; border-radius: 999px; font-size: 11px; line-height: 16px;
+  background: rgba(255,255,255,0.07); color: var(--dsw-alias-label-tertiary, #8b8f98);
+}
+.dshBrowserCtlTicketDiagBadge[data-on='true'] { background: rgba(52,179,113,0.18); color: #34b371; }
+.dshBrowserCtlTicketDiagDesc { margin: 0; font-size: 11.5px; line-height: 17px; color: var(--dsw-alias-label-tertiary, #8b8f98); }
+.dshBrowserCtlTicketDiagLegal { margin: 0; font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-tertiary, #8b8f98); }
+.dshBrowserCtlTicketDiagFiles { display: flex; flex-wrap: wrap; gap: 6px; }
+.dshBrowserCtlTicketDiagPreview {
+  display: flex; flex-direction: column; gap: 9px;
+  padding: 11px 12px; border: 1px solid var(--dsw-alias-state-info-primary, #4da3ff);
+  border-radius: 10px; background: var(--dsw-alias-bg-layer-1, rgba(255,255,255,0.03));
+}
+.dshBrowserCtlTicketDiagPre {
+  margin: 0; max-height: 260px; overflow: auto; padding: 9px 10px;
+  border-radius: 8px; background: rgba(0,0,0,0.28); color: var(--dsw-alias-label-secondary, #c9ccd2);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px; line-height: 1.55; white-space: pre-wrap; word-break: break-word;
+  flex: 0 0 auto;
+}
+.dshBrowserCtlTicketDiagConsent {
+  display: flex; align-items: flex-start; gap: 8px; font-size: 11.5px; line-height: 17px;
+  color: var(--dsw-alias-label-secondary, #a6aab2); cursor: pointer;
+}
+.dshBrowserCtlTicketDiagConsent input { margin: 3px 0 0; flex: none; }
+.dshBrowserCtlTicketLogLink {
+  display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; border-radius: 7px;
+  border: 1px solid var(--dsw-alias-border-l2, #2a2c33); font-size: 11.5px;
+  color: var(--dsw-alias-state-info-primary, #4da3ff); text-decoration: none;
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dshBrowserCtlTicketLogLink:hover { background: rgba(77,163,255,0.1); }
 .dshBrowserCtlTicketDest {
   display: flex; flex-direction: column; gap: 3px; width: 100%;
   margin: 0 0 8px; padding: 10px 12px; text-align: left;
@@ -2403,14 +3519,14 @@ function DevicesSection({ t, reloadToken, onRefresh, disabled }) {
           ] })
         ] }),
         /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlDevActions", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "ghost", size: "sm", disabled: anyBusy, onClick: () => kick(s.dev), children: kicking === s.dev ? "\u8E22\u51FA\u4E2D\u2026" : t("deviceKick") }),
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "ghost", size: "sm", disabled: anyBusy, onClick: () => ban(s.dev, s.ip, s.name), children: banning === s.dev ? "\u62C9\u9ED1\u4E2D\u2026" : /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, { variant: "ghost", size: "sm", disabled: anyBusy, onClick: () => kick(s.dev), children: kicking === s.dev ? "\u8E22\u51FA\u4E2D\u2026" : t("deviceKick") }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, { variant: "ghost", size: "sm", disabled: anyBusy, onClick: () => ban(s.dev, s.ip, s.name), children: banning === s.dev ? "\u62C9\u9ED1\u4E2D\u2026" : /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
             Svg.shield,
             " \u62C9\u9ED1"
           ] }) })
         ] })
       ] }, s.dev)) }),
-      sessions.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: { display: "flex", justifyContent: "center", gap: 8 }, children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "secondary", size: "sm", disabled: anyBusy, onClick: () => kick(null), children: kicking === "all" ? "\u8E22\u51FA\u4E2D\u2026" : t("totpKick") }) }),
+      sessions.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: { display: "flex", justifyContent: "center", gap: 8 }, children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, { variant: "secondary", size: "sm", disabled: anyBusy, onClick: () => kick(null), children: kicking === "all" ? "\u8E22\u51FA\u4E2D\u2026" : t("totpKick") }) }),
       kickMsg && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: { textAlign: "center", fontSize: 12, color: "var(--dsw-alias-state-success-primary,#34b371)", padding: "4px 0 0" }, children: kickMsg })
     ] }),
     devices.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlCard", "data-busy": anyBusy ? "true" : "false", style: { marginTop: 2 }, children: [
@@ -2443,7 +3559,7 @@ function DevicesSection({ t, reloadToken, onRefresh, disabled }) {
             ] })
           ] })
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlDevActions", children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "ghost", size: "sm", disabled: anyBusy, onClick: () => ban(d.key, d.ip, d.name), children: banning === d.key ? "\u62C9\u9ED1\u4E2D\u2026" : /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlDevActions", children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, { variant: "ghost", size: "sm", disabled: anyBusy, onClick: () => ban(d.key, d.ip, d.name), children: banning === d.key ? "\u62C9\u9ED1\u4E2D\u2026" : /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
           Svg.shield,
           " \u62C9\u9ED1"
         ] }) }) })
@@ -2487,9 +3603,34 @@ function fmtClock(ts) {
   const p = (n) => String(n).padStart(2, "0");
   return p(d.getMonth() + 1) + "-" + p(d.getDate()) + " " + p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds());
 }
+var LOG_CAT_OF = {
+  verify: "login",
+  pair: "pair",
+  kick: "kick",
+  ban: "ban",
+  totp: "totp",
+  devbind: "totp",
+  settings: "settings",
+  devsig: "devsig",
+  devsig_sum: "devsig",
+  file_dl: "sys",
+  error: "sys"
+};
+var LOG_TABS = [
+  { id: "all", labelKey: "logTabAll" },
+  { id: "login", labelKey: "logTabLogin" },
+  { id: "pair", labelKey: "logTabPair" },
+  { id: "kick", labelKey: "logTabKick" },
+  { id: "ban", labelKey: "logTabBan" },
+  { id: "totp", labelKey: "logTabTotp" },
+  { id: "devsig", labelKey: "logTabUnsigned" },
+  { id: "settings", labelKey: "logTabSettings" },
+  { id: "sys", labelKey: "logTabSys" }
+];
 function LogCard({ t, reloadToken }) {
   const [open, setOpen] = (0, import_react.useState)(true);
   const [events, setEvents] = (0, import_react.useState)(null);
+  const [cat, setCat] = (0, import_react.useState)("all");
   (0, import_react.useEffect)(() => {
     let alive = true;
     fetch(API_P + "/browserctl-gate/events", { cache: "no-store" }).then((r) => r.ok ? r.json() : Promise.reject()).then((j) => {
@@ -2503,7 +3644,13 @@ function LogCard({ t, reloadToken }) {
       alive = false;
     };
   }, [reloadToken]);
-  const list = (events || []).slice().reverse();
+  const catOf = (e) => e && e.cat || LOG_CAT_OF[e && e.typ] || "other";
+  const counts = {};
+  for (const e of events || []) {
+    const c = catOf(e);
+    counts[c] = (counts[c] || 0) + 1;
+  }
+  const list = (events || []).filter((e) => cat === "all" || catOf(e) === cat).slice().reverse();
   return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlCard", children: [
     /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(
       "button",
@@ -2515,16 +3662,38 @@ function LogCard({ t, reloadToken }) {
         children: [
           Svg.clip,
           /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: t("logTitle") }),
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: { fontWeight: 500, fontSize: 12, color: "var(--dsw-alias-label-tertiary,#8b8f98)" }, children: list.length ? list.length + " \u6761" : "\u6682\u65E0" }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: { fontWeight: 500, fontSize: 12, color: "var(--dsw-alias-label-tertiary,#8b8f98)" }, children: (events || []).length ? (events || []).length + " \u6761" : "\u6682\u65E0" }),
           /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlCardArrow", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("svg", { width: "12", height: "12", viewBox: "0 0 12 12", fill: "none", children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("path", { d: "M4 2.5 7.5 6 4 9.5", stroke: "currentColor", strokeWidth: "1.4", strokeLinecap: "round", strokeLinejoin: "round" }) }) })
         ]
       }
     ),
-    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlCardBody", "data-open": open, children: list.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlDevEmpty", children: t("logEmpty") }) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlLogBody", children: list.map((e, i) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlLogRow", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlLogType", children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(LogIcon, { typ: e.typ }) }),
-      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlLogMsg", title: e.msg || "", children: e.msg || "" }),
-      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlLogTime", children: fmtClock(e.t) })
-    ] }, i)) }) })
+    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlCardBody", "data-open": open, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlLogTabs", role: "tablist", children: LOG_TABS.map((tab) => {
+        const n = tab.id === "all" ? (events || []).length : counts[tab.id] || 0;
+        if (tab.id !== "all" && !n) return null;
+        return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(
+          "button",
+          {
+            type: "button",
+            role: "tab",
+            "aria-selected": cat === tab.id,
+            className: "dshBrowserCtlLogTab",
+            "data-on": cat === tab.id ? "true" : "false",
+            onClick: () => setCat(tab.id),
+            children: [
+              t(tab.labelKey),
+              n ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlLogTabN", children: n > 99 ? "99+" : n }) : null
+            ]
+          },
+          tab.id
+        );
+      }) }),
+      list.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlDevEmpty", children: t("logEmpty") }) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlLogBody", "data-cat": cat, children: list.map((e, i) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlLogRow", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlLogType", children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(LogIcon, { typ: e.typ }) }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlLogMsg", title: e.msg || "", children: e.msg || "" }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlLogTime", children: fmtClock(e.t) })
+      ] }, i)) })
+    ] })
   ] });
 }
 function BlacklistCard({ t, reloadToken, disabled }) {
@@ -2575,7 +3744,7 @@ function BlacklistCard({ t, reloadToken, disabled }) {
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: { color: "var(--dsw-alias-label-secondary,#a6aab2)" }, children: r.ip }),
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlBanReason", children: r.reason ? " \xB7 " + r.reason : "" })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "ghost", size: "sm", disabled: anyBusy, onClick: () => unban(r.ip), children: "\u89E3\u7981" })
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, { variant: "ghost", size: "sm", disabled: anyBusy, onClick: () => unban(r.ip), children: "\u89E3\u7981" })
     ] }, i)) }) })
   ] });
 }
@@ -2712,13 +3881,13 @@ function AppPairCard({ t, reloadToken }) {
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dshBrowserCtlCardDesc", style: { textAlign: "center" }, children: t("appOnceHint") }),
         /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlUrlRow", children: [
           /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlUrl", title: data.url, children: data.url }),
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "ghost", size: "sm", onClick: () => {
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, { variant: "ghost", size: "sm", onClick: () => {
             navigator.clipboard?.writeText(data.url).then(() => setCopied(true)).catch(() => {
             });
           }, children: copied ? t("copied") : t("appCopyLink") })
         ] })
       ] }) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlQrBox", style: { height: 120 }, children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: { color: "#666", fontSize: 12, padding: "0 14px", textAlign: "center" }, children: loading ? t("appLoading") : data && data.error || t("appNoQr") }) }),
-      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlActions", children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "secondary", size: "sm", disabled: loading, onClick: load, children: loading ? "\u2026" : t("appRefresh") }) }),
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlActions", children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, { variant: "secondary", size: "sm", disabled: loading, onClick: load, children: loading ? "\u2026" : t("appRefresh") }) }),
       /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlPairedList", children: [
         /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlPairedHead", children: [
           /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "\u5DF2\u914D\u5BF9\u7684\u624B\u673A" }),
@@ -2736,7 +3905,7 @@ function AppPairCard({ t, reloadToken }) {
             ] })
           ] }),
           /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-            import_dsh_client_ui_primitives.Button,
+            Button,
             {
               variant: "ghost",
               size: "sm",
@@ -2817,11 +3986,11 @@ function IosGuideCard({ t }) {
       /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dshBrowserCtlCardDesc", children: t("linkSubtitle") }),
       /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlUrlRow", style: { marginTop: 8, gap: 8 }, children: [
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlUrl", title: site, children: site }),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "ghost", size: "sm", onClick: () => {
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, { variant: "ghost", size: "sm", onClick: () => {
           navigator.clipboard?.writeText(site).then(() => setCopied(true)).catch(() => {
           });
         }, children: copied ? t("linkCopied") : t("linkCopy") }),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "secondary", size: "sm", onClick: () => window.open(site, "_blank", "noopener"), children: t("linkOpenSite") })
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, { variant: "secondary", size: "sm", onClick: () => window.open(site, "_blank", "noopener"), children: t("linkOpenSite") })
       ] }),
       /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dshBrowserCtlCardDesc", style: { marginTop: 10, fontWeight: 500, color: "var(--dsw-alias-label-secondary,#a6aab2)" }, children: t("linkStepsTitle") }),
       /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("ol", { style: { margin: "4px 0 0", paddingLeft: 18, fontSize: 11.5, lineHeight: "18px", color: "var(--dsw-alias-label-tertiary,#8b8f98)" }, children: [
@@ -2933,15 +4102,15 @@ function TotpCard({ t, reloadToken, onRefresh, disabled }) {
           ": ",
           data.secret
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "ghost", size: "sm", onClick: () => {
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, { variant: "ghost", size: "sm", onClick: () => {
           navigator.clipboard?.writeText(data.secret).then(() => setCopiedSecret(true)).catch(() => {
           });
         }, children: copiedSecret ? t("copied") : t("copySecret") })
       ] }),
       /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlActions", children: data?.enabled ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "secondary", size: "sm", disabled: anyBusy, onClick: () => toggle(false), children: t("totpDisable") }),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "secondary", size: "sm", disabled: anyBusy, onClick: () => toggle(true, true), children: t("totpReset") })
-      ] }) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "primary", size: "sm", disabled: anyBusy || !data, onClick: () => toggle(true), children: t("totpEnable") }) })
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, { variant: "secondary", size: "sm", disabled: anyBusy, onClick: () => toggle(false), children: t("totpDisable") }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, { variant: "secondary", size: "sm", disabled: anyBusy, onClick: () => toggle(true, true), children: t("totpReset") })
+      ] }) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, { variant: "primary", size: "sm", disabled: anyBusy || !data, onClick: () => toggle(true), children: t("totpEnable") }) })
     ] })
   ] });
 }
@@ -2990,7 +4159,7 @@ function SessionDaysCard({ t, disabled }) {
     ] }),
     /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlCardBody", "data-open": "true", children: [
       /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlActions", children: opts.map((n) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-        import_dsh_client_ui_primitives.Button,
+        Button,
         {
           variant: days === n ? "primary" : "secondary",
           size: "sm",
@@ -3017,7 +4186,6 @@ function SigEnforceCard({ t, reloadToken }) {
   const [health, setHealth] = (0, import_react.useState)(null);
   const [allConfirm, setAllConfirm] = (0, import_react.useState)(false);
   const [allMsg, setAllMsg] = (0, import_react.useState)("");
-  const [restarting, setRestarting] = (0, import_react.useState)(false);
   (0, import_react.useEffect)(() => {
     let alive = true;
     fetch(API_P + "/browserctl/api/sig", { cache: "no-store" }).then((r) => r.json().catch(() => ({}))).then((j) => {
@@ -3065,6 +4233,7 @@ function SigEnforceCard({ t, reloadToken }) {
       setHealth({ ok: false });
     }
   }
+  const [restarting, setRestarting] = (0, import_react.useState)(false);
   (0, import_react.useEffect)(() => {
     loadHealth();
   }, [reloadToken]);
@@ -3234,13 +4403,13 @@ function SigEnforceCard({ t, reloadToken }) {
           " \u53F0"
         ] }) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: { color: "#e5655c" }, children: "\u95F8\u673A\u672A\u54CD\u5E94(\u96A7\u9053/\u8FDB\u7A0B\u53EF\u80FD\u5DF2\u505C)" }),
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: { flex: 1 } }),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", style: { fontSize: 11, background: "transparent", border: 0, color: "inherit", cursor: "pointer", padding: 0 }, onClick: loadHealth, children: "\u5237\u65B0" }),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", style: { fontSize: 11, background: "transparent", border: 0, color: "inherit", cursor: "pointer", padding: 0 }, onClick: restartGate, children: restarting ? "\u91CD\u542F\u4E2D\u2026" : "\u91CD\u542F\u95F8\u673A" })
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", className: "dshBrowserCtlMiniBtn", onClick: loadHealth, children: "\u5237\u65B0" }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", className: "dshBrowserCtlMiniBtn", onClick: restartGate, children: restarting ? "\u91CD\u542F\u4E2D\u2026" : "\u91CD\u542F\u95F8\u673A" })
       ] }),
       confirming && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlActions", role: "alertdialog", "aria-label": t("sigYes"), children: [
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { style: { margin: 0, fontSize: 12, lineHeight: "17px", color: "var(--dsw-alias-state-warning-primary,#c78d33)" }, children: t("sigConfirm") }),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "primary", size: "sm", disabled: busy, onClick: () => toggle(true), children: t("sigYes") }),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "secondary", size: "sm", disabled: busy, onClick: () => setConfirming(false), children: t("sigCancel") })
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, { variant: "primary", size: "sm", disabled: busy, onClick: () => toggle(true), children: t("sigYes") }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, { variant: "secondary", size: "sm", disabled: busy, onClick: () => setConfirming(false), children: t("sigCancel") })
       ] }),
       data && Array.isArray(data.device_list) && data.device_list.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { style: { marginTop: 10 }, children: [
         /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", { type: "button", className: "dshBrowserCtlCardHead", "data-open": devsOpen ? "true" : "false", style: { width: "100%", background: "transparent", border: 0, cursor: "pointer", padding: "4px 0", display: "flex", alignItems: "center", gap: 6 }, onClick: () => setDevsOpen((o) => !o), children: [
@@ -3265,21 +4434,21 @@ function SigEnforceCard({ t, reloadToken }) {
               ] })
             ] }),
             /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: { fontSize: 10, padding: "1px 6px", borderRadius: 999, flexShrink: 0, background: d.has_pubkey ? "rgba(52,179,113,.16)" : d.has_key ? "rgba(61,126,255,.14)" : "rgba(229,101,92,.14)", color: d.has_pubkey ? "#34b371" : d.has_key ? "#3d7eff" : "#e5655c" }, children: d.has_pubkey ? t("sigHasPub") : d.has_key ? t("sigHasKeyB") : t("sigNoKey") }),
-            /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "ghost", size: "sm", disabled: !!acting, onClick: () => revoke(d.dev), children: acting === d.dev ? t("sigRevoking") : t("sigRevoke") })
+            /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, { variant: "ghost", size: "sm", disabled: !!acting, onClick: () => revoke(d.dev), children: acting === d.dev ? t("sigRevoking") : t("sigRevoke") })
           ] }, d.dev)),
           dups.length > 0 && (dedupeConfirm ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlActions", role: "alertdialog", "aria-label": t("sigDedupeYes"), children: [
             /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { style: { margin: 0, fontSize: 12, lineHeight: "17px", color: "var(--dsw-alias-state-warning-primary,#c78d33)" }, children: t("sigDedupeHint").replace("{n}", String(dups.length)) }),
-            /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "primary", size: "sm", disabled: !!acting, onClick: dedupe, children: t("sigDedupeYes") }),
-            /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "secondary", size: "sm", disabled: !!acting, onClick: () => setDedupeConfirm(false), children: t("sigCancel") })
-          ] }) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: { display: "flex", justifyContent: "center", paddingTop: 2 }, children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "secondary", size: "sm", disabled: !!acting, onClick: () => setDedupeConfirm(true), children: t("sigDedupe").replace("{n}", String(dups.length)) }) })),
+            /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, { variant: "primary", size: "sm", disabled: !!acting, onClick: dedupe, children: t("sigDedupeYes") }),
+            /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, { variant: "secondary", size: "sm", disabled: !!acting, onClick: () => setDedupeConfirm(false), children: t("sigCancel") })
+          ] }) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: { display: "flex", justifyContent: "center", paddingTop: 2 }, children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, { variant: "secondary", size: "sm", disabled: !!acting, onClick: () => setDedupeConfirm(true), children: t("sigDedupe").replace("{n}", String(dups.length)) }) })),
           msg && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { style: { margin: 0, fontSize: 12, textAlign: "center", color: "var(--dsw-alias-state-success-primary,#34b371)" }, children: msg })
         ] })
       ] }),
       allConfirm ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlActions", role: "alertdialog", "aria-label": "\u6E05\u9664\u6240\u6709\u6388\u6743", children: [
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { style: { margin: 0, fontSize: 12, lineHeight: "17px", color: "var(--dsw-alias-state-error-primary,#e5655c)" }, children: "\u5C06\u64A4\u9500\u3010\u6240\u6709\u8BBE\u5907\u3011\u7684\u767B\u5F55\u4F1A\u8BDD\u4E0E\u7B7E\u540D\u5BC6\u94A5,\u4F5C\u5E9F\u672A\u4F7F\u7528\u7684\u914D\u5BF9\u7801,\u5E76\u6E05\u7A7A\u5168\u90E8\u8BBE\u5907\u8BB0\u5F55\u3002\u4E4B\u540E\u6BCF\u53F0\u624B\u673A/\u6D4F\u89C8\u5668\u90FD\u5FC5\u987B\u91CD\u65B0\u626B\u7801,\u786E\u5B9A\u7EE7\u7EED?" }),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "primary", size: "sm", disabled: !!acting, onClick: revokeAll, children: acting === "all" ? "\u6B63\u5728\u6E05\u9664\u2026" : "\u786E\u8BA4\u6E05\u9664" }),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "secondary", size: "sm", disabled: !!acting, onClick: () => setAllConfirm(false), children: t("sigCancel") })
-      ] }) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: { display: "flex", justifyContent: "flex-end" }, children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "ghost", size: "sm", disabled: !!acting, onClick: () => {
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, { variant: "primary", size: "sm", disabled: !!acting, onClick: revokeAll, children: acting === "all" ? "\u6B63\u5728\u6E05\u9664\u2026" : "\u786E\u8BA4\u6E05\u9664" }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, { variant: "secondary", size: "sm", disabled: !!acting, onClick: () => setAllConfirm(false), children: t("sigCancel") })
+      ] }) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: { display: "flex", justifyContent: "flex-end" }, children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, { variant: "ghost", size: "sm", disabled: !!acting, onClick: () => {
         setAllConfirm(true);
         setAllMsg("");
       }, children: "\u6E05\u9664\u6240\u6709\u6388\u6743" }) }),
@@ -3346,12 +4515,12 @@ function SysinfoCard({ t }) {
           return /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { children: bar(String(dk.drive || "?"), p, t("sysFree") + " " + fmtGB(free)) }, dk.drive);
         })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlActions", children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "secondary", size: "sm", disabled: busy, onClick: load, children: busy ? t("pushRefreshing") : t("pushRefresh") }) }),
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlActions", children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, { variant: "secondary", size: "sm", disabled: busy, onClick: load, children: busy ? t("pushRefreshing") : t("pushRefresh") }) }),
       /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { style: { margin: 0, fontSize: 12, lineHeight: "17px", color: "var(--dsw-alias-label-tertiary,#8b8f98)" }, children: t("sysHint") })
     ] })
   ] });
 }
-var PUSH_KIND = { test: "Test", verify: "Verify", kick: "Kick", ban: "Ban", totp: "Totp", pair: "Pair", join: "Join", dev: "Dev", msg: "Msg", announce: "Announce" };
+var PUSH_KIND = { test: "Test", verify: "Verify", kick: "Kick", ban: "Ban", totp: "Totp", pair: "Pair", join: "Join", dev: "Dev", msg: "Msg" };
 function pushKindLabel(t, kind) {
   const key = PUSH_KIND[kind];
   return key ? t("pushKind" + key) : kind || "";
@@ -3361,6 +4530,39 @@ function fmtPushTime(ts) {
   const d = new Date(ts * 1e3);
   const p = (n) => String(n).padStart(2, "0");
   return p(d.getMonth() + 1) + "-" + p(d.getDate()) + " " + p(d.getHours()) + ":" + p(d.getMinutes());
+}
+var PUSH_CAT_OF_KIND = { announce: "official" };
+function pushCatOf(it) {
+  const c = it && it.cat;
+  if (c === "official" || c === "security") return c;
+  return PUSH_CAT_OF_KIND[it && it.kind] || "security";
+}
+function PushGroupedList({ t, items }) {
+  const groups = { official: [], security: [] };
+  for (const it of items) groups[pushCatOf(it)].push(it);
+  const groupHead = (key) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlPushGroupHead", children: t(key === "official" ? "pushGroupOfficial" : "pushGroupSecurity") }, "g-" + key);
+  const rows = [];
+  if (groups.official.length) {
+    rows.push(groupHead("official"));
+    rows.push(...groups.official.map((it) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)(PushRow, { t, it }, "o" + (it.id || it.t))));
+  }
+  if (groups.security.length) {
+    rows.push(groupHead("security"));
+    rows.push(...groups.security.map((it) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)(PushRow, { t, it }, "s" + (it.id || it.t))));
+  }
+  return /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlPushList", children: rows });
+}
+function PushRow({ t, it }) {
+  return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlPushRow", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { className: "dshBrowserCtlPushAside", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlPushType", children: pushKindLabel(t, it.kind) }),
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlPushTime", children: fmtPushTime(it.t) })
+    ] }),
+    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { className: "dshBrowserCtlPushMain", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlPushTitle", title: it.title || "", children: it.title || "" }),
+      it.body ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlPushBody", title: it.body, children: it.body }) : null
+    ] })
+  ] });
 }
 function PushCard({ t, reloadToken }) {
   const [cfg, setCfg] = (0, import_react.useState)(null);
@@ -3474,7 +4676,7 @@ function PushCard({ t, reloadToken }) {
       const r = await fetch(API_P + "/browserctl-gate/push-poll?last=0", { cache: "no-store" });
       const j = await r.json().catch(() => ({}));
       if (r.ok && j.ok) {
-        setItems(Array.isArray(j.items) ? j.items.slice(0, 10) : []);
+        setItems(Array.isArray(j.items) ? j.items.slice(0, 20) : []);
         setCfg((c) => ({ ...c || {}, enabled: !!j.enabled, since: j.since || c && c.since || 0 }));
         setCfgErr("");
       }
@@ -3585,7 +4787,7 @@ function PushCard({ t, reloadToken }) {
             "/500"
           ] }),
           /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-            import_dsh_client_ui_primitives.Button,
+            Button,
             {
               variant: "primary",
               size: "sm",
@@ -3598,7 +4800,7 @@ function PushCard({ t, reloadToken }) {
         ] })
       ] }),
       /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlActions", children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-        import_dsh_client_ui_primitives.Button,
+        Button,
         {
           variant: "secondary",
           size: "sm",
@@ -3612,18 +4814,9 @@ function PushCard({ t, reloadToken }) {
       /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlPairedList", children: [
         /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlPairedHead", children: [
           /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: t("pushRecent") }),
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "ghost", size: "sm", disabled: polling, onClick: loadPoll, children: polling ? t("pushRefreshing") : t("pushRefresh") })
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, { variant: "ghost", size: "sm", disabled: polling, onClick: loadPoll, children: polling ? t("pushRefreshing") : t("pushRefresh") })
         ] }),
-        list.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlPairedEmpty", children: t("pushEmpty") }) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlPushList", children: list.map((it) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlPushRow", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { className: "dshBrowserCtlPushAside", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlPushType", children: pushKindLabel(t, it.kind) }),
-            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlPushTime", children: fmtPushTime(it.t) })
-          ] }),
-          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { className: "dshBrowserCtlPushMain", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlPushTitle", title: it.title || "", children: it.title || "" }),
-            it.body ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlPushBody", title: it.body, children: it.body }) : null
-          ] })
-        ] }, it.id || it.t + (it.title || ""))) })
+        list.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlPairedEmpty", children: t("pushEmpty") }) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)(PushGroupedList, { t, items: list })
       ] })
     ] })
   ] });
@@ -3651,7 +4844,7 @@ function UpdateApplyButton({ t, latest, variant, onApplied }) {
     }
   }
   const btn = /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Tooltip, { label: state === "done" ? t("updateApplyDone").replace("{v}", latest) : t("updateApplyTip"), children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-    import_dsh_client_ui_primitives.Button,
+    Button,
     {
       variant: variant || "primary",
       size: "sm",
@@ -3708,7 +4901,7 @@ function AboutPanel({ t, onClose, initialResult, onDismissUpdate, onCheckResult 
     /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", { className: "dshBrowserCtlPanel dshBrowserCtlPanelNested", children: [
       /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("header", { className: "dshBrowserCtlHeader", children: [
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("h1", { children: t("about") }) }),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Tooltip, { label: t("close"), children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "ghost", size: "sm", "aria-label": t("close"), icon: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.IconCloseOutlineRegular, {}), onClick: onClose }) })
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Tooltip, { label: t("close"), children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, { variant: "ghost", size: "sm", "aria-label": t("close"), icon: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.IconCloseOutlineRegular, {}), onClick: onClose }) })
       ] }),
       /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlAboutApp", children: [
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlAboutAppName", children: t("tab") }),
@@ -3728,8 +4921,8 @@ function AboutPanel({ t, onClose, initialResult, onDismissUpdate, onCheckResult 
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", className: "dshBrowserCtlAboutLegalLink", onClick: () => setLegalDoc(LEGAL_PRIVACY), children: t("legalPrivacy") })
       ] }),
       /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlAboutUpdate", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-          import_dsh_client_ui_primitives.Button,
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Tooltip, { label: t("updateRecheckTip"), children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+          Button,
           {
             variant: "secondary",
             size: "sm",
@@ -3738,7 +4931,7 @@ function AboutPanel({ t, onClose, initialResult, onDismissUpdate, onCheckResult 
             onClick: checkUpdate,
             children: checkState === "loading" ? t("updateChecking") : checkState === "done" ? t("updateRecheck") : t("updateCheck")
           }
-        ),
+        ) }),
         checkState === "done" && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
           (hasUpdate || upToDate) && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
             /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlAboutUpdateRow", children: [
@@ -3758,21 +4951,22 @@ function AboutPanel({ t, onClose, initialResult, onDismissUpdate, onCheckResult 
           ] }),
           hasUpdate && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
             /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dshBrowserCtlAboutUpdateFound", children: t("updateFound").replace("{v}", checkResult.latest) }),
-            checkResult.install && checkResult.install.form === "local" && !IS_TEST && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(UpdateApplyButton, { t, latest: String(checkResult.latest) }),
+            canApplyOneClick && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(UpdateApplyButton, { t, latest: String(checkResult.latest) }),
             /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlUrlRow", children: [
               /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlUrl", title: downloadUrl, children: downloadUrl }),
-              /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Tooltip, { label: t("updateDownloadTip"), children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: canApplyOneClick ? "secondary" : "primary", size: "sm", onClick: () => window.open(downloadUrl, "_blank"), children: t("updateDownload") }) })
+              /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Tooltip, { label: t("updateDownloadTip"), children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, { variant: canApplyOneClick ? "secondary" : "primary", size: "sm", onClick: () => window.open(downloadUrl, "_blank"), children: t("updateDownload") }) })
             ] }),
+            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlAboutUpdateSep", "aria-hidden": "true" }),
             checkResult.install && checkResult.install.form === "local" && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", { className: "dshBrowserCtlAboutUpdateGuide", children: [
               t("updateGuideLocal").replace("{dir}", checkResult.install && checkResult.install.dir || ""),
               IS_TEST ? t("updateGuideTestNote") : ""
             ] }),
             checkResult.install && checkResult.install.form === "package" && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dshBrowserCtlAboutUpdateGuide", children: t("updateGuidePackage").replace("{cmd}", PLUGIN_ADD_CMD) }),
             notes.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
-              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dshBrowserCtlCardDesc", children: t("updateNotesTitle") }),
+              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dshBrowserCtlAboutUpdateLabel", children: t("updateNotesTitle") }),
               /* @__PURE__ */ (0, import_jsx_runtime.jsx)("ul", { className: "dshBrowserCtlAboutUpdateNotes", children: notes.map((n, i) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)("li", { children: n }, i)) })
             ] }),
-            onDismissUpdate && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlAboutUpdateIgnoreRow", children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Tooltip, { label: t("updateIgnoreTip"), children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "secondary", size: "sm", onClick: onDismissUpdate, children: t("updateIgnore") }) }) })
+            onDismissUpdate && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlAboutUpdateIgnoreRow", children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Tooltip, { label: t("updateIgnoreTip"), children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, { variant: "secondary", size: "sm", onClick: onDismissUpdate, children: t("updateIgnore") }) }) })
           ] }),
           upToDate && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dshBrowserCtlAboutUpdateLatest", children: t("updateUpToDate") }),
           err && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dshBrowserCtlAboutUpdateErr", children: err })
@@ -3792,7 +4986,7 @@ function LegalDialog({ t, doc, onClose }) {
           /* @__PURE__ */ (0, import_jsx_runtime.jsx)("h1", { children: doc.title }),
           /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { children: t("legalMeta").replace("{d}", LEGAL_EFFECTIVE).replace("{v}", LEGAL_VERSION) })
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Tooltip, { label: t("close"), children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "ghost", size: "sm", "aria-label": t("close"), icon: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.IconCloseOutlineRegular, {}), onClick: onClose }) })
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Tooltip, { label: t("close"), children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, { variant: "ghost", size: "sm", "aria-label": t("close"), icon: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.IconCloseOutlineRegular, {}), onClick: onClose }) })
       ] }),
       /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlLegalBody", children: [
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dshBrowserCtlLegalSubtitle", children: doc.subtitle }),
@@ -3801,7 +4995,7 @@ function LegalDialog({ t, doc, onClose }) {
           sec.paragraphs.map((p, i) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { children: p }, i))
         ] }, sec.title))
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlLegalFooter", children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "secondary", size: "sm", className: "dshBrowserCtlAboutUpdateBtn", onClick: onClose, children: t("legalAck") }) })
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlLegalFooter", children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, { variant: "secondary", size: "sm", className: "dshBrowserCtlAboutUpdateBtn", onClick: onClose, children: t("legalAck") }) })
     ] })
   ] });
 }
@@ -3960,7 +5154,7 @@ function ConfigPanel({ t, onClose, onSaved }) {
           /* @__PURE__ */ (0, import_jsx_runtime.jsx)("h1", { children: t("config") }),
           /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { children: t("configSubtitle") })
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Tooltip, { label: t("close"), children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "ghost", size: "sm", "aria-label": t("close"), icon: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.IconCloseOutlineRegular, {}), onClick: onClose }) })
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Tooltip, { label: t("close"), children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, { variant: "ghost", size: "sm", "aria-label": t("close"), icon: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.IconCloseOutlineRegular, {}), onClick: onClose }) })
       ] }),
       /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlCfgModes", children: [
         /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", { className: "dshBrowserCtlCfgMode", children: [
@@ -4018,9 +5212,9 @@ function ConfigPanel({ t, onClose, onSaved }) {
       ] }),
       err && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dshBrowserCtlCfgErr", children: err }),
       /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlCfgActions", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "secondary", size: "sm", className: "dshBrowserCtlCfgSave", disabled: saving === "loading" || testing, onClick: onClose, children: t("cancel") }),
-        mode === "selfhost" && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "secondary", size: "sm", className: "dshBrowserCtlCfgSave", disabled: saving === "loading" || testing, onClick: testConn, children: testing ? t("configTesting") : t("configTestBtn") }),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "primary", size: "sm", className: "dshBrowserCtlCfgSave", disabled: saving === "loading" || testing, onClick: save, children: saving === "loading" ? t("saving") : saving === "done" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, { variant: "secondary", size: "sm", className: "dshBrowserCtlCfgSave", disabled: saving === "loading" || testing, onClick: onClose, children: t("cancel") }),
+        mode === "selfhost" && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, { variant: "secondary", size: "sm", className: "dshBrowserCtlCfgSave", disabled: saving === "loading" || testing, onClick: testConn, children: testing ? t("configTesting") : t("configTestBtn") }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, { variant: "primary", size: "sm", className: "dshBrowserCtlCfgSave", disabled: saving === "loading" || testing, onClick: save, children: saving === "loading" ? t("saving") : saving === "done" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
           /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { "aria-hidden": "true", children: Svg.check }),
           t("saved")
         ] }) : t("save") })
@@ -4037,6 +5231,40 @@ function OfficialAccountCard({ t, onSaved }) {
   const pollTimer = (0, import_react.useRef)(null);
   const pendingRef = (0, import_react.useRef)(null);
   const [copiedOauth, setCopiedOauth] = (0, import_react.useState)(false);
+  const [pwdEmail, setPwdEmail] = (0, import_react.useState)("");
+  const [pwdPass, setPwdPass] = (0, import_react.useState)("");
+  const [busyLogin, setBusyLogin] = (0, import_react.useState)(false);
+  const pwdLogin = async () => {
+    if (busyLogin || !pwdEmail.trim() || !pwdPass) return;
+    setBusyLogin(true);
+    setErr("");
+    setMsg("");
+    try {
+      const r = await fetch(API_P + "/browserctl/api/server/login", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: pwdEmail.trim(), password: pwdPass }),
+        cache: "no-store"
+      });
+      const j = await r.json().catch(() => ({}));
+      if (j && j.ok) {
+        setMsg(t("configAcctOauthDone"));
+        setPwdEmail("");
+        setPwdPass("");
+        onSaved();
+        const okRestart = await restartTunnel();
+        if (!okRestart) {
+          setErr(t("configAcctRestartFail"));
+          setMsg("");
+        }
+      } else {
+        setErr(j && j.error || "HTTP " + r.status);
+      }
+    } catch (e) {
+      setErr(String(e && e.message || e));
+    }
+    setBusyLogin(false);
+  };
   const loadAcct = async () => {
     try {
       const r = await fetch(API_P + "/browserctl/api/server/me", { cache: "no-store" });
@@ -4197,7 +5425,7 @@ function OfficialAccountCard({ t, onSaved }) {
       ] }) }),
       msg && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dshBrowserCtlCfgNote", children: msg }),
       err && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dshBrowserCtlCfgErr", children: err }),
-      /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "secondary", size: "sm", disabled: working, onClick: logout, children: busy === "logout" ? t("configAcctLoggingOut") : t("configAcctLogout") })
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, { variant: "secondary", size: "sm", disabled: working, onClick: logout, children: busy === "logout" ? t("configAcctLoggingOut") : t("configAcctLogout") })
     ] });
   }
   if (pending) {
@@ -4210,14 +5438,26 @@ function OfficialAccountCard({ t, onSaved }) {
       /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlCfgOauthCode", children: pending.userCode }),
       /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dshBrowserCtlCfgNote", children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("a", { href: pending.verificationUri, target: "_blank", rel: "noopener noreferrer", style: { color: "var(--dsw-alias-accent-strong,#4da3ff)", wordBreak: "break-all" }, children: pending.verificationUri }) }),
       /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlCfgFieldRow", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "secondary", size: "sm", onClick: () => openAuthPage(pending.verificationUri), children: t("configAcctOauthOpenAgain") }),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "secondary", size: "sm", onClick: () => copyOauthUrl(pending.verificationUri), children: copiedOauth ? t("configAcctCopied") : t("configAcctCopy") }),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "secondary", size: "sm", onClick: cancelOAuth, children: t("configAcctOauthCancel") })
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, { variant: "secondary", size: "sm", onClick: () => openAuthPage(pending.verificationUri), children: t("configAcctOauthOpenAgain") }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, { variant: "secondary", size: "sm", onClick: () => copyOauthUrl(pending.verificationUri), children: copiedOauth ? t("configAcctCopied") : t("configAcctCopy") }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, { variant: "secondary", size: "sm", onClick: cancelOAuth, children: t("configAcctOauthCancel") })
       ] }),
       msg && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dshBrowserCtlCfgNote", children: msg }),
       err && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dshBrowserCtlCfgErr", children: err })
     ] });
   }
+  const inputCss = {
+    width: "100%",
+    boxSizing: "border-box",
+    padding: "6px 8px",
+    fontSize: 13,
+    background: "transparent",
+    color: "inherit",
+    borderRadius: 6,
+    border: "1px solid var(--dsw-alias-border-secondary,#3a3c41)",
+    outline: "none"
+  };
+  const busyPwd = busyLogin || pwdEmail.trim() === "" || pwdPass === "";
   return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlCfgFields", children: [
     /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", { className: "dshBrowserCtlCfgField", children: [
       /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: t("configAcctTitle") }),
@@ -4225,7 +5465,51 @@ function OfficialAccountCard({ t, onSaved }) {
     ] }),
     msg && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dshBrowserCtlCfgNote", children: msg }),
     err && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dshBrowserCtlCfgErr", children: err }),
-    /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "primary", size: "sm", disabled: working, onClick: startOAuth, children: busy === "begin" ? t("configAcctOauthOpening") : t("configAcctOauthBtn") })
+    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlCfgFieldRow", children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, { variant: "primary", size: "sm", disabled: working, onClick: startOAuth, children: busy === "begin" ? t("configAcctOauthOpening") : t("configAcctOauthBtn") }) }),
+    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 8,
+      margin: "10px 0 4px",
+      width: "100%",
+      fontSize: 11,
+      color: "var(--dsw-alias-label-tertiary,#8b8f98)"
+    }, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: { flex: "1 1 auto", height: 1, background: "var(--dsw-alias-border-secondary,#3a3c41)" } }),
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: { flex: "0 0 auto" }, children: t("loginOr") }),
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: { flex: "1 1 auto", height: 1, background: "var(--dsw-alias-border-secondary,#3a3c41)" } })
+    ] }),
+    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", { className: "dshBrowserCtlCfgField", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: t("loginPwdTitle") }),
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+        "input",
+        {
+          type: "email",
+          autoComplete: "username",
+          placeholder: t("loginEmail"),
+          style: inputCss,
+          value: pwdEmail,
+          onChange: (e) => setPwdEmail(e.target.value),
+          disabled: !!busy || busyLogin
+        }
+      )
+    ] }),
+    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", { className: "dshBrowserCtlCfgField", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: t("loginPassword") }),
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+        "input",
+        {
+          type: "password",
+          autoComplete: "current-password",
+          placeholder: t("loginPassword"),
+          style: inputCss,
+          value: pwdPass,
+          onChange: (e) => setPwdPass(e.target.value),
+          disabled: !!busy || busyLogin
+        }
+      )
+    ] }),
+    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlCfgFieldRow", children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, { variant: "secondary", size: "sm", disabled: !!busy || busyPwd, onClick: pwdLogin, children: busyLogin ? t("loginLoggingIn") : t("loginBtn") }) })
   ] });
 }
 function AccountLoginModal({ t, onClose, onSaved }) {
@@ -4237,7 +5521,7 @@ function AccountLoginModal({ t, onClose, onSaved }) {
           /* @__PURE__ */ (0, import_jsx_runtime.jsx)("h1", { children: t("configAcctTitle") }),
           /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { children: t("configOfficialHint") })
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Tooltip, { label: t("close"), children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "ghost", size: "sm", "aria-label": t("close"), icon: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.IconCloseOutlineRegular, {}), onClick: onClose }) })
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Tooltip, { label: t("close"), children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, { variant: "ghost", size: "sm", "aria-label": t("close"), icon: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.IconCloseOutlineRegular, {}), onClick: onClose }) })
       ] }),
       /* @__PURE__ */ (0, import_jsx_runtime.jsx)(OfficialAccountCard, { t, onSaved })
     ] })
@@ -4309,13 +5593,48 @@ function buildMsgEntries(msgs, feedItems) {
   list.sort((a, b) => b.ts - a.ts);
   return list;
 }
-function MsgCenter({ t, loggedInHint, onClose }) {
+function MsgCenter({ t, loggedInHint, onClose, anchorRef }) {
   const [msgs, setMsgs] = (0, import_react.useState)(null);
   const [feed, setFeed] = (0, import_react.useState)(null);
   const [err, setErr] = (0, import_react.useState)("");
   const [loggedIn, setLoggedIn] = (0, import_react.useState)(false);
   const [tab, setTab] = (0, import_react.useState)("official");
   const [detail, setDetail] = (0, import_react.useState)(null);
+  const popRef = (0, import_react.useRef)(null);
+  const [popStyle, setPopStyle] = (0, import_react.useState)(null);
+  (0, import_react.useLayoutEffect)(() => {
+    const anchor = anchorRef && anchorRef.current;
+    if (!anchor) return;
+    const place = () => {
+      const r = anchor.getBoundingClientRect();
+      const vw = window.innerWidth, vh = window.innerHeight;
+      if (!r || !r.width && !r.height || !vw || !vh) return;
+      let z = 1;
+      try {
+        z = parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
+      } catch (e) {
+      }
+      const w = Math.min(340, vw - 16) / z;
+      const right = Math.max(8, vw - r.right) / z;
+      const below = (vh - r.bottom - 12) / z;
+      const above = (r.top - 12) / z;
+      const up = below < 220 && above > below;
+      const maxH = Math.max(180, Math.min(480, up ? above : below));
+      setPopStyle(up ? { position: "fixed", right, bottom: (vh - r.top + 6) / z, maxHeight: maxH, width: w } : { position: "fixed", right, top: (r.bottom + 6) / z, maxHeight: maxH, width: w });
+    };
+    place();
+    window.addEventListener("resize", place);
+    return () => window.removeEventListener("resize", place);
+  }, [anchorRef]);
+  (0, import_react.useEffect)(() => {
+    const onScroll = (e) => {
+      const node = popRef.current;
+      if (node && e.target && e.target.nodeType === 1 && node.contains(e.target)) return;
+      onClose();
+    };
+    window.addEventListener("scroll", onScroll, true);
+    return () => window.removeEventListener("scroll", onScroll, true);
+  }, [onClose]);
   (0, import_react.useEffect)(() => {
     let alive = true;
     fetch(API_P + "/browserctl/api/server/messages", { cache: "no-store" }).then((r) => r.json().catch(() => ({ ok: false, error: "HTTP " + r.status }))).then((j) => {
@@ -4363,11 +5682,11 @@ function MsgCenter({ t, loggedInHint, onClose }) {
   };
   return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
     /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { className: "dshBrowserCtlMsgMask", type: "button", "aria-label": t("close"), onClick: onClose }),
-    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlMsgPop", role: "dialog", "aria-label": t("msgCenter"), children: [
+    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { ref: popRef, className: "dshBrowserCtlMsgPop", style: popStyle || void 0, role: "dialog", "aria-label": t("msgCenter"), children: [
       /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlMsgPopHead", children: [
         detail ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", className: "dshBrowserCtlMsgBack", "aria-label": t("msgBack"), onClick: () => setDetail(null), children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("svg", { width: "14", height: "14", viewBox: "0 0 14 14", fill: "none", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("path", { d: "M9 2.5 4.5 7 9 11.5", stroke: "currentColor", strokeWidth: "1.4", strokeLinecap: "round", strokeLinejoin: "round" }) }) }) : null,
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlMsgPopTitle", children: t("msgCenter") }),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "ghost", size: "sm", "aria-label": t("close"), icon: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.IconCloseOutlineRegular, {}), onClick: onClose })
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, { variant: "ghost", size: "sm", "aria-label": t("close"), icon: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.IconCloseOutlineRegular, {}), onClick: onClose })
       ] }),
       detail ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(MsgDetail, { t, e: detail }) : /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
         /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlMsgTabs", role: "tablist", "aria-label": t("msgCenter"), children: [
@@ -4575,12 +5894,12 @@ function TicketModal({ t, onClose }) {
           /* @__PURE__ */ (0, import_jsx_runtime.jsx)("h1", { children: t("tickets") }),
           /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { children: t("ticketExportSubtitle") })
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Tooltip, { label: t("close"), children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "ghost", size: "sm", "aria-label": t("close"), icon: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.IconCloseOutlineRegular, {}), onClick: onClose }) })
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Tooltip, { label: t("close"), children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, { variant: "ghost", size: "sm", "aria-label": t("close"), icon: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.IconCloseOutlineRegular, {}), onClick: onClose }) })
       ] }),
       /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlTicketBody", children: [
         err ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dshBrowserCtlCfgErr", children: err }) : null,
         info ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dshBrowserCtlCfgNote", style: { marginTop: 0 }, children: info }) : null,
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlActions", style: { justifyContent: "flex-start" }, children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "primary", size: "sm", disabled: !!busy, onClick: () => doExport("", "export"), children: busy === "export" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlActions", style: { justifyContent: "flex-start" }, children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, { variant: "primary", size: "sm", disabled: !!busy, onClick: () => doExport("", "export"), children: busy === "export" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
           /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlSpinner", "aria-hidden": "true" }),
           " ",
           t("ticketExporting")
@@ -4601,12 +5920,12 @@ function TicketModal({ t, onClose }) {
             color: "var(--dsw-alias-label-secondary,#a6aab2)"
           }, children: exported.path }),
           /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { style: { display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }, children: [
-            /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "secondary", size: "sm", disabled: !!busy, onClick: revealFolder, children: busy === "reveal" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
+            /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, { variant: "secondary", size: "sm", disabled: !!busy, onClick: revealFolder, children: busy === "reveal" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
               /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlSpinner", "aria-hidden": "true" }),
               " ",
               t("ticketOpening")
             ] }) : t("ticketOpenFolder") }),
-            /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "secondary", size: "sm", onClick: copyPath, children: t("ticketCopyPath") })
+            /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, { variant: "secondary", size: "sm", onClick: copyPath, children: t("ticketCopyPath") })
           ] })
         ] }) : null,
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { style: { ...destStyle, margin: "14px 0 6px", fontWeight: 600, color: "var(--dsw-alias-label-primary,inherit)" }, children: t("ticketDestTitle") }),
@@ -4639,7 +5958,7 @@ function TicketModal({ t, onClose }) {
               }
             }
           ),
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "secondary", size: "sm", disabled: !!busy || !pickPath.trim(), onClick: () => doExport(pickPath.trim(), "save"), children: busy === "save" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, { variant: "secondary", size: "sm", disabled: !!busy || !pickPath.trim(), onClick: () => doExport(pickPath.trim(), "save"), children: busy === "save" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
             /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlSpinner", "aria-hidden": "true" }),
             " ",
             t("ticketSaving")
@@ -4682,28 +6001,8 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
       setUpdTick((x) => x + 1);
     }
   };
-  (0, import_react.useEffect)(() => {
-    let cancelled = false;
-    fetch(API_P + "/browserctl/api/update-check", { cache: "no-store" }).then((r) => r.json()).then((j) => {
-      if (!cancelled && j) setUpdateInfo(j);
-    }).catch(() => {
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-  (0, import_react.useEffect)(() => {
-    if (!open) return;
-    let cancelled = false;
-    fetch(API_P + "/browserctl/api/update-check", { cache: "no-store" }).then((r) => r.json()).then((j) => {
-      if (!cancelled && j) setUpdateInfo(j);
-    }).catch(() => {
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [open]);
   const panel = (0, import_react.useRef)(null);
+  const bellRef = (0, import_react.useRef)(null);
   const { data, error, expiresAt, status, retrying, refresh } = useQr(open, reloadToken, uses);
   const left = useCountdown(expiresAt);
   const run = async (label, fn) => {
@@ -4753,6 +6052,27 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
   };
   const msgUnreadCount = msgData.loggedIn ? msgData.unread || 0 : (msgData.messages || []).filter((m) => !msgIsSeen(m)).length;
   const msgShowDot = !msgPopOpen && msgUnreadCount > 0;
+  (0, import_react.useEffect)(() => {
+    let cancelled = false;
+    fetch(API_P + "/browserctl/api/update-check", { cache: "no-store" }).then((r) => r.json()).then((j) => {
+      if (!cancelled && j) setUpdateInfo(j);
+    }).catch(() => {
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  (0, import_react.useEffect)(() => {
+    if (!open) return;
+    let cancelled = false;
+    fetch(API_P + "/browserctl/api/update-check", { cache: "no-store" }).then((r) => r.json()).then((j) => {
+      if (!cancelled && j) setUpdateInfo(j);
+    }).catch(() => {
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
   (0, import_react.useEffect)(() => {
     if (!open) return;
     fetch(API_P + "/browserctl/api/config", { cache: "no-store" }).then((r) => r.json().then((j) => {
@@ -4936,6 +6256,10 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
         setLoginPrompt(false);
         return;
       }
+      if (ticketOpen) {
+        setTicketOpen(false);
+        return;
+      }
       if (msgPopOpen) {
         closeMsgPop();
         return;
@@ -4957,7 +6281,7 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [actions, open, aboutOpen, configOpen, accountOpen, loginPrompt, msgPopOpen]);
+  }, [actions, open, aboutOpen, configOpen, accountOpen, loginPrompt, ticketOpen, msgPopOpen]);
   (0, import_react.useEffect)(() => {
     if (!open) return;
     let alive = true;
@@ -5001,7 +6325,7 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
           busy === "start" ? t("starting") : busy === "stop" ? t("stopping") : t("refresh") + "\u2026"
         ] }),
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Tooltip, { label: acctMe ? acctMe.email || t("configAcctTitle") : t("aboutAccount"), children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(
-          import_dsh_client_ui_primitives.Button,
+          Button,
           {
             variant: "ghost",
             size: "sm",
@@ -5016,7 +6340,7 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
           }
         ) }),
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Tooltip, { label: t("tickets"), children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-          import_dsh_client_ui_primitives.Button,
+          Button,
           {
             variant: "ghost",
             size: "sm",
@@ -5025,9 +6349,9 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
             onClick: () => setTicketOpen(true)
           }
         ) }),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Tooltip, { label: t("msgCenter"), children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { className: "dshBrowserCtlAboutBtn", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Tooltip, { label: t("msgCenter"), children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { ref: bellRef, className: "dshBrowserCtlAboutBtn", children: [
           /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-            import_dsh_client_ui_primitives.Button,
+            Button,
             {
               variant: "ghost",
               size: "sm",
@@ -5039,15 +6363,15 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
             }
           ),
           msgShowDot && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlBadgeDot" }),
-          msgPopOpen && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(MsgCenter, { t, loggedInHint: t("msgGuestHint"), onClose: closeMsgPop })
+          msgPopOpen && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(MsgCenter, { t, loggedInHint: t("msgGuestHint"), onClose: closeMsgPop, anchorRef: bellRef })
         ] }) }),
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Tooltip, { label: t("about"), children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { className: "dshBrowserCtlAboutBtn", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "ghost", size: "sm", "aria-label": t("about"), icon: Svg.info, onClick: () => setAboutOpen(true) }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, { variant: "ghost", size: "sm", "aria-label": t("about"), icon: Svg.info, onClick: () => setAboutOpen(true) }),
           pluginUpdatePending && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlBadgeDot" })
         ] }) }),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Tooltip, { label: t("config"), children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "ghost", size: "sm", "aria-label": t("config"), icon: Svg.gear, onClick: () => setConfigOpen(true) }) }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Tooltip, { label: t("config"), children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, { variant: "ghost", size: "sm", "aria-label": t("config"), icon: Svg.gear, onClick: () => setConfigOpen(true) }) }),
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Tooltip, { label: t("close"), children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-          import_dsh_client_ui_primitives.Button,
+          Button,
           {
             variant: "ghost",
             size: "sm",
@@ -5152,7 +6476,7 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
           ) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: { color: "#666", fontSize: 12, padding: "0 14px", textAlign: "center" }, children: t("statusLoading") }) }),
           data && !(cfgMode === "official" && !acctMe) && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlUrlRow", children: [
             /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "dshBrowserCtlUrl", title: data.url, children: data.url }),
-            /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "ghost", size: "sm", onClick: () => {
+            /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, { variant: "ghost", size: "sm", onClick: () => {
               navigator.clipboard?.writeText(data.url).then(() => setCopied(true)).catch(() => {
               });
             }, children: copied ? t("copied") : t("copyLink") })
@@ -5177,7 +6501,7 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
                 children: [1, 2, 3, 5, 10].map((n) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", { value: n, children: n === 1 ? t("pairUsesOne") : n + " " + t("pairUsesTimes") }, n))
               }
             ),
-            /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "ghost", size: "sm", disabled: gating, onClick: refresh, children: t("pairSwap") })
+            /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, { variant: "ghost", size: "sm", disabled: gating, onClick: refresh, children: t("pairSwap") })
           ] }),
           /* @__PURE__ */ (0, import_jsx_runtime.jsx)(IosGuideCard, { t }),
           elevNeed && canElevate && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { style: {
@@ -5194,27 +6518,27 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
               textAlign: "center",
               color: "var(--dsw-alias-state-error-primary,#e5655c)"
             }, children: elevNeed === "stop" ? t("elevateStopHint") : t("elevateHint") }),
-            /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "secondary", size: "sm", disabled: gating, onClick: () => elevateChain(elevNeed), children: busy === "elevate" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
+            /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, { variant: "secondary", size: "sm", disabled: gating, onClick: () => elevateChain(elevNeed), children: busy === "elevate" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
               /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlSpinner", "aria-hidden": "true" }),
               " ",
               t("elevating")
             ] }) : elevNeed === "stop" ? t("elevateStop") : t("elevateStart") })
           ] }),
           /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlActions", children: [
-            !data && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "primary", size: "sm", disabled: gating, onClick: startChain, children: busy === "start" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
+            !data && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, { variant: "primary", size: "sm", disabled: gating, onClick: startChain, children: busy === "start" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
               /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlSpinner", "aria-hidden": "true" }),
               " ",
               t("starting")
             ] }) : t("startCtl") }),
-            /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "secondary", size: "sm", disabled: gating, onClick: refreshAll, children: busy === "refresh" ? t("refresh") + "\u2026" : t("refresh") }),
-            data && data.panel && !(cfgMode === "official" && !acctMe) && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "primary", size: "sm", disabled: gating, onClick: openPanelChain, children: busy === "open" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
+            /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, { variant: "secondary", size: "sm", disabled: gating, onClick: refreshAll, children: busy === "refresh" ? t("refresh") + "\u2026" : t("refresh") }),
+            data && data.panel && !(cfgMode === "official" && !acctMe) && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, { variant: "primary", size: "sm", disabled: gating, onClick: openPanelChain, children: busy === "open" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
               /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "dshBrowserCtlSpinner", "aria-hidden": "true" }),
               " ",
               t("opening")
             ] }) : t("openPanel") }),
             data && !data.panel && !(cfgMode === "official" && !acctMe) && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: { fontSize: 12, color: "var(--dsw-alias-label-tertiary,#8b8f98)", display: "inline-flex", alignItems: "center" }, children: t("loginRequired") }),
             data && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-              import_dsh_client_ui_primitives.Button,
+              Button,
               {
                 variant: "secondary",
                 size: "sm",
@@ -5246,19 +6570,41 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
       ] })
     ] }),
     aboutOpen && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(AboutPanel, { t, onClose: () => setAboutOpen(false), initialResult: updateInfo, onDismissUpdate: dismissPluginUpdate, onCheckResult: setUpdateInfo }),
+    configOpen && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(ConfigPanel, { t, onClose: () => setConfigOpen(false), onSaved: refreshAll }),
+    accountOpen && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(AccountLoginModal, { t, onClose: () => setAccountOpen(false), onSaved: refreshAll }),
+    ticketOpen && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(TicketModal, { t, onClose: () => setTicketOpen(false) }),
+    loginPrompt && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlOverlay dshBrowserCtlLoginPrompt", role: "dialog", "aria-modal": "true", "aria-label": t("loginRequired"), children: [
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { className: "dshBrowserCtlOverlayMask", type: "button", "aria-label": t("close"), onClick: () => setLoginPrompt(false) }),
+      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", { className: "dshBrowserCtlPanel", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("header", { className: "dshBrowserCtlHeader", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("h1", { children: t("loginRequired") }) }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Tooltip, { label: t("close"), children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, { variant: "ghost", size: "sm", "aria-label": t("close"), icon: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.IconCloseOutlineRegular, {}), onClick: () => setLoginPrompt(false) }) })
+        ] }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlLoginPromptBody", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dshBrowserCtlLoginPromptText", children: t("loginRequiredDesc") }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlLoginPromptActions", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, { variant: "secondary", size: "sm", onClick: () => setLoginPrompt(false), children: t("cancel") }),
+            /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, { variant: "primary", size: "sm", onClick: () => {
+              setLoginPrompt(false);
+              setAccountOpen(true);
+            }, children: t("aboutAccount") })
+          ] })
+        ] })
+      ] })
+    ] }),
     pluginUpdPrompt && updateInfo && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlOverlay dshBrowserCtlLoginPrompt", role: "dialog", "aria-modal": "true", "aria-label": t("pluginUpdTitle").replace("{v}", String(updateInfo.latest)), children: [
       /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { className: "dshBrowserCtlOverlayMask", type: "button", "aria-label": t("close"), onClick: () => setUpdPromptClosed(String(updateInfo.latest)) }),
       /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", { className: "dshBrowserCtlPanel", children: [
         /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("header", { className: "dshBrowserCtlHeader", children: [
           /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("h1", { children: t("pluginUpdTitle").replace("{v}", String(updateInfo.latest)) }) }),
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Tooltip, { label: t("close"), children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "ghost", size: "sm", "aria-label": t("close"), icon: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.IconCloseOutlineRegular, {}), onClick: () => setUpdPromptClosed(String(updateInfo.latest)) }) })
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Tooltip, { label: t("close"), children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, { variant: "ghost", size: "sm", "aria-label": t("close"), icon: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.IconCloseOutlineRegular, {}), onClick: () => setUpdPromptClosed(String(updateInfo.latest)) }) })
         ] }),
         /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlLoginPromptBody", children: [
           /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dshBrowserCtlLoginPromptText", children: t("pluginUpdDesc").replace("{cur}", String(updateInfo.current || "")).replace("{v}", String(updateInfo.latest)) }),
           pluginUpdNotes.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("ul", { className: "dshBrowserCtlUpdNotes", children: pluginUpdNotes.map((n, i) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)("li", { children: n }, i)) }),
           /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlLoginPromptActions", children: [
             /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Tooltip, { label: t("updateIgnoreTip"), children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-              import_dsh_client_ui_primitives.Button,
+              Button,
               {
                 variant: "secondary",
                 size: "sm",
@@ -5271,7 +6617,7 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
             ) }),
             updateInfo.install && updateInfo.install.form === "local" && !IS_TEST && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(UpdateApplyButton, { t, latest: String(updateInfo.latest), variant: "primary", onApplied: dismissPluginUpdate }),
             /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Tooltip, { label: t("updateDownloadTip"), children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-              import_dsh_client_ui_primitives.Button,
+              Button,
               {
                 variant: "secondary",
                 size: "sm",
@@ -5285,35 +6631,13 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
           ] })
         ] })
       ] })
-    ] }),
-    configOpen && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(ConfigPanel, { t, onClose: () => setConfigOpen(false), onSaved: refreshAll }),
-    accountOpen && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(AccountLoginModal, { t, onClose: () => setAccountOpen(false), onSaved: refreshAll }),
-    ticketOpen && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(TicketModal, { t, onClose: () => setTicketOpen(false) }),
-    loginPrompt && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlOverlay dshBrowserCtlLoginPrompt", role: "dialog", "aria-modal": "true", "aria-label": t("loginRequired"), children: [
-      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { className: "dshBrowserCtlOverlayMask", type: "button", "aria-label": t("close"), onClick: () => setLoginPrompt(false) }),
-      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", { className: "dshBrowserCtlPanel", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("header", { className: "dshBrowserCtlHeader", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("h1", { children: t("loginRequired") }) }),
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Tooltip, { label: t("close"), children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "ghost", size: "sm", "aria-label": t("close"), icon: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.IconCloseOutlineRegular, {}), onClick: () => setLoginPrompt(false) }) })
-        ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlLoginPromptBody", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "dshBrowserCtlLoginPromptText", children: t("loginRequiredDesc") }),
-          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "dshBrowserCtlLoginPromptActions", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "secondary", size: "sm", onClick: () => setLoginPrompt(false), children: t("cancel") }),
-            /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "primary", size: "sm", onClick: () => {
-              setLoginPrompt(false);
-              setAccountOpen(true);
-            }, children: t("aboutAccount") })
-          ] })
-        ] })
-      ] })
     ] })
   ] });
 }
 function BrowserCtlButton({ wide, useStore, actions, t }) {
   const open = useStore((state) => state.open);
   return /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Tooltip, { label: t("tab"), delayMs: 500, disabled: wide, children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-    import_dsh_client_ui_primitives.Button,
+    Button,
     {
       variant: "ghost",
       className: "dshBrowserCtlLauncher",
@@ -5331,8 +6655,12 @@ function BrowserCtlButton({ wide, useStore, actions, t }) {
     }
   ) });
 }
-var inject = ["slots", "locale"];
+var inject = ["slots", "locale", "uiWorkspace"];
 function apply(ctx) {
+  ctx.effect(
+    () => consumeOpenSessionHash((sid) => ctx.uiWorkspace.openSession(sid)),
+    "browserctl: push deep-link open session"
+  );
   const view = (0, import_dsh_client_store.defineStore)({
     init: () => ({ open: false }),
     actions: {
@@ -5345,638 +6673,8 @@ function apply(ctx) {
     }
   });
   ctx.effect(() => ctx.locale.register(NS, {
-    zh: {
-      tab: "DSH \u8FDC\u7A0B\u52A9\u624B",
-      tabConnect: "\u8FDE\u63A5",
-      tabDevices: "\u8BBE\u5907",
-      tab2fa: "2FA",
-      tabBan: "\u9ED1\u540D\u5355",
-      tabLog: "\u65E5\u5FD7",
-      tabApp: "App \u914D\u5BF9",
-      tabPush: "\u63A8\u9001",
-      appSubtitle: "\u624B\u673A App \u626B\u4E00\u6B21,\u4E4B\u540E\u6253\u5F00\u514D\u626B\u7801\u76F4\u8FDE",
-      appQrAlt: "\u624B\u673A App \u957F\u671F\u914D\u5BF9\u4E8C\u7EF4\u7801",
-      appLoading: "\u6B63\u5728\u751F\u6210\u957F\u671F\u914D\u5BF9\u7801\u2026",
-      appReady: "\u957F\u671F\u914D\u5BF9\u7801\u5DF2\u751F\u6210",
-      appFailed: "\u914D\u5BF9\u7801\u751F\u6210\u5931\u8D25",
-      appOnceHint: "\u8FD9\u662F\u957F\u671F\u914D\u5BF9\u7801:\u624B\u673A App \u626B\u7801\u540E\u767B\u8BB0\u8BBE\u5907\u5E76\u4FDD\u5B58\u767B\u5F55\u72B6\u6001,\u4E4B\u540E\u6253\u5F00\u514D\u626B\u7801\u76F4\u8FDE\u3002\u82E5\u626B\u300C\u8FDE\u63A5\u300D\u9875\u7684\u4E00\u6B21\u6027\u4E8C\u7EF4\u7801,\u53EA\u4F1A\u83B7\u5F97 1 \u5C0F\u65F6\u4E34\u65F6\u4F1A\u8BDD,\u4E0D\u4F1A\u957F\u671F\u7ED1\u5B9A\u3002",
-      appRefresh: "\u5237\u65B0\u914D\u5BF9\u7801",
-      appCopyLink: "\u590D\u5236\u914D\u5BF9\u94FE\u63A5",
-      appNoQr: "\u957F\u671F\u914D\u5BF9\u7801\u4E0D\u53EF\u7528",
-      subtitle: "\u624B\u673A\u626B\u7801\u6216\u590D\u5236\u94FE\u63A5,\u76F4\u63A5\u6253\u5F00\u672C\u673A\u52A9\u624B\u9762\u677F",
-      about: "\u5173\u4E8E",
-      config: "\u914D\u7F6E",
-      aboutAccount: "\u8D26\u53F7\u767B\u5F55",
-      aboutAccountLogged: "\u5DF2\u767B\u5F55",
-      loginRequired: "\u9700\u8981\u5148\u767B\u5F55",
-      loginRequiredDesc: "\u4F7F\u7528\u5B98\u65B9\u670D\u52A1\u5668\u9700\u8981\u5148\u767B\u5F55\u8D26\u53F7,\u767B\u5F55\u540E\u624D\u4F1A\u5206\u914D\u4E13\u5C5E\u5165\u53E3\u3002\u70B9\u51FB\u4E0B\u65B9\u6309\u94AE\u524D\u5F80\u767B\u5F55\u3002",
-      startFailed: "\u542F\u52A8\u5931\u8D25:",
-      aboutDesc: "\u628A\u672C\u673A DeepSeek \u52A9\u624B Web \u9762\u677F\u5B89\u5168\u7A7F\u900F\u5230\u624B\u673A\u6216\u5916\u7F51\u6D4F\u89C8\u5668,\u968F\u65F6\u968F\u5730\u8FDC\u7A0B\u63A7\u5236\u3002",
-      aboutWebsite: "\u5B98\u7F51",
-      aboutGithub: "GitHub",
-      aboutApp: "App \u4E0B\u8F7D",
-      aboutQq: "\u52A0\u5165QQ\u7FA4",
-      updateCheck: "\u68C0\u67E5\u66F4\u65B0",
-      updateChecking: "\u68C0\u67E5\u4E2D\u2026",
-      updateRecheck: "\u91CD\u65B0\u68C0\u67E5",
-      updateCur: "\u5F53\u524D\u7248\u672C",
-      updateLst: "\u6700\u65B0\u7248\u672C",
-      updateFound: "\u53D1\u73B0\u65B0\u7248\u672C v{v}",
-      updateDownload: "\u4E0B\u8F7D\u65B0\u7248\u672C",
-      updateNotesTitle: "\u66F4\u65B0\u8BF4\u660E",
-      updateUpToDate: "\u5DF2\u662F\u6700\u65B0\u7248\u672C",
-      updateFailed: "\u66F4\u65B0\u68C0\u67E5\u5931\u8D25",
-      updateIgnore: "\u5FFD\u7565\u6B64\u7248\u672C",
-      pluginUpdTitle: "\u53D1\u73B0\u63D2\u4EF6\u65B0\u7248\u672C v{v}",
-      pluginUpdDesc: "\u5F53\u524D\u7248\u672C v{cur},\u5B98\u7F51\u5DF2\u53D1\u5E03 v{v}\u3002\u66F4\u65B0\u540E\u53EF\u83B7\u5F97\u6700\u65B0\u4FEE\u590D\u4E0E\u65B0\u529F\u80FD\u3002",
-      updateGuideLocal: "\u66F4\u65B0\u65B9\u6CD5\uFF1A\u4E0B\u8F7D\u65B0 zip \u89E3\u538B\u540E\u8986\u76D6\u63D2\u4EF6\u76EE\u5F55\uFF08{dir}\uFF09\uFF0C\u91CD\u542F DSH \u751F\u6548\uFF1B\u82E5\u8986\u76D6\u540E\u96A7\u9053\u8D77\u4E0D\u6765\uFF0C\u5148\u53CC\u51FB\u76EE\u5F55\u91CC\u7684 fix-antivirus.bat \u89E3\u9664\u6740\u8F6F\u62E6\u622A",
-      updateGuidePackage: "\u66F4\u65B0\u65B9\u6CD5\uFF1A\u547D\u4EE4\u884C\u6267\u884C {cmd}\uFF0C\u91CD\u542F DSH \u751F\u6548",
-      updateApplyBtn: "\u4E00\u952E\u66F4\u65B0\u5230 v{v}",
-      updateApplying: "\u6B63\u5728\u66F4\u65B0\uFF08\u4E0B\u8F7D\u5E76\u8986\u76D6\uFF0C\u52FF\u5173\u95ED\u9762\u677F\uFF09\u2026",
-      updateApplyDone: "\u5DF2\u66F4\u65B0\u5230 v{v}\uFF0C\u91CD\u542F DSH \u540E\u751F\u6548",
-      updateApplyTip: "\u81EA\u52A8\u4E0B\u8F7D\u5B98\u65B9 zip \u8986\u76D6\u5F53\u524D\u63D2\u4EF6\u76EE\u5F55\uFF08\u4F1A\u5148\u505C\u6B62\u96A7\u9053\uFF09\uFF0C\u91CD\u542F DSH \u5373\u5B8C\u6210\u66F4\u65B0\uFF1B\u4EC5\u9002\u7528\u4E8E\u89E3\u538B\u76EE\u5F55\u5B89\u88C5",
-      updateRecheckTip: "\u91CD\u65B0\u5411\u5B98\u65B9\u66F4\u65B0\u6E90\u67E5\u8BE2\u6700\u65B0\u7248\u672C\uFF08\u6570\u636E\u6E90\uFF1AGitHub Release\uFF0C\u5B98\u7F51\u670D\u52A1\u5668\u6BCF\u5C0F\u65F6\u540C\u6B65\uFF0C\u56FD\u5185\u76F4\u8FDE\uFF09",
-      updateDownloadTip: "\u5728\u6D4F\u89C8\u5668\u6253\u5F00\u5B98\u65B9 zip \u76F4\u94FE\u624B\u52A8\u4E0B\u8F7D\uFF08\u7EA6 6.4 MB\uFF0C\u8D70\u5B98\u7F51\u670D\u52A1\u5668\uFF09\uFF1B\u4E00\u952E\u66F4\u65B0\u5931\u8D25\u65F6\u7684\u5907\u7528\u65B9\u5F0F",
-      updateIgnoreTip: "\u672C\u7248\u672C\u4E0D\u518D\u63D0\u9192\uFF1B\u5B98\u7F51\u53D1\u5E03\u66F4\u65B0\u7248\u672C\u540E\u4F1A\u91CD\u65B0\u63D0\u793A",
-      updateGuideTestNote: "\uFF08\u5F00\u53D1\u526F\u672C\uFF1A\u4E00\u952E\u66F4\u65B0\u5DF2\u7981\u7528\u2014\u2014\u8986\u76D6\u5DE5\u4F5C\u533A\u4F1A\u4E22\u5F00\u53D1\u6001\uFF0C\u8BF7\u7528\u53D1\u5E03\u5DE5\u5177\u540C\u6B65\u6B63\u5F0F\u7248\uFF09",
-      legalTerms: "\u7528\u6237\u534F\u8BAE",
-      legalPrivacy: "\u9690\u79C1\u653F\u7B56",
-      legalMeta: "\u751F\u6548 {d} \xB7 \u7248\u672C {v}",
-      legalAck: "\u6211\u77E5\u9053\u4E86",
-      configSubtitle: "\u9009\u62E9\u8FDE\u63A5\u5B98\u65B9\u670D\u52A1\u5668\u6216\u4F60\u81EA\u5DF1\u7684 frps \u670D\u52A1\u5668",
-      configOfficial: "\u5B98\u65B9\u670D\u52A1\u5668",
-      configOfficialHint: "\u6CE8\u518C / \u767B\u5F55\u5B98\u65B9\u8D26\u53F7,\u5F00\u7BB1\u5373\u7528",
-      configOfficialNote: "\u4F7F\u7528\u5B98\u65B9\u670D\u52A1\u5668:\u767B\u5F55(\u6216\u6CE8\u518C)\u8D26\u53F7\u540E\u81EA\u52A8\u5206\u914D\u4E13\u5C5E\u5165\u53E3,\u65E0\u9700\u624B\u5DE5\u586B\u5199\u4EFB\u4F55\u670D\u52A1\u5668\u4FE1\u606F\u3002",
-      configAcctTitle: "\u5B98\u65B9\u8D26\u53F7",
-      configAcctLoggedIn: "\u5DF2\u767B\u5F55",
-      configAcctPort: "\u4E13\u5C5E\u7AEF\u53E3",
-      configAcctLogout: "\u9000\u51FA\u767B\u5F55",
-      configAcctLoggingOut: "\u9000\u51FA\u4E2D\u2026",
-      configAcctLoggedOut: "\u5DF2\u9000\u51FA(\u96A7\u9053\u5C06\u65AD\u5F00,\u91CD\u65B0\u767B\u5F55\u53EF\u6062\u590D)",
-      configAcctOauthBtn: "\u767B\u5F55 / \u6CE8\u518C\u5B98\u65B9\u8D26\u53F7",
-      configAcctOauthHint: "\u5C06\u6253\u5F00\u6D4F\u89C8\u5668\u8DF3\u8F6C\u5B98\u7F51,\u5728\u7F51\u9875\u5B8C\u6210\u767B\u5F55/\u6CE8\u518C\u540E\u81EA\u52A8\u56DE\u8C03",
-      configAcctOauthOpening: "\u6B63\u5728\u6253\u5F00\u6D4F\u89C8\u5668\u2026",
-      configAcctOauthWait: "\u7B49\u5F85\u6388\u6743\u2026",
-      configAcctOauthOpenBrowser: "\u5DF2\u6253\u5F00\u6D4F\u89C8\u5668:\u8BF7\u5728\u5B98\u7F51\u9875\u9762\u767B\u5F55\u8D26\u53F7\u5E76\u70B9\u300C\u786E\u8BA4\u6388\u6743\u300D\u3002\u82E5\u672A\u81EA\u52A8\u6253\u5F00,\u8BF7\u70B9\u4E0B\u65B9\u6309\u94AE\u91CD\u8BD5\u3002",
-      configAcctOauthOpenAgain: "\u91CD\u65B0\u6253\u5F00\u6388\u6743\u9875",
-      configAcctOauthOpenFail: "\u81EA\u52A8\u6253\u5F00\u6D4F\u89C8\u5668\u5931\u8D25:\u8BF7\u70B9\u4E0B\u65B9\u94FE\u63A5\u624B\u52A8\u6253\u5F00\u6388\u6743\u9875\u3002",
-      configAcctCopy: "\u590D\u5236\u94FE\u63A5",
-      configAcctCopied: "\u5DF2\u590D\u5236",
-      configAcctOauthCancel: "\u53D6\u6D88",
-      configAcctOauthExpired: "\u6388\u6743\u5DF2\u8FC7\u671F,\u8BF7\u91CD\u65B0\u53D1\u8D77\u3002",
-      configAcctOauthFail: "\u6388\u6743\u5931\u8D25:",
-      configAcctOauthNetwork: "\u5B98\u65B9\u670D\u52A1\u5668\u6682\u65F6\u4E0D\u53EF\u8FBE,\u8BF7\u7A0D\u540E\u518D\u8BD5\u3002",
-      configAcctOauthDone: "\u6388\u6743\u6210\u529F,\u6B63\u5728\u5E94\u7528\u8D26\u53F7\u4E0E\u4E13\u5C5E\u7AEF\u53E3\u2026",
-      configAcctRestartFail: "\u767B\u5F55\u6210\u529F,\u4F46\u96A7\u9053\u91CD\u542F\u5931\u8D25:\u8BF7\u70B9\u300C\u5F00\u59CB\u63A7\u5236\u300D\u624B\u52A8\u542F\u52A8\u3002",
-      configAcctLoadFail: "\u5B98\u65B9\u670D\u52A1\u5668\u6682\u65F6\u4E0D\u53EF\u8FBE,\u8BF7\u7A0D\u540E\u518D\u8BD5\u3002",
-      configSelfhost: "\u81EA\u5EFA\u670D\u52A1\u5668",
-      configSelfhostHint: "\u4F7F\u7528\u4F60\u81EA\u5DF1\u7684 frps \u670D\u52A1\u5668",
-      configHost: "\u670D\u52A1\u5668\u5730\u5740 (host)",
-      configHostPh: "\u4F8B\u5982 frps.example.com",
-      configPort: "frps \u7AEF\u53E3",
-      configRemotePort: "\u8FDC\u7A0B\u7AEF\u53E3 (\u53EF\u9009)",
-      configToken: "FRP token",
-      configTokenPh: "\u8F93\u5165 frps \u8BA4\u8BC1 token",
-      configTokenKeep: "\u5DF2\u4FDD\u5B58(\u7559\u7A7A\u4FDD\u6301\u4E0D\u53D8)",
-      configTokenNote: "Token \u4EC5\u4FDD\u5B58\u5728\u672C\u673A browserctl_secrets.json(\u5DF2\u88AB gitignore \u6392\u9664,\u4E0D\u4F1A\u63D0\u4EA4\u6216\u4E0A\u4F20)\u3002",
-      configHostRequired: "\u8BF7\u586B\u5199\u670D\u52A1\u5668\u5730\u5740",
-      configTestBtn: "\u6D4B\u8BD5\u8FDE\u63A5",
-      configTesting: "\u6D4B\u8BD5\u4E2D\u2026",
-      configTestVer: "\u63A2\u9488 frpc v{v}(\u81EA\u5EFA frps \u4E0D\u8981\u6C42\u4E0E\u5BA2\u6237\u7AEF\u7248\u672C\u5B8C\u5168\u4E00\u81F4,\u5EFA\u8BAE\u540C\u4EE3\u76F8\u8FD1)",
-      configTestOkTitle: "\u2705 \u8FDE\u63A5\u6210\u529F:frps \u53EF\u8FBE,token \u6709\u6548",
-      configTestOkHint: "\u5F53\u524D\u914D\u7F6E\u53EF\u4EE5\u6B63\u5E38\u5EFA\u7ACB\u96A7\u9053,\u70B9\u300C\u4FDD\u5B58\u300D\u540E\u5373\u53EF\u4F7F\u7528\u3002",
-      configTestAuthTitle: "\u274C \u670D\u52A1\u5668\u53EF\u8FBE,\u4F46 token \u88AB\u62D2\u7EDD",
-      configTestAuthHint: "frps \u670D\u52A1\u7684 token \u4E0E\u8FD9\u91CC\u586B\u5199\u7684\u4E0D\u4E00\u81F4:\u6838\u5BF9 frps.toml \u7684 auth.token \u4E0E\u914D\u7F6E\u9762\u677F\u91CC\u7684 token \u662F\u5426\u5B8C\u5168\u76F8\u540C(\u6CE8\u610F\u9996\u5C3E\u7A7A\u683C)\u3002",
-      configTestDnsTitle: "\u274C \u57DF\u540D\u89E3\u6790\u5931\u8D25:\u300C{h}\u300D",
-      configTestDnsHint: "\u57DF\u540D\u4E0D\u5B58\u5728\u6216\u8FD8\u6CA1\u751F\u6548:\u68C0\u67E5\u62FC\u5199\u3001DNS \u89E3\u6790(A \u8BB0\u5F55)\u662F\u5426\u5DF2\u914D\u7F6E,\u6216\u76F4\u63A5\u6539\u7528\u670D\u52A1\u5668 IP \u6D4B\u8BD5\u3002",
-      configTestRefusedTitle: "\u274C \u8FDE\u63A5\u88AB\u62D2\u7EDD(\u7AEF\u53E3\u672A\u5F00\u653E)",
-      configTestRefusedHint: "frps \u53EF\u80FD\u6CA1\u5728\u8FD0\u884C,\u6216\u7AEF\u53E3\u4E0D\u5BF9:\u786E\u8BA4\u670D\u52A1\u5668\u4E0A frps \u5DF2\u542F\u52A8,bindPort/kcpBindPort \u4E0E\u8FD9\u91CC\u586B\u7684\u7AEF\u53E3\u4E00\u81F4\u3002",
-      configTestUnreachTitle: "\u274C \u670D\u52A1\u5668\u4E0D\u53EF\u8FBE(TCP \u4E0E UDP \u90FD\u8FDE\u4E0D\u4E0A)",
-      configTestUnreachHint: "\u5730\u5740\u6216\u7AEF\u53E3\u586B\u9519\u3001frps \u6CA1\u5728\u8FD0\u884C\u3001\u6216\u9632\u706B\u5899/\u4E91\u5B89\u5168\u7EC4\u62E6\u622A:\u5148\u5728\u670D\u52A1\u5668\u4E0A\u786E\u8BA4 frps \u8FDB\u7A0B\u6D3B\u7740,\u518D\u68C0\u67E5\u5B89\u5168\u7EC4\u662F\u5426\u653E\u884C\u8BE5\u7AEF\u53E3\u7684 TCP+UDP\u3002",
-      configTestKcpTitle: "\u26A0\uFE0F frps \u53EF\u8FBE,\u4F46 KCP(UDP)\u8FDE\u4E0D\u901A",
-      configTestKcpHint: "\u63D2\u4EF6\u7684\u96A7\u9053\u8D70 KCP(UDP)\u3002\u9700\u8981\u5728 frps.toml \u91CC\u52A0 kcpBindPort = <\u7AEF\u53E3>(\u53EF\u4E0E bindPort \u540C\u53F7,TCP/UDP \u4E0D\u540C\u534F\u8BAE\u4E0D\u51B2\u7A81),\u5E76\u5728\u4E91\u5B89\u5168\u7EC4\u653E\u884C\u540C\u7AEF\u53E3\u7684 UDP\u3002",
-      configTestProtoTitle: "\u26A0\uFE0F \u8FDE\u4E0A\u4E86\u4F46\u63E1\u624B\u5931\u8D25(\u7591\u4F3C frps \u7248\u672C\u6216 TLS \u914D\u7F6E\u4E0D\u517C\u5BB9)",
-      configTestProtoHint: "\u81EA\u5EFA frps \u4E0E\u63A2\u9488 frpc({v})\u7248\u672C\u5DEE\u8DDD\u8FC7\u5927,\u6216 frps \u5F3A\u5236\u4E86\u4E0D\u540C TLS \u914D\u7F6E:\u5EFA\u8BAE\u628A frps \u5347\u7EA7\u5230 0.52+ \u7684\u540C\u4EE3\u7248\u672C\u518D\u8BD5\u3002",
-      configTestToolTitle: "\u274C frpc \u63A2\u9488\u65E0\u6CD5\u542F\u52A8",
-      configTestToolHint: "frpc.exe \u53EF\u80FD\u88AB\u5B89\u5168\u8F6F\u4EF6\u9694\u79BB:\u5148\u8FD0\u884C\u63D2\u4EF6\u76EE\u5F55\u91CC\u7684 fix-antivirus.bat,\u518D\u91CD\u8BD5\u3002",
-      configTestErrTitle: "\u274C \u6D4B\u8BD5\u5931\u8D25",
-      save: "\u4FDD\u5B58",
-      saving: "\u4FDD\u5B58\u4E2D\u2026",
-      saved: "\u5DF2\u4FDD\u5B58",
-      cancel: "\u53D6\u6D88",
-      close: "\u5173\u95ED",
-      startCtl: "\u5F00\u59CB\u63A7\u5236",
-      starting: "\u6B63\u5728\u542F\u52A8\u96A7\u9053\u2026",
-      stopCtl: "\u505C\u6B62\u63A7\u5236",
-      stopping: "\u6B63\u5728\u505C\u6B62\u2026",
-      elevateStart: "\u4EE5\u7BA1\u7406\u5458\u8EAB\u4EFD\u542F\u52A8",
-      elevateStop: "\u4EE5\u7BA1\u7406\u5458\u8EAB\u4EFD\u505C\u6B62",
-      elevating: "\u7B49\u5F85\u63D0\u6743\u786E\u8BA4\u2026",
-      elevateHint: "\u82E5\u5931\u8D25\u539F\u56E0\u662F\u6740\u8F6F\u62E6\u4E86 frpc.exe \u6216\u88AB\u6743\u9650\u6321\u4F4F,\u70B9\u4E0B\u9762\u6309\u94AE\u7528\u7BA1\u7406\u5458\u6743\u9650\u91CD\u8BD5(Windows \u4F1A\u5F39 UAC \u786E\u8BA4\u6846)\u3002",
-      elevateStopHint: "\u505C\u6B62\u6CA1\u751F\u6548:\u8FD9\u5957\u8FDB\u7A0B\u53EF\u80FD\u4EE5\u7BA1\u7406\u5458\u8EAB\u4EFD\u5728\u8DD1,\u666E\u901A\u6743\u9650\u6740\u4E0D\u6389\u3002",
-      copyLink: "\u590D\u5236\u94FE\u63A5",
-      copied: "\u5DF2\u590D\u5236",
-      refresh: "\u5237\u65B0\u4E8C\u7EF4\u7801",
-      openPanel: "\u6253\u5F00\u9762\u677F",
-      opening: "\u6B63\u5728\u6253\u5F00\u2026",
-      openFailed: "\u6253\u5F00\u9762\u677F\u5931\u8D25",
-      qrAlt: "\u914D\u5BF9\u4E8C\u7EF4\u7801",
-      pairOnce: "\u4E00\u6B21\u6027\u914D\u5BF9\u94FE\u63A5",
-      pairLeft: "\u5269\u4F59",
-      pairExpired: '\u914D\u5BF9\u5DF2\u8FC7\u671F,\u70B9"\u5237\u65B0\u4E8C\u7EF4\u7801"\u91CD\u65B0\u751F\u6210',
-      pairStatic: "\u5F15\u5BFC\u94FE\u63A5(24 \u5C0F\u65F6\u6709\u6548)",
-      pairAppTempNote: "\u624B\u673A App \u626B\u6B64\u7801\u53EA\u83B7\u5F97 1 \u5C0F\u65F6\u4E34\u65F6\u4F1A\u8BDD,\u4E0D\u4F1A\u957F\u671F\u7ED1\u5B9A;\u8981\u957F\u671F\u514D\u626B\u7801\u8BF7\u7528\u300CApp \u914D\u5BF9\u300D\u9875\u7B7E\u3002",
-      pairUses: "\u5DF2\u626B\u7801",
-      pairUsesLabel: "\u626B\u7801\u6B21\u6570",
-      pairUsesOne: "1 \u6B21(\u626B\u5B8C\u6362\u7801)",
-      pairUsesTimes: "\u6B21",
-      pairSwap: "\u6362\u4E00\u4E2A\u7801",
-      linkTitle: "iOS / \u65E0 App \u8BBE\u5907",
-      linkWebTag: "\u7F51\u9875\u7ED1\u5B9A",
-      linkSubtitle: "\u6CA1\u6709 App \u7684\u8BBE\u5907(iPhone / iPad)\u7528\u300C\u957F\u671F\u914D\u5BF9\u7801\u300D\u7ED1\u5B9A\u7F51\u9875\u7248:\u626B\u4E00\u6B21\u7801\u767B\u8BB0\u8BBE\u5907,30 \u5929\u514D\u9A8C\u8BC1,\u518D\u300C\u6DFB\u52A0\u5230\u4E3B\u5C4F\u5E55\u300D\u5F53 App \u7528,\u4E0D\u518D\u9700\u8981 PWA \u5F15\u5BFC\u94FE\u63A5\u3002",
-      linkCopy: "\u590D\u5236\u94FE\u63A5",
-      linkCopied: "\u5DF2\u590D\u5236",
-      linkOpenSite: "\u6253\u5F00\u5B98\u7F51",
-      linkStepsTitle: "\u7ED1\u5B9A\u6B65\u9AA4",
-      linkStep1: "\u624B\u673A\u6D4F\u89C8\u5668\u6253\u5F00\u4E0A\u9762\u7684\u5B98\u7F51\u5730\u5740(\u53EF\u767B\u5F55\u8D26\u53F7\u770B\u8BBE\u5907\u4E0E\u65F6\u957F;\u8FD9\u4E2A\u5165\u53E3\u957F\u671F\u4E0D\u53D8,\u7AEF\u53E3\u600E\u4E48\u53D8\u90FD\u4E0D\u53D7\u5F71\u54CD)",
-      linkStep2: "\u7535\u8111\u7AEF\u5207\u5230\u672C\u9762\u677F\u7684\u300CApp \u914D\u5BF9\u300D\u9875\u7B7E,\u51FA\u793A\u957F\u671F\u914D\u5BF9\u7801(\u626B\u5B8C\u4F1A\u81EA\u52A8\u6362\u65B0\u7801)",
-      linkStep3: "\u7528 iPhone \u76F8\u673A\u626B\u8FD9\u4E2A\u7801(\u522B\u7528\u5FAE\u4FE1\u626B):\u6D4F\u89C8\u5668\u6253\u5F00\u5373\u81EA\u52A8\u767B\u8BB0\u8BBE\u5907\u5E76\u7ED1\u5B9A,30 \u5929\u514D\u9A8C\u8BC1\u76F4\u8FBE\u9762\u677F",
-      linkStep4: "\u5728\u9762\u677F\u9875\u9762\u70B9\u6D4F\u89C8\u5668\u300C\u5206\u4EAB \u2192 \u6DFB\u52A0\u5230\u4E3B\u5C4F\u5E55\u300D,\u628A\u5165\u53E3\u6C38\u4E45\u4FDD\u5B58;\u514D\u9A8C\u8BC1\u671F\u8FC7\u540E\u518D\u626B\u4E00\u6B21\u7801\u5373\u53EF\u6062\u590D",
-      linkNote: "\u626B\u7801\u7ED1\u5B9A\u7684\u8BBE\u5907\u4F1A\u51FA\u73B0\u5728\u300CApp \u914D\u5BF9\u300D\u9875\u7B7E\u300C\u5DF2\u914D\u5BF9\u7684\u624B\u673A\u300D\u5217\u8868,\u53EF\u968F\u65F6\u89E3\u9664;\u914D\u5BF9\u7801\u522B\u622A\u56FE\u53D1\u7ED9\u522B\u4EBA\u3002",
-      statusLoading: "\u6B63\u5728\u751F\u6210\u4E8C\u7EF4\u7801\u2026",
-      statusReady: "\u96A7\u9053\u5C31\u7EEA,\u626B\u7801\u5373\u53EF\u6253\u5F00\u9762\u677F",
-      statusTunnelStarting: "\u96A7\u9053\u6B63\u5728\u5EFA\u7ACB,\u8BF7\u7A0D\u5019\u51E0\u79D2\u540E\u5237\u65B0\u4E8C\u7EF4\u7801",
-      statusTunnelBuilding: "\u96A7\u9053\u6B63\u5728\u5EFA\u7ACB,\u51E0\u79D2\u540E\u81EA\u52A8\u51FA\u4E8C\u7EF4\u7801(\u65E0\u9700\u518D\u70B9\u300C\u5F00\u59CB\u63A7\u5236\u300D)",
-      statusNoSecret: '\u96A7\u9053\u672A\u5C31\u7EEA:\u70B9\u4E0B\u65B9"\u5F00\u59CB\u63A7\u5236"\u542F\u52A8\u672C\u673A\u7A7F\u900F,\u51E0\u79D2\u540E\u81EA\u52A8\u51FA\u4E8C\u7EF4\u7801',
-      totpTitle: "\u4E24\u6B65\u9A8C\u8BC1 (2FA)",
-      totpOn: "\u5DF2\u542F\u7528",
-      totpOff: "\u672A\u542F\u7528",
-      totpHint: "\u542F\u7528\u540E,\u6240\u6709\u8BBE\u5907\u6253\u5F00\u9762\u677F\u524D\u5FC5\u987B\u5148\u8F93\u5165\u9A8C\u8BC1\u5668 6 \u4F4D\u52A8\u6001\u7801(RFC 6238);\u8FDE\u9519 5 \u6B21\u51BB\u7ED3 15 \u5206\u949F,\u540C\u7801\u9632\u91CD\u653E\u3002\u7ED1\u5B9A\u65B9\u5F0F:\u7528\u624B\u673A\u9A8C\u8BC1\u5668\u626B\u63CF\u4E0B\u65B9\u4E8C\u7EF4\u7801\u6216\u624B\u52A8\u8F93\u5165\u5BC6\u94A5\u3002",
-      totpHintShort: "\u5F00\u542F\u540E,\u624B\u673A\u6253\u5F00\u9762\u677F\u9700\u5148\u8F93\u5165\u9A8C\u8BC1\u5668 6 \u4F4D\u52A8\u6001\u7801;\u8FDE\u9519 5 \u6B21\u51BB\u7ED3 15 \u5206\u949F\u3002",
-      totpAppHint: "\u624B\u673A\u7AEF\u9700\u8981\u5B89\u88C5\u9A8C\u8BC1\u5668 App \u751F\u6210\u52A8\u6001\u7801,\u63A8\u8350\u5FAE\u8F6F\u5B98\u65B9 Microsoft Authenticator:",
-      totpAppLink: "\u5FAE\u8F6F\u5B98\u7F51\u4E0B\u8F7D",
-      totpBind: "2FA \u7ED1\u5B9A\u4E8C\u7EF4\u7801",
-      totpSecretLabel: "\u5BC6\u94A5(\u624B\u52A8\u8F93\u5165\u7528)",
-      totpEnable: "\u542F\u7528 2FA",
-      totpDisable: "\u7981\u7528 2FA",
-      totpReset: "\u91CD\u7F6E\u5BC6\u94A5",
-      totpKick: "\u5168\u90E8\u8E22\u4E0B\u7EBF",
-      devicesTitle: "\u5728\u7EBF\u8BBE\u5907",
-      devicesOnline: "\u5728\u7EBF {n} \u53F0",
-      noDevices: "\u6682\u65E0\u5DF2\u9A8C\u8BC1\u8BBE\u5907",
-      noOnlineDevices: "\u5F53\u524D\u6CA1\u6709\u8BBE\u5907\u5728\u7EBF",
-      noDevicesHint: "\u624B\u673A\u626B\u7801\u6253\u5F00\u9762\u677F\u5E76\u901A\u8FC7\u52A8\u6001\u7801\u9A8C\u8BC1\u540E,\u8BBE\u5907\u4F1A\u663E\u793A\u5728\u8FD9\u91CC;\u672C\u673A\u76F4\u5F00\u7684\u9762\u677F\u4E0D\u8BA1\u5165\u3002",
-      deviceSeen: "\u6D3B\u8DC3:",
-      deviceKick: "\u8E22\u4E0B\u7EBF",
-      copySecret: "\u590D\u5236\u5BC6\u94A5",
-      logTitle: "\u8FD0\u884C\u65E5\u5FD7",
-      logEmpty: "\u6682\u65E0\u65E5\u5FD7\u3002\u8BBE\u5907\u9A8C\u8BC1\u3001\u8E22\u4E0B\u7EBF\u30012FA \u5F00\u5173\u90FD\u4F1A\u8BB0\u5F55\u5728\u8FD9\u91CC\u3002",
-      banTitle: "IP \u9ED1\u540D\u5355",
-      banEmpty: "\u6682\u65E0\u88AB\u5C01\u7981\u7684 IP \u5730\u5740\u3002\u5728\u8BBE\u5907\u5217\u8868\u70B9\u201C\u62C9\u9ED1\u201D\u53EF\u6DFB\u52A0\u3002",
-      pushTitle: "\u6D88\u606F\u63A8\u9001",
-      pushDesc: "\u628A\u8BBE\u5907\u8FDE\u5165\u3001\u88AB\u8E22\u3001\u9ED1\u540D\u5355\u30012FA\u3001\u914D\u5BF9\u7B49\u5B89\u5168\u4E8B\u4EF6,\u4EE5\u53CA\u7CFB\u7EDF\u6D88\u606F\u5B9E\u65F6\u63A8\u9001\u5230\u4F60\u7684\u624B\u673A\u3002",
-      pushOn: "\u5DF2\u5F00\u542F",
-      pushOff: "\u672A\u5F00\u542F",
-      pushEnabledLabel: "\u63A5\u6536\u624B\u673A\u63A8\u9001",
-      pushEnabledHint: "\u603B\u5F00\u5173:\u5F00\u542F\u540E\u624B\u673A\u53EF\u6536\u5230\u672C\u673A\u9762\u677F\u7684\u63A8\u9001\u6D88\u606F",
-      pushSystemLabel: "\u7CFB\u7EDF\u5B89\u5168\u4E8B\u4EF6",
-      pushSystemHint: "\u8BBE\u5907\u8FDE\u5165 / \u88AB\u8E22 / \u9ED1\u540D\u5355 / 2FA / \u914D\u5BF9",
-      pushTest: "\u53D1\u9001\u6D4B\u8BD5\u63A8\u9001",
-      pushTesting: "\u53D1\u9001\u4E2D\u2026",
-      pushTestTitle: "\u6D4B\u8BD5\u63A8\u9001",
-      pushTestBody: "\u8FD9\u662F\u4E00\u6761\u6765\u81EA DSH \u8FDC\u7A0B\u52A9\u624B\u7684\u6D4B\u8BD5\u63A8\u9001\u6D88\u606F",
-      pushTestOk: "\u6D4B\u8BD5\u63A8\u9001\u5DF2\u53D1\u9001",
-      pushTestFail: "\u6D4B\u8BD5\u63A8\u9001\u53D1\u9001\u5931\u8D25",
-      pushComposerTitle: "\u53D1\u9001\u6D88\u606F",
-      pushComposerHint: "\u53D1\u9001\u540E,\u624B\u673A App \u4E0E\u672C\u673A\u901A\u77E5\u4E2D\u5FC3\u90FD\u4F1A\u5F39\u51FA\u8FD9\u6761\u6D88\u606F",
-      pushMsgTitleLabel: "\u6807\u9898(\u53EF\u9009)",
-      pushMsgTitlePh: "\u4E0D\u586B\u5219\u53EA\u663E\u793A\u6D88\u606F\u5185\u5BB9",
-      pushMsgBodyLabel: "\u5185\u5BB9",
-      pushMsgBodyPh: "\u8F93\u5165\u8981\u63A8\u9001\u7684\u6D88\u606F\u2026",
-      pushSend: "\u53D1\u9001",
-      pushSending: "\u53D1\u9001\u4E2D\u2026",
-      pushSendOk: "\u6D88\u606F\u5DF2\u63A8\u9001",
-      pushSendOff: "\u63A8\u9001\u5F00\u5173\u672A\u5F00\u542F,\u6D88\u606F\u672A\u53D1\u51FA",
-      pushSendFail: "\u6D88\u606F\u53D1\u9001\u5931\u8D25",
-      pushSaveFailed: "\u8BBE\u7F6E\u4FDD\u5B58\u5931\u8D25",
-      pushRecent: "\u6700\u8FD1\u63A8\u9001",
-      pushRefresh: "\u5237\u65B0",
-      pushRefreshing: "\u5237\u65B0\u4E2D\u2026",
-      pushEmpty: "\u6682\u65E0\u63A8\u9001\u3002\u5F00\u542F\u63A8\u9001\u540E,\u5B89\u5168\u4E8B\u4EF6\u4F1A\u663E\u793A\u5728\u8FD9\u91CC\u3002",
-      pushPollFailed: "\u8BFB\u53D6\u63A8\u9001\u914D\u7F6E\u5931\u8D25",
-      pushKindTest: "\u6D4B\u8BD5",
-      pushKindVerify: "\u9A8C\u8BC1",
-      pushKindKick: "\u8E22\u4E0B\u7EBF",
-      pushKindBan: "\u9ED1\u540D\u5355",
-      pushKindTotp: "2FA",
-      pushKindPair: "\u914D\u5BF9",
-      pushKindJoin: "\u8BBE\u5907\u8FDE\u5165",
-      pushKindDev: "\u8BBE\u5907",
-      pushKindMsg: "\u6D88\u606F",
-      // ---- 顶栏通知中心(铃铛) ----
-      msgCenter: "\u901A\u77E5\u4E2D\u5FC3",
-      msgEmpty: "\u6682\u65E0\u901A\u77E5",
-      msgLoadFail: "\u901A\u77E5\u52A0\u8F7D\u5931\u8D25",
-      msgOfficial: "\u5B98\u65B9\u516C\u544A",
-      msgPersonal: "\u53D1\u7ED9\u6211\u7684",
-      msgOpenLink: "\u67E5\u770B\u94FE\u63A5",
-      msgGuestHint: "\u5F53\u524D\u663E\u793A\u5168\u5458\u516C\u544A;\u767B\u5F55\u5B98\u65B9\u8D26\u53F7\u540E\u53EF\u63A5\u6536\u53D1\u7ED9\u4F60\u7684\u5B9A\u5411\u6D88\u606F\u3002",
-      msgTabFeed: "\u7535\u8111\u63A8\u9001",
-      msgBack: "\u8FD4\u56DE\u5217\u8868",
-      msgEmptyOfficial: "\u6682\u65E0\u516C\u544A",
-      msgEmptyMine: "\u6682\u65E0\u6D88\u606F",
-      msgEmptyFeed: "\u6682\u65E0\u7535\u8111\u63A8\u9001;\u7535\u8111\u7AEF\u5F00\u542F\u63A8\u9001\u540E,\u5386\u53F2\u901A\u77E5\u4F1A\u6C47\u603B\u5728\u8FD9\u91CC\u3002",
-      msgNoTitle: "(\u65E0\u6807\u9898)",
-      msgStyleUpdate: "\u7248\u672C\u66F4\u65B0",
-      msgStyleWarning: "\u5B89\u5168\u63D0\u9192",
-      msgStyleEvent: "\u6D3B\u52A8",
-      // ---- 工单反馈(导出日志 → 网页端提交) ----
-      tickets: "\u5DE5\u5355\u53CD\u9988",
-      ticketExportSubtitle: "\u5BFC\u51FA\u672C\u673A\u8BCA\u65AD\u65E5\u5FD7\uFF08\u81EA\u52A8\u6253\u7801\uFF09\uFF0C\u7136\u540E\u9009\u62E9\u65E5\u5FD7\u53BB\u5411\u3002",
-      ticketExportDo: "\u751F\u6210\u5E76\u5BFC\u51FA\u8BCA\u65AD\u65E5\u5FD7",
-      ticketExporting: "\u6B63\u5728\u5BFC\u51FA\u2026",
-      ticketExportAgain: "\u91CD\u65B0\u5BFC\u51FA",
-      ticketExportDone: "\u5DF2\u5BFC\u51FA\u5230\uFF1A",
-      ticketDestTitle: "\u5BFC\u51FA\u53BB\u5411",
-      ticketOpenWeb: "\u6253\u5F00\u7F51\u9875\u7248\u5DE5\u5355",
-      ticketOpenWebDesc: "\u63A8\u8350\uFF1A\u767B\u5F55\u540E\u5728\u7F51\u9875\u7AEF\u63D0\u4EA4\u5DE5\u5355\uFF0C\u5E76\u628A\u8FD9\u4EFD txt \u4F5C\u4E3A\u300C\u8FD0\u884C\u65E5\u5FD7\u300D\u4E0A\u4F20\u3002",
-      ticketSaveOther: "\u5B58\u5230\u5176\u4ED6\u6587\u4EF6\u5939",
-      ticketSaveOtherDesc: "\u628A\u8FD9\u4EFD\u65E5\u5FD7\u518D\u5B58\u4E00\u4EFD\u5230\u4F60\u9009\u7684\u6587\u4EF6\u5939\u3002",
-      ticketCopyContent: "\u590D\u5236\u65E5\u5FD7\u5185\u5BB9",
-      ticketCopyContentDesc: "\u628A\u5DF2\u6253\u7801\u7684\u5168\u6587\u590D\u5236\u5230\u526A\u8D34\u677F\uFF0C\u53EF\u76F4\u63A5\u7C98\u8D34\u7ED9\u522B\u4EBA\u3002",
-      ticketOpenFolder: "\u6253\u5F00\u6240\u5728\u6587\u4EF6\u5939",
-      ticketOpening: "\u6B63\u5728\u6253\u5F00\u2026",
-      ticketCopyPath: "\u590D\u5236\u8DEF\u5F84",
-      ticketCopyPathOk: "\u8DEF\u5F84\u5DF2\u590D\u5236",
-      ticketCopyOk: "\u65E5\u5FD7\u5185\u5BB9\u5DF2\u590D\u5236\u5230\u526A\u8D34\u677F",
-      ticketCopyFail: "\u590D\u5236\u5931\u8D25\uFF0C\u8BF7\u6253\u5F00\u5BFC\u51FA\u7684 txt \u624B\u52A8\u590D\u5236\u3002",
-      ticketSavePathPh: "\u7C98\u8D34\u6587\u4EF6\u5939\u5B8C\u6574\u8DEF\u5F84\uFF0C\u5982 C:\\Users\\\u4F60\\Documents",
-      ticketSaveGo: "\u4FDD\u5B58\u5230\u8FD9\u91CC",
-      ticketSaving: "\u6B63\u5728\u4FDD\u5B58\u2026",
-      ticketSaveOk: "\u5DF2\u53E6\u5B58\u5230\uFF1A",
-      ticketNoContent: "\u65E5\u5FD7\u8FD8\u6CA1\u751F\u6210\uFF0C\u8BF7\u5148\u300C\u751F\u6210\u5E76\u5BFC\u51FA\u8BCA\u65AD\u65E5\u5FD7\u300D\u3002",
-      ticketExportNote: "\u65E5\u5FD7\u53EA\u5728\u672C\u673A\u751F\u6210\u3001\u4E0D\u4F1A\u81EA\u52A8\u4E0A\u4F20\uFF1B\u4F55\u65F6\u4E0A\u4F20\u3001\u4E0A\u4F20\u54EA\u4E00\u7248\u5B8C\u5168\u7531\u4F60\u5728\u7F51\u9875\u7AEF\u51B3\u5B9A\u3002",
-      ticketExportHostOld: "\u63D2\u4EF6\u5BBF\u4E3B\u8FD8\u662F\u65E7\u7248\u672C\uFF08\u65B0\u529F\u80FD\u8981\u5B8C\u5168\u91CD\u542F DSH \u624D\u751F\u6548\uFF09\u3002\u8BF7\u5F7B\u5E95\u9000\u51FA DSH \u518D\u91CD\u65B0\u6253\u5F00\uFF0C\u7136\u540E\u91CD\u8BD5\u3002",
-      // ---- 批次1-C2:会话有效期 / 批次1-A5:主机遥测 ----
-      sdTitle: "\u4F1A\u8BDD\u6709\u6548\u671F",
-      sdCurrent: "\u5F53\u524D {n} \u5929",
-      sdLoading: "\u2026",
-      sdDay1: "1 \u5929",
-      sdDay7: "7 \u5929",
-      sdDay30: "30 \u5929",
-      sdHint: "\u65B0\u8BBE\u5907\u9A8C\u8BC1\u901A\u8FC7\u540E,\u514D\u91CD\u590D\u9A8C\u8BC1\u7684\u6709\u6548\u671F\u3002\u53EA\u5F71\u54CD\u4E4B\u540E\u65B0\u7B7E\u53D1\u7684\u4F1A\u8BDD;\u8981\u7ACB\u5373\u8BA9\u5168\u90E8\u8BBE\u5907\u91CD\u65B0\u9A8C\u8BC1,\u7528 2FA \u9875\u7684\u300C\u5168\u90E8\u8E22\u4E0B\u7EBF\u300D\u3002",
-      sdSaveFail: "\u4FDD\u5B58\u5931\u8D25",
-      sdLoadFail: "\u8BFB\u53D6\u5931\u8D25(\u95F8\u673A\u672A\u8FD0\u884C?)",
-      // ---- 批次4-②:L1 设备签名强制开关 ----
-      sigTitle: "\u5F3A\u5236\u8BBE\u5907\u7B7E\u540D",
-      sigLoading: "\u2026",
-      sigOff: "\u5BBD\u5BB9\u671F",
-      sigOn: "\u5F3A\u5236",
-      sigCounts: "\u8BBE\u5907 {d} \xB7 \u6301\u5BC6\u94A5 {k} \xB7 \u6301\u516C\u94A5 {p}",
-      sigSwitchLabel: "\u5F00\u542F\u5F3A\u5236\u6821\u9A8C",
-      sigSwitchHint: "\u5F00\u542F\u540E,\u65E0\u6709\u6548\u8BBE\u5907\u7B7E\u540D\u7684\u8BF7\u6C42\u4E00\u5F8B 401+\u5F15\u5BFC\u9875;\u6301 30 \u5929\u4F1A\u8BDD\u4F46\u672A\u7ED1\u5BC6\u94A5\u7684\u8BBE\u5907\u4F1A\u88AB\u62D2\u3002",
-      sigConfirm: "\u518D\u786E\u8BA4\u4E00\u6B21:\u6240\u6709\u5E38\u7528\u8BBE\u5907\u90FD\u5DF2\u5347\u7EA7\u5230 v1.0.55+ \u5E76\u5B8C\u6210\u5BC6\u94A5\u7ED1\u5B9A?\u5F00\u542F\u8BEF\u4F24\u81EA\u5DF1\u65F6,\u56DE\u6765\u8FD9\u91CC\u5173\u6389\u5373\u53EF(\u7ACB\u5373\u751F\u6548)\u3002",
-      sigYes: "\u786E\u8BA4\u5F00\u542F",
-      sigCancel: "\u53D6\u6D88",
-      sigHint: "\u5224\u636E:\u8FD0\u884C\u65E5\u5FD7\u91CC\u300C\u5BBD\u5BB9\u671F:\u65E0\u7B7E\u540D\u8BF7\u6C42\u300D\u4E0D\u518D\u51FA\u73B0(\u4E8B\u4EF6 60s \u8282\u6D41,\u5173\u6389\u624B\u673A\u6D4F\u89C8\u5668\u540E\u53F0\u5237\u65B0\u518D\u7B49\u51E0\u5206\u949F\u518D\u770B)\u3002",
-      sigFail: "\u5207\u6362\u5931\u8D25(\u9700 DSH \u91CD\u542F\u540E\u751F\u6548\u7684 host \u8DEF\u7531\u672A\u5C31\u7EEA?)",
-      sigDevs: "\u8BBE\u5907\u51ED\u8BC1",
-      sigRevoke: "\u505C\u6B62\u6388\u6743",
-      sigRevoking: "\u505C\u6B62\u4E2D\u2026",
-      sigRevoked: "\u5DF2\u505C\u6B62\u6388\u6743,\u8BE5\u8BBE\u5907\u9700\u91CD\u65B0\u914D\u5BF9\u6216\u8F93\u52A8\u6001\u7801",
-      sigHasPub: "\u516C\u94A5",
-      sigHasKeyB: "\u5BC6\u94A5",
-      sigNoKey: "\u65E0\u5BC6\u94A5",
-      sigDedupe: "\u4E00\u952E\u53BB\u91CD({n})",
-      sigDedupeHint: "\u540C\u673A\u91CD\u590D\u6863\u6848 {n} \u53F0:\u5220\u9664\u591A\u4F59\u6863\u6848(\u5E76\u505C\u6B62\u5176\u6388\u6743),\u53EA\u4FDD\u7559\u6700\u65B0\u4E00\u53F0",
-      sigDedupeYes: "\u786E\u8BA4\u53BB\u91CD",
-      sigDedupeDone: "\u5DF2\u5220\u9664 {n} \u53F0\u91CD\u590D\u6863\u6848",
-      sigDedupePart: "\u5DF2\u5220\u9664 {ok}/{n} \u53F0,\u5176\u4F59\u53EA\u505C\u6B62\u6388\u6743(\u5220\u6863\u9700\u65B0\u7248\u95F8\u673A+\u672C\u673A\u9762\u677F)",
-      sigFail2: "\u64CD\u4F5C\u5931\u8D25",
-      sysTitle: "\u4E3B\u673A\u72B6\u6001",
-      sysLoading: "\u8BFB\u53D6\u4E2D\u2026",
-      sysFail: "\u8BFB\u53D6\u5931\u8D25(\u95F8\u673A\u672A\u8FD0\u884C?)",
-      sysMem: "\u5185\u5B58",
-      sysFree: "\u4F59",
-      sysCached: "\u7F13\u5B58",
-      sysHint: "\u6570\u636E\u6765\u81EA\u672C\u673A\u95F8\u673A,\u7EA6 10 \u79D2\u7F13\u5B58\u3002",
-      pushKindAnnounce: "\u516C\u544A"
-    },
-    en: {
-      tab: "DshRemote",
-      tabConnect: "Connect",
-      tabDevices: "Devices",
-      tab2fa: "2FA",
-      tabBan: "Blacklist",
-      tabLog: "Log",
-      tabApp: "App Pairing",
-      tabPush: "Push",
-      appSubtitle: "Scan once to pair; the app reconnects without scanning",
-      appQrAlt: "Long-term pairing QR code",
-      appLoading: "Generating long-term pairing code\u2026",
-      appReady: "Long-term pairing code ready",
-      appFailed: "Failed to generate pairing code",
-      appOnceHint: 'This is a long-term pairing code: the app registers the device and saves its login, then reconnects without scanning. Scanning the one-time QR on the "Connect" tab only grants a 1-hour temporary session, not a persistent binding.',
-      appRefresh: "Refresh pairing code",
-      appCopyLink: "Copy pairing link",
-      appNoQr: "Long-term pairing code unavailable",
-      subtitle: "Scan or copy the link to open this panel from any device",
-      about: "About",
-      config: "Settings",
-      aboutAccount: "Sign in",
-      aboutAccountLogged: "Signed in",
-      loginRequired: "Sign in required",
-      loginRequiredDesc: "Using the official server requires signing in first; a dedicated entry is assigned after login. Tap below to sign in.",
-      startFailed: "Start failed:",
-      aboutDesc: "Securely tunnel this DeepSeek assistant web panel to your phone or any browser for remote control, anywhere.",
-      aboutWebsite: "Website",
-      aboutGithub: "GitHub",
-      aboutApp: "App Download",
-      aboutQq: "QQ Group",
-      updateCheck: "Check for updates",
-      updateChecking: "Checking\u2026",
-      updateRecheck: "Check again",
-      updateCur: "Current version",
-      updateLst: "Latest version",
-      updateFound: "New version v{v} available",
-      updateDownload: "Download",
-      updateNotesTitle: "Release notes",
-      updateUpToDate: "You are up to date",
-      updateFailed: "Update check failed",
-      updateIgnore: "Ignore this version",
-      pluginUpdTitle: "New plugin version v{v}",
-      pluginUpdDesc: "You are on v{cur}; v{v} has been released with the latest fixes and features.",
-      updateGuideLocal: "To update: download the new zip, extract it over the plugin folder ({dir}), then restart DSH. If the tunnel fails afterwards, run fix-antivirus.bat in the folder first",
-      updateGuidePackage: 'To update: run "{cmd}" in a terminal, then restart DSH',
-      updateApplyBtn: "Update to v{v}",
-      updateApplying: "Updating (downloading & overwriting)\u2026",
-      updateApplyDone: "Updated to v{v}; restart DSH to apply",
-      updateApplyTip: "Downloads the official zip and overwrites this plugin folder (the tunnel stops first). Restart DSH to finish; works for extracted-folder installs only",
-      updateRecheckTip: "Query the official update source again (GitHub Release, mirrored hourly by the website server)",
-      updateDownloadTip: "Open the official zip direct link in your browser (about 6.4 MB) as a manual fallback",
-      updateIgnoreTip: "Skip reminders for this version; newer releases will notify again",
-      updateGuideTestNote: " (dev copy: one-click update is disabled here \u2014 use the release tool to sync)",
-      legalTerms: "User Agreement",
-      legalPrivacy: "Privacy Policy",
-      legalMeta: "Effective {d} \xB7 Version {v}",
-      legalAck: "Got it",
-      configSubtitle: "Connect to the official server or your own frps server",
-      configOfficial: "Official server",
-      configOfficialHint: "Register / sign in to your official account \u2014 works out of the box",
-      configOfficialNote: "Official server: sign in (or register) and a dedicated entry is assigned automatically \u2014 no server details to fill in.",
-      configAcctTitle: "Official account",
-      configAcctLoggedIn: "Signed in",
-      configAcctPort: "Dedicated port",
-      configAcctLogout: "Sign out",
-      configAcctLoggingOut: "Signing out\u2026",
-      configAcctLoggedOut: "Signed out (tunnel will disconnect; sign in again to restore)",
-      configAcctOauthBtn: "Sign in / Register",
-      configAcctOauthHint: "Your browser will open the official site to sign in / register, then come back automatically",
-      configAcctOauthOpening: "Opening browser\u2026",
-      configAcctOauthWait: "Waiting for approval\u2026",
-      configAcctOauthOpenBrowser: 'Browser opened: sign in to your account on the site and click "Approve". If it did not open, use the button below.',
-      configAcctOauthOpenAgain: "Reopen approval page",
-      configAcctOauthOpenFail: "Could not open your browser automatically \u2014 open the approval page via the link below.",
-      configAcctCopy: "Copy link",
-      configAcctCopied: "Copied",
-      configAcctOauthCancel: "Cancel",
-      configAcctOauthExpired: "Authorization expired, please start again.",
-      configAcctOauthFail: "Authorization failed:",
-      configAcctOauthNetwork: "Official server unreachable, please try again later.",
-      configAcctOauthDone: "Authorized \u2014 applying your account and dedicated port\u2026",
-      configAcctRestartFail: 'Signed in, but tunnel restart failed: press "Start" to launch it manually.',
-      configAcctLoadFail: "Official server unreachable, please try again later.",
-      configSelfhost: "Self-hosted server",
-      configSelfhostHint: "Use your own frps server",
-      configHost: "Server address (host)",
-      configHostPh: "e.g. frps.example.com",
-      configPort: "frps port",
-      configRemotePort: "Remote port (optional)",
-      configToken: "FRP token",
-      configTokenPh: "Enter the frps auth token",
-      configTokenKeep: "Saved (leave blank to keep)",
-      configTokenNote: "Token is stored only in local browserctl_secrets.json (gitignored, never committed or uploaded).",
-      configHostRequired: "Server address is required",
-      configTestBtn: "Test connection",
-      configTesting: "Testing\u2026",
-      configTestVer: "Probe frpc v{v} (a self-hosted frps does not need the exact same version; keep it in the same generation)",
-      configTestOkTitle: "\u2705 Connection OK: frps reachable, token valid",
-      configTestOkHint: "This configuration can establish the tunnel; click Save to use it.",
-      configTestAuthTitle: "\u274C Server reachable, but the token was rejected",
-      configTestAuthHint: "The frps token does not match what you typed: check auth.token in frps.toml against the token field here (watch for stray spaces).",
-      configTestDnsTitle: '\u274C DNS lookup failed: "{h}"',
-      configTestDnsHint: "The domain does not resolve yet: check the spelling and the DNS A record, or test with the server IP directly.",
-      configTestRefusedTitle: "\u274C Connection refused (port not open)",
-      configTestRefusedHint: "frps may not be running, or the port is wrong: make sure frps is up and its bindPort/kcpBindPort matches the port here.",
-      configTestUnreachTitle: "\u274C Server unreachable (both TCP and UDP failed)",
-      configTestUnreachHint: "Wrong address/port, frps down, or a firewall/security-group block: confirm the frps process on the server, then allow this port (TCP+UDP) in your cloud security group.",
-      configTestKcpTitle: "\u26A0\uFE0F frps reachable, but KCP (UDP) fails",
-      configTestKcpHint: "The plugin tunnel uses KCP (UDP). Add kcpBindPort = <port> to frps.toml (may equal bindPort; TCP/UDP do not conflict) and allow the same port over UDP in your security group.",
-      configTestProtoTitle: "\u26A0\uFE0F Connected but handshake failed (possible frps version or TLS mismatch)",
-      configTestProtoHint: "Your frps is too far from probe frpc ({v}) or enforces different TLS settings: upgrade frps to a same-generation release (0.52+) and retry.",
-      configTestToolTitle: "\u274C Failed to launch the frpc probe",
-      configTestToolHint: "frpc.exe may be quarantined by antivirus: run fix-antivirus.bat from the plugin folder first, then retry.",
-      configTestErrTitle: "\u274C Test failed",
-      save: "Save",
-      saving: "Saving\u2026",
-      saved: "Saved",
-      cancel: "Cancel",
-      close: "Close",
-      startCtl: "Start control",
-      starting: "Starting tunnel\u2026",
-      stopCtl: "Stop control",
-      stopping: "Stopping\u2026",
-      elevateStart: "Start as administrator",
-      elevateStop: "Stop as administrator",
-      elevating: "Waiting for elevation\u2026",
-      elevateHint: "If antivirus blocked frpc.exe or permissions got in the way, retry with administrator rights below (Windows will show a UAC prompt).",
-      elevateStopHint: "Stop did not take effect: these processes may be running as administrator.",
-      copyLink: "Copy link",
-      copied: "Copied",
-      refresh: "Refresh QR",
-      openPanel: "Open panel",
-      opening: "Opening\u2026",
-      openFailed: "Failed to open panel",
-      qrAlt: "Pairing QR code",
-      pairOnce: "One-time pairing link",
-      pairLeft: "expires in",
-      pairExpired: "Pairing expired \u2014 refresh to generate a new one",
-      pairStatic: "Bootstrap link (valid for 24 hours)",
-      pairAppTempNote: 'Scanning this code with the app grants only a 1-hour temporary session; for long-term pairing use the "App pairing" tab.',
-      pairUses: "used",
-      pairUsesLabel: "Uses",
-      pairUsesOne: "1 use (rotate after scan)",
-      pairUsesTimes: "uses",
-      pairSwap: "New code",
-      linkTitle: "iOS / No-App devices",
-      linkWebTag: "Web pairing",
-      linkSubtitle: 'For devices without the app (iPhone / iPad): open the official site, then scan the long-term pairing code from the "App pairing" tab \u2014 one scan registers the device for 30 days of verification-free access; then "Add to Home Screen" to use it like an app. No PWA invite link needed.',
-      linkCopy: "Copy link",
-      linkCopied: "Copied",
-      linkOpenSite: "Open site",
-      linkStepsTitle: "Binding steps",
-      linkStep1: "Open the official site above in the phone browser (sign-in optional; this entry never changes, no matter how ports rotate)",
-      linkStep2: 'On the computer, switch to the "App pairing" tab and show the long-term pairing code (it rotates automatically after each scan)',
-      linkStep3: "Scan it with the iPhone camera (not WeChat): the browser registers and binds the device, then opens the panel verification-free for 30 days",
-      linkStep4: 'On the panel page, tap Share \u2192 "Add to Home Screen" to keep the entry permanently; after the 30-day window, scan a fresh code to renew',
-      linkNote: 'Paired devices appear in the "App pairing" tab and can be unpaired anytime; never share the pairing code with others.',
-      statusLoading: "Generating QR code\u2026",
-      statusReady: "Tunnel ready \u2014 scan to open the panel",
-      statusTunnelStarting: "Tunnel starting; refresh the QR in a few seconds",
-      statusTunnelBuilding: "Tunnel is starting \u2014 the QR appears automatically in a few seconds (no need to click Start again)",
-      statusNoSecret: 'Tunnel not ready: click "Start control" below, QR appears in a few seconds',
-      totpTitle: "Two-Factor Auth (2FA)",
-      totpOn: "Enabled",
-      totpOff: "Disabled",
-      totpHint: "When enabled, every device must pass a 6-digit authenticator code (RFC 6238) before opening the panel; 5 wrong tries lock for 15 minutes; replayed codes are rejected.",
-      totpHintShort: "Devices must enter a 6-digit code to open the panel; 5 wrong tries lock for 15 minutes.",
-      totpAppHint: "An authenticator app on the phone generates the codes; Microsoft Authenticator is recommended:",
-      totpAppLink: "Get it from Microsoft",
-      totpBind: "2FA binding QR code",
-      totpSecretLabel: "Secret (manual entry)",
-      totpEnable: "Enable 2FA",
-      totpDisable: "Disable 2FA",
-      totpReset: "Reset secret",
-      totpKick: "Kick all devices",
-      devicesTitle: "Online devices",
-      devicesOnline: "{n} online",
-      noDevices: "No verified devices yet",
-      noOnlineDevices: "No devices online right now",
-      noDevicesHint: "Devices appear here after opening the panel via the QR link and passing the 2FA code; locally opened panels are not counted.",
-      deviceSeen: "Active:",
-      deviceKick: "Kick",
-      copySecret: "Copy secret",
-      logTitle: "Event log",
-      logEmpty: "No events yet. Device verifications, kicks and 2FA toggles are recorded here.",
-      banTitle: "IP Blacklist",
-      banEmpty: 'No banned IPs. Click "Ban" on a device to add.',
-      pushTitle: "Push Notifications",
-      pushDesc: "Realtime push of security events \u2014 device connect / kick / blacklist / 2FA / pairing \u2014 plus system messages to your phone.",
-      pushOn: "On",
-      pushOff: "Off",
-      pushEnabledLabel: "Receive phone push",
-      pushEnabledHint: "Master switch: receive push from this panel on your phone",
-      pushSystemLabel: "Security events",
-      pushSystemHint: "Device connect / kick / blacklist / 2FA / pairing",
-      pushTest: "Send test push",
-      pushTesting: "Sending\u2026",
-      pushTestTitle: "Test push",
-      pushTestBody: "This is a test push from DSH Remote Assistant",
-      pushTestOk: "Test push sent",
-      pushTestFail: "Failed to send test push",
-      pushComposerTitle: "Send a message",
-      pushComposerHint: "The message pops up on the phone App and in this PC's notification centre",
-      pushMsgTitleLabel: "Title (optional)",
-      pushMsgTitlePh: "Leave empty to show the message only",
-      pushMsgBodyLabel: "Content",
-      pushMsgBodyPh: "Type the message to push\u2026",
-      pushSend: "Send",
-      pushSending: "Sending\u2026",
-      pushSendOk: "Message pushed",
-      pushSendOff: "Push is off \u2014 message not sent",
-      pushSendFail: "Failed to send message",
-      pushSaveFailed: "Failed to save settings",
-      pushRecent: "Recent pushes",
-      pushRefresh: "Refresh",
-      pushRefreshing: "Refreshing\u2026",
-      pushEmpty: "No pushes yet. Security events will appear here once push is enabled.",
-      pushPollFailed: "Failed to load push config",
-      pushKindTest: "Test",
-      pushKindVerify: "Verify",
-      pushKindKick: "Kick",
-      pushKindBan: "Ban",
-      pushKindTotp: "2FA",
-      pushKindPair: "Pair",
-      pushKindJoin: "Connect",
-      pushKindDev: "Device",
-      pushKindMsg: "Message",
-      // ---- Header notification centre (bell) ----
-      msgCenter: "Notifications",
-      msgEmpty: "No notifications",
-      msgLoadFail: "Failed to load notifications",
-      msgOfficial: "Announcement",
-      msgPersonal: "For you",
-      msgOpenLink: "Open link",
-      msgGuestHint: "Showing public announcements; sign in to the official account to receive direct messages.",
-      msgTabFeed: "From this PC",
-      msgBack: "Back to list",
-      msgEmptyOfficial: "No announcements",
-      msgEmptyMine: "No messages",
-      msgEmptyFeed: "No pushes yet. Once push is enabled on this PC, its notifications will be collected here.",
-      msgNoTitle: "(no title)",
-      msgStyleUpdate: "Update",
-      msgStyleWarning: "Security notice",
-      msgStyleEvent: "Event",
-      // ---- ticket feedback (export logs -> choose destination) ----
-      tickets: "Ticket Feedback",
-      ticketExportSubtitle: "Export the local diagnostic log (auto-redacted), then choose where it goes.",
-      ticketExportDo: "Export diagnostic logs",
-      ticketExporting: "Exporting\u2026",
-      ticketExportAgain: "Export again",
-      ticketExportDone: "Exported to:",
-      ticketDestTitle: "Where the log goes",
-      ticketOpenWeb: "Open web ticket page",
-      ticketOpenWebDesc: "Recommended: sign in, submit the ticket on the web and upload this txt as a log file.",
-      ticketSaveOther: "Save to another folder",
-      ticketSaveOtherDesc: "Keep another copy of this log in a folder you choose.",
-      ticketCopyContent: "Copy log content",
-      ticketCopyContentDesc: "Copy the redacted full text to the clipboard for pasting into a chat.",
-      ticketOpenFolder: "Open folder",
-      ticketOpening: "Opening\u2026",
-      ticketCopyPath: "Copy path",
-      ticketCopyPathOk: "Path copied",
-      ticketCopyOk: "Log content copied to clipboard",
-      ticketCopyFail: "Copy failed \u2014 open the exported txt and copy manually.",
-      ticketSavePathPh: "Paste a full folder path, e.g. C:\\Users\\you\\Documents",
-      ticketSaveGo: "Save here",
-      ticketSaving: "Saving\u2026",
-      ticketSaveOk: "Saved to: ",
-      ticketNoContent: 'Log not generated yet \u2014 click "Export diagnostic logs" first.',
-      ticketExportNote: "Logs are generated locally and never uploaded automatically; you decide what to upload on the web.",
-      ticketExportHostOld: "The plugin host is still the old version (this feature needs a full DSH restart). Quit DSH completely, reopen it, then try again.",
-      sdTitle: "Session lifetime",
-      sdCurrent: "Currently {n} days",
-      sdLoading: "\u2026",
-      sdDay1: "1 day",
-      sdDay7: "7 days",
-      sdDay30: "30 days",
-      sdHint: 'How long a verified device stays trusted. Only affects sessions issued afterwards; to force all devices to re-verify now, use "Kick all devices" on the 2FA tab.',
-      sdSaveFail: "Save failed",
-      sdLoadFail: "Load failed (gate not running?)",
-      sigTitle: "Enforce device signatures",
-      sigLoading: "\u2026",
-      sigOff: "Grace period",
-      sigOn: "Enforced",
-      sigCounts: "Devices {d} \xB7 With key {k} \xB7 With pubkey {p}",
-      sigSwitchLabel: "Enable enforcement",
-      sigSwitchHint: "When enabled, requests without a valid device signature are rejected with 401 + onboarding page; devices holding a 30-day session but no bound key are refused.",
-      sigConfirm: "Confirm once more: all regular devices are on v1.0.55+ with keys bound? If this locks you out, come back here to switch it off (effective immediately).",
-      sigYes: "Confirm",
-      sigCancel: "Cancel",
-      sigHint: 'Criterion: "grace: unsigned request" stops appearing in the run log (events are throttled to 60s; close background phone browser tabs and wait a few minutes before judging).',
-      sigFail: "Switch failed (host route not ready? needs DSH restart)",
-      sigDevs: "Device credentials",
-      sigRevoke: "Revoke",
-      sigRevoking: "Revoking\u2026",
-      sigRevoked: "Revoked; the device must re-pair or verify with a code",
-      sigHasPub: "PubKey",
-      sigHasKeyB: "Key",
-      sigNoKey: "No key",
-      sigDedupe: "Dedupe ({n})",
-      sigDedupeHint: "{n} duplicate records of the same device: delete the extras (and revoke them), keep the latest",
-      sigDedupeYes: "Confirm dedupe",
-      sigDedupeDone: "Removed {n} duplicate records",
-      sigDedupePart: "Removed {ok}/{n}; the rest were only revoked (deletion needs the new gate + local panel)",
-      sigFail2: "Operation failed",
-      sysTitle: "Host status",
-      sysLoading: "Loading\u2026",
-      sysFail: "Load failed (gate not running?)",
-      sysMem: "Memory",
-      sysFree: "free",
-      sysCached: "cached",
-      sysHint: "Sampled by the local gate, ~10s cache.",
-      pushKindAnnounce: "Announcement"
-    }
+    zh: zh_default.panel,
+    en: en_default.panel
   }), "browserctl: dictionaries");
   ctx.effect(() => installStyles(), "browserctl: styles");
   ctx.slots.inject("sidebar.footer.action", () => ctx.slots.register({

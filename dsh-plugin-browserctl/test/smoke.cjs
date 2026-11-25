@@ -42,6 +42,8 @@ const React = {
   useMemo: (fn) => fn(),
   useCallback: (fn) => fn(),
   useReducer: (r, init) => [init, () => {}],
+  // 2026-11-25 插件 Button 包装器用 forwardRef 转发 ref(Tooltip 定位需要),桩里直通渲染
+  forwardRef: (render) => (props) => render(props, props && props.ref),
   Children: { map: (c, f) => (Array.isArray(c) ? c.map(f) : [f(c)]), toArray: (c) => (Array.isArray(c) ? c : [c]) },
 }
 
