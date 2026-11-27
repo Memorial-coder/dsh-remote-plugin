@@ -10,8 +10,8 @@
 import { spawn, spawnSync } from 'node:child_process'
 import crypto from 'node:crypto'
 import net from 'node:net'
-import { existsSync, readdirSync, readFileSync, writeFileSync, renameSync, rmSync, openSync, closeSync, readSync, truncateSync, statSync, chmodSync, realpathSync, copyFileSync, mkdirSync } from 'node:fs'
 import os from 'node:os'
+import { existsSync, readdirSync, readFileSync, writeFileSync, renameSync, rmSync, openSync, closeSync, readSync, truncateSync, statSync, chmodSync, realpathSync, copyFileSync, mkdirSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import QRCode from 'qrcode'
@@ -77,9 +77,6 @@ const SECRETS_PATH = path.join(CORE_DIR, 'browserctl_secrets.json')
 // frpc 日志:隧道就绪的**唯一权威依据**是日志里出现 `start proxy success`(端口注册成功)。
 // tunnelReady() 用它自愈 state 里滞后的 tunnel_ok(详见下面的自愈注释)。
 const FRPC_LOG = path.join(CORE_DIR, 'browserctl_frpc.log')
-// 工单「导出诊断日志」还要读闸机日志(fwd/主进程/watch)与 frpc 日志(常量见上)。
-const FWD_LOG = path.join(CORE_DIR, 'browserctl_fwd.log')
-const WATCH_LOG = path.join(CORE_DIR, 'browserctl_watch.log')
 // 本地管理令牌:闸机把特权端点(生成链接/配对码/改推送开关)从「loopback 即管理员」
 // 改成「loopback + 持有令牌」。每次调用都重新读,这样闸机重启后新建的令牌能立刻生效。
 const ADMIN_TOKEN_PATH = path.join(CORE_DIR, 'browserctl_admin_token')
@@ -148,9 +145,9 @@ const OAUTH_CLIENT_ID = 'dsh-plugin-desktop'
 const PAIR_ISSUE_URL = 'https://remote.ymzcc.com/pair/api/issue'
 const CONFIRM_BASE = 'https://remote.ymzcc.com/pair/confirm'
 
-// 「检查更新」版本源(2026-11-21 定版,2026-11-23 同步至正式版:GitHub Release 为唯一版本源):
+// 「检查更新」版本源(2026-11-21 定版:GitHub Release 为唯一版本源):
 // 主源 = 官网 /api/plugin/version —— 服务器脚本每小时从 GitHub releases/latest 同步
-// (下载 zip + sha256 双校验 + 原子写 plugin-config.json),国内直连可达;
+// (下载 zip + sha256 双校验 + 原子写 plugin-config.json,kb/21.11),国内直连可达;
 // 备源 = GitHub API releases/latest(官网接口失效时兜底;国内直连常失败,仅作兜底)。
 // 历史:此前接随官网 web/ 部署的静态 version.json,它不归发版流水线管、靠手动同步,
 // 实查长期滞后(停在 1.0.65 而真实最新 1.0.81),用户点「检查更新」会被旧版本号误导。
@@ -187,7 +184,7 @@ function splitNotes(text) {
 }
 
 // 拉最新插件版本:① 官网自动同步接口 → ② GitHub API。成功返回
-// { latest, downloadUrl, notes, source, zipSize },两条源都失败返回 null(调用方回 ok:false)。
+// { latest, downloadUrl, notes, source },两条源都失败返回 null(调用方回 ok:false)。
 async function fetchLatestRelease() {
   const siteOrigin = new URL(OFFICIAL_API_BASE).origin
   // ① 官网自动同步接口:{version, download_url(相对), website_download_url, release_notes, zips[]}
@@ -225,9 +222,9 @@ async function fetchLatestRelease() {
 // 流程:停隧道(释放 frpc.exe/browserctl.py 文件锁)→ 下载官网 zip(大小校验)→
 // Python zipfile 安全解包(逐条目防 zip-slip)→ 校验包根(版本一致+关键文件在)→
 // 逐文件覆盖进插件目录(运行态文件绝不覆盖,先写临时名再原子改名)→ 清理 → 回 restartRequired。
-// 三类拒绝:开发工作区副本(覆盖工作区会丢开发态)、包安装(node_modules 用安装命令)、
+// 三类拒绝:(覆盖工作区会丢开发态)、包安装(node_modules 用安装命令)、
 // git 仓库目录(自更新会弄脏 checkout,用 git pull / 发布工具)。
-// 注意:开发副本判据用 /-test$/ 后缀正则,与 client 侧 IS_TEST 同款,便于两份代码保持同构。
+// 注意:测试判据用 /-test$/ 后缀正则(与 client IS_TEST 同款),镜像改名脚本整串替换后依然成立。
 const GITHUB_ADD_CMD = 'dsh plugin add github:Memorial-coder/dsh-remote-plugin'
 let updateApplying = false
 
@@ -367,8 +364,8 @@ function atomicWrite(file, data) {
     try { rmSync(tmp, { force: true }) } catch {}
     throw e
   }
-  // 写后 ACL 收紧（kb/24 P1-3）：rename 出来的新文件继承父目录 ACL，与闸机
-  // harden_file_perms 同语义（Windows: icacls 断继承+仅当前用户；POSIX: 0600）。
+  // 写后 ACL 收紧（kb/09 P1-3）：rename 出来的新文件继承父目录宽 ACL，
+  // 与闸机 harden_file_perms 同语义（Windows: icacls 断继承+仅当前用户；POSIX: 0600）。
   // atomicWrite 只用于 state/secrets/blacklist 三个凭据/运行态文件，在这里收一次全覆盖。
   hardenFileAcl(file)
 }
@@ -385,7 +382,7 @@ function hardenFileAcl(file) {
       child.on('error', () => {
         if (!_aclWarned.has(file)) {
           _aclWarned.add(file)
-          console.warn('[browserctl] [安全告警] 无法收紧 ' + file + ' 的 ACL（权限不足时跳过，其余写入方会再收紧）')
+          console.warn('[browserctl] [安全告警] 无法收紧 ' + file + ' 的 ACL（沙箱/权限不足时属预期，真机自动生效）')
         }
       })
     } else {
@@ -750,6 +747,10 @@ export function resolvePython() {
 // 现在写到 kit 目录下的 browserctl_start.log,失败时把尾部摘要透给面板。
 const START_LOG = path.join(path.dirname(SCRIPT_PATH), 'browserctl_start.log')
 const START_LOG_MAX = 256 * 1024
+// 工单诊断日志要读的另外两份(闸机访问日志 / 看门狗日志)。
+// 只有插件(/本机)能读到这些文件,客户端读不到 → 由 host 路由读出、脱敏后给客户端预览。
+const FWD_LOG = path.join(CORE_DIR, 'browserctl_fwd.log')
+const WATCH_LOG = path.join(CORE_DIR, 'browserctl_watch.log')
 
 function startLogFd() {
   try {
@@ -860,11 +861,11 @@ function runBrowserctl(args) {
     ? (0x00000008 | 0x00000200 | 0x01000000 | 0x08000000) // DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB | CREATE_NO_WINDOW
     : 0
   const fd = startLogFd()
+  // 不注入 PYTHONUTF8/PYTHONIOENCODING(2026-11-09 已撤):强制 UTF-8 后,闸机父进程
+  // 按 UTF-8 解码 tasklist/netstat 等 GBK 输出,_readerthread 直接 UnicodeDecodeError、
+  // 输出整段丢失(自愈路径失灵)。日志乱码由 decodeLogBuffer 按行转码兜底,足够且无副作用。
   const child = spawn(py.cmd, [...py.pre, script, ...args], {
     cwd: path.dirname(script),
-    // 不注入 PYTHONUTF8/PYTHONIOENCODING(2026-11-09 已撤):强制 UTF-8 后,闸机父进程
-    // 按 UTF-8 解码 tasklist/netstat 等 GBK 输出,_readerthread 直接 UnicodeDecodeError、
-    // 输出整段丢失(自愈路径失灵)。日志乱码由 decodeLogBuffer 按行转码兜底,足够且无副作用。
     // 有 fd 就把子进程输出落盘(失败原因可回读);拿不到 fd 才退回忽略
     stdio: fd === null ? 'ignore' : ['ignore', fd, fd],
     detached: true,
@@ -1082,9 +1083,7 @@ function totpUri(secret) {
   return 'otpauth://totp/DshRemote:DeepSeekPanel?secret=' + secret +
     '&issuer=DshRemote&algorithm=SHA1&digits=6&period=30'}
 
-/** 闸机实际端口(自动避让后可能不是 3080):从 state 读,读不到退回 3080。
- *  2026-11-18:正式版此前只有 SigEnforceCard 调用 gatePort() 却没有定义,
- *  点「强制设备签名」必 ReferenceError;其余路由又写死 3080,自动避让后全断。 */
+/** 闸机实际端口(自动避让后可能不是 3080):从 state 读,读不到退回 3080。 */
 function gatePort() {
   try { return Number(readState().fwd_port) || 3080 } catch { return 3080 }
 }
@@ -1201,7 +1200,7 @@ async function buildTunnel() {
     await new Promise(r => setTimeout(r, 400))
   }
   if (!fwd) {
-    // 15 秒还没起来 = 真的失败了(最常见:Defender 拦 frpc.exe → WinError 5),
+    // 时限到还没起来 = 真的失败了(最常见:Defender 拦 frpc.exe → WinError 5),
     // 以前这里照样回 ok:true,面板就永远停在"隧道正在建立",用户完全无从排查。
     const tail = startLogTail(25)
     return {
@@ -1276,161 +1275,6 @@ function readRawBody(req) {
     req.on('data', chunk => chunks.push(chunk))
     req.on('end', () => resolve(Buffer.concat(chunks)))
     req.on('error', reject)
-  })
-}
-
-// ---- 自建 frps 连接测试(「测试连接」按钮) ------------------------------------
-// 用户反馈:自建 frps 连不上时,面板只会说「隧道未建立」,分不清是 token 错、
-// frps 没开 KCP(UDP)、防火墙拦截还是地址填错("不知道到底是哪边的问题")。
-// 这里用与真实隧道完全一致的方式(协议 + TLS + token)临时拉起一份不带
-// [[proxies]] 的 frpc 探针:
-//   - 只验证「登录 frps」这一步,不注册任何代理,不占远程端口;user 前缀是
-//     "probe",与正在运行的 browserctl 隧道互不干扰;
-//   - 读 frpc 日志做结论分类;KCP 不通时再用 TCP 探一次,区分「frps 没开
-//     kcpBindPort」和「整个端口不可达」——这是自建用户最常见的两种坑;
-//   - 无论结果如何,测试完立即杀进程并清理临时文件。
-// frpc 日志标记(0.61~0.72 源码逐字核对过,client/service.go):
-//   成功: login to server success, get run id [xxx]
-//   失败: connect to server error: <原因>(服务器拒绝时原因=服务端错误文本,
-//         如 token authentication failed;网络不通时=dial tcp/udp 系统错误)
-const PROBE_KCP_TIMEOUT = 7000 // KCP(UDP)探针最长等待:UDP 丢包不会报错,只能等超时
-const PROBE_TCP_TIMEOUT = 6000 // TCP 回退探针最长等待
-
-function frpcBinaryPath() {
-  const env = String(process.env.BROWSERCTL_FRPC || '').trim()
-  if (env && existsSync(env)) return env
-  const exe = process.platform === 'win32' ? 'frpc.exe' : 'frpc'
-  const inKit = path.join(CORE_DIR, exe)
-  return existsSync(inKit) ? inKit : null
-}
-
-let _frpcVerCache = null
-function frpcVersion() {
-  if (_frpcVerCache !== null) return _frpcVerCache
-  _frpcVerCache = ''
-  const bin = frpcBinaryPath()
-  if (!bin) return ''
-  const outPath = path.join(os.tmpdir(), `browserctl_frpcver_${process.pid}_${Date.now()}.log`)
-  let fd = null
-  try {
-    fd = openSync(outPath, 'w')
-    // 输出落临时文件而非管道:DSH 运行环境里管道 stdio 可能 EPERM(见 build.mjs 头注)
-    spawnSync(bin, ['-v'], { stdio: ['ignore', fd, fd], timeout: 8000, windowsHide: true })
-  } catch { /* 二进制无法执行:版本留空 */ }
-  finally { try { if (fd !== null) closeSync(fd) } catch {} }
-  try {
-    _frpcVerCache = decodeLogBuffer(readFileSync(outPath)).trim().split(/\r?\n/)[0].trim()
-  } catch { /* 读取失败:留空 */ }
-  try { rmSync(outPath, { force: true }) } catch {}
-  return _frpcVerCache
-}
-
-/** 把一份 frpc 探针日志分类成结论;日志里还没有结论标记时返回 null(继续等)。 */
-function classifyProbeLog(text) {
-  const t = String(text || '')
-  if (t.includes('login to server success')) return { stage: 'ok', detail: '' }
-  const errLine = t.split(/\r?\n/).filter(l => l.includes('connect to server error')).pop()
-  if (errLine) {
-    const marker = 'connect to server error:'
-    const idx = errLine.indexOf(marker)
-    const reason = idx >= 0 ? errLine.slice(idx + marker.length).trim() : errLine.trim()
-    const low = reason.toLowerCase()
-    if (low.includes('no such host') || low.includes('lookup')) return { stage: 'dns', detail: reason }
-    if (low.includes('token') || low.includes('auth') || low.includes('invalid')) return { stage: 'auth', detail: reason }
-    if (low.includes('eof') || low.includes('unexpected frame') || low.includes('invalid message') ||
-        low.includes('tls') || low.includes('handshake')) return { stage: 'protocol', detail: reason }
-    if (low.includes('refused')) return { stage: 'refused', detail: reason }
-    return { stage: 'network', detail: reason }
-  }
-  return null
-}
-
-/** 读探针日志全文(小文件,直接读);读不到返回 ''。 */
-function readProbeLog(file) {
-  try { return decodeLogBuffer(readFileSync(file)) } catch { return '' }
-}
-
-/**
- * 跑一次 frpc 登录探针:写临时 toml → 拉起 frpc → 轮询日志出结论 → 杀进程清理。
- * 返回 { stage: 'ok'|'auth'|'dns'|'protocol'|'refused'|'network'|'timeout'|'tool', detail, logTail }。
- */
-function probeFrpsLogin({ host, port, token, protocol, timeoutMs }) {
-  return new Promise((resolve) => {
-    const stamp = `${process.pid}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
-    const cfgPath = path.join(os.tmpdir(), `browserctl_probe_${stamp}.toml`)
-    const logPath = path.join(os.tmpdir(), `browserctl_probe_${stamp}.log`)
-    const bin = frpcBinaryPath()
-    if (!bin) {
-      resolve({ stage: 'tool', detail: '未找到 frpc 可执行文件', logTail: '' })
-      return
-    }
-    // TOML 基本字符串只要求转义反斜杠与引号(与 browserctl.py 生成正式 toml 同款规则)
-    const esc = (s) => String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"')
-    const toml =
-      'serverAddr = "' + esc(host) + '"\n' +
-      'serverPort = ' + (parseInt(port, 10) || 17000) + '\n' +
-      'auth.method = "token"\n' +
-      'auth.token = "' + esc(token) + '"\n' +
-      'user = "probe"\n' +
-      // loginFailExit=false:失败持续重试,每轮都会把失败原因写进日志;探针反正会按时杀掉
-      'loginFailExit = false\n' +
-      'transport.protocol = "' + (protocol === 'tcp' ? 'tcp' : 'kcp') + '"\n' +
-      'transport.tls.enable = true\n' +
-      'transport.heartbeatInterval = 10\n' +
-      'transport.heartbeatTimeout = 30\n' +
-      'log.to = "console"\n' +
-      'log.level = "info"\n' +
-      'log.disablePrintColor = true\n'
-    let child = null
-    let fd = null
-    let timer = null
-    let poll = null
-    let settled = false
-    const finish = (result) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      clearInterval(poll)
-      // 杀探针进程(Windows 下再补一发 taskkill /T /F,确保不残留)
-      if (child && child.pid && child.exitCode === null) {
-        try { child.kill() } catch { /* 已退出 */ }
-        if (process.platform === 'win32') {
-          try {
-            spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'],
-              { stdio: 'ignore', windowsHide: true, detached: true }).unref()
-          } catch { /* kill() 已尽力 */ }
-        }
-      }
-      try { if (fd !== null) closeSync(fd) } catch {}
-      // 延迟删临时文件,给进程退出/句柄释放留时间;仍被占用时 rmSync 抛错就留给系统临时目录
-      setTimeout(() => {
-        try { rmSync(cfgPath, { force: true }) } catch {}
-        try { rmSync(logPath, { force: true }) } catch {}
-      }, 500)
-      const text = readProbeLog(logPath)
-      resolve({
-        ...result,
-        logTail: text ? text.split(/\r?\n/).filter(l => l.trim()).slice(-6).join('\n') : '',
-      })
-    }
-    // 超时 = 日志里始终没有结论标记:UDP 静默丢包/端口未开放/服务器无响应的典型表现
-    timer = setTimeout(() => finish({ stage: 'timeout', detail: '', logTail: '' }), timeoutMs)
-    try {
-      writeFileSync(cfgPath, toml, 'utf8')
-      fd = openSync(logPath, 'w')
-      // 输出落临时文件(不用管道,原因见 frpcVersion 注释);windowsHide 防止闪黑窗
-      child = spawn(bin, ['-c', cfgPath], { stdio: ['ignore', fd, fd], windowsHide: true })
-      child.on('error', (e) => {
-        // spawn 失败(如 frpc.exe 被安全软件拒绝执行):立即给出 tool 结论
-        finish({ stage: 'tool', detail: String((e && e.message) || e), logTail: '' })
-      })
-      poll = setInterval(() => {
-        const verdict = classifyProbeLog(readProbeLog(logPath))
-        if (verdict) finish(verdict)
-      }, 300)
-    } catch (e) {
-      finish({ stage: 'tool', detail: String((e && e.message) || e), logTail: '' })
-    }
   })
 }
 
@@ -1556,15 +1400,16 @@ const CSRF_PROTECTED = new Set([
   '/browserctl/api/pair-long',
   '/browserctl/api/totp-toggle',
   '/browserctl/api/totp-kick',
+  '/browserctl/api/sig-toggle',
   '/browserctl/api/blacklist-add',
   '/browserctl/api/blacklist-remove',
+  '/browserctl/api/server/login',
   '/browserctl/api/server/logout',
   '/browserctl/api/server/messages/read',
   '/browserctl/api/server/oauth/begin',
   '/browserctl/api/server/oauth/open',
   '/browserctl/api/server/oauth/poll',
   '/browserctl/api/config',
-  '/browserctl/api/config/test',
 ])
 
 // 闸机反代里的「写端点」后缀(POST/DELETE 全拦 + GET 型写操作;events/push-poll/
@@ -1908,9 +1753,6 @@ export function apply(ctx, config = {}) {
           sendJson(res, 200, { ok: true, blacklist: readBlacklist() })
           return
         }
-        // ---- 官方多用户账号(设备授权流:登录/注册走浏览器官网授权页,轮询换 token)----
-        // 流程:client → /server/oauth/begin 拿 device_code → /server/oauth/open 打开
-        // 浏览器授权页 → 用户在网页登录/注册并确认 → client 轮询 /server/oauth/poll
         // ---- 会话有效期(批次1-C2)+ 主机遥测(批次1-A5):代理本机闸机端点 ----
         // GET 读当前值(闸机放行会话或管理令牌;host 服务端调用带管理令牌),
         // POST 改(闸机侧仅本机管理员,?days=N,1-365)。
@@ -1946,6 +1788,9 @@ export function apply(ctx, config = {}) {
           }
           return
         }
+        // ---- 官方多用户账号(设备授权流:登录/注册走浏览器官网授权页,轮询换 token)----
+        // 流程:client → /server/oauth/begin 拿 device_code → /server/oauth/open 打开
+        // 浏览器授权页 → 用户在网页登录/注册并确认 → client 轮询 /server/oauth/poll
         // 拿 access token → applyOfficialSession 落 per-user 密钥与分配端口。
         if (route === '/browserctl/api/server/oauth/begin') {
           if (req.method !== 'POST') { sendJson(res, 405, { ok: false, error: 'POST only' }); return }
@@ -1986,8 +1831,9 @@ export function apply(ctx, config = {}) {
           }
           const href = target.toString()
           // 多方法打开默认浏览器:rundll32 → explorer,任一 spawn 成功即可。
-          // 即便全部失败,client 的授权页链接也能让用户手动打开,这里只上报。
-          // （cmd start 候选已移除——解析面更大,rundll32/explorer 已覆盖所有场景,kb/24 P3）
+          // 不再用 cmd start:cmd.exe 是最常被滥用/被安全软件重点盯防的任意命令执行入口,
+          // 纯打开 URL 用 rundll32/explorer 足够;即便全部失败,client 的授权页链接
+          // 也能让用户手动打开,这里只上报。
           const candidates = [
             ['rundll32', ['url.dll,FileProtocolHandler', href]],
             ['explorer', [href]],
@@ -2058,8 +1904,9 @@ export function apply(ctx, config = {}) {
           delete sec.server_link_secret
           delete sec.server_panel_url
           delete sec.frp_remote_port
-          // 派生凭据一并清（kb/24 P3）：官方下发的 frp token 与模式切换备份,
-          // 重新登录会拿到新 token;不清会让 /config 的 hasToken 误报「已配置」。
+          // frp_token 是随官方会话下发的 frps 凭据,登出一并清空:否则凭据残留在 secrets
+          // 文件里,/config 的 hasToken 也会继续显示「已配置」。frp_token_official 是它
+          // 在模式切换时留的备份,同属派生缓存字段,一起清(重新登录会拿到新 token)。
           delete sec.frp_token
           delete sec.frp_token_official
           writeSecrets(sec)
@@ -2072,6 +1919,50 @@ export function apply(ctx, config = {}) {
             writeState(st)
           } catch (e) {}
           sendJson(res, 200, { ok: true })
+          return
+        }
+        if (route === '/browserctl/api/server/login') {
+          // 账号密码登录(测试插件):POST {email,password} → 官方 /api/login → 落 secrets。
+          // 「设备授权」流程仍然保留,两条路并存。
+          if (req.method !== 'POST') { sendJson(res, 405, { ok: false, error: 'POST only' }); return }
+          try {
+            let body = {}
+            try { body = JSON.parse((await readRawBody(req)).toString('utf-8') || '{}') } catch { body = {} }
+            const email = String(body.email || '').trim()
+            const password = String(body.password || '')
+            if (!email || !password) { sendJson(res, 400, { ok: false, error: '请输入邮箱和密码' }); return }
+            const r = await fetch(OFFICIAL_API_BASE + '/api/login', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ login: email, password }),
+              signal: AbortSignal.timeout(15000),
+            })
+            const j = await r.json().catch(() => ({}))
+            if (j && j.need2FA) {
+              sendJson(res, 401, { ok: false, need2FA: true, error: '该账号开了两步验证,请改用「设备授权」登录' })
+              return
+            }
+            if (!(j && j.token)) {
+              sendJson(res, r.ok ? 401 : r.status, { ok: false, error: (j && j.error) || '登录失败,请检查邮箱和密码' })
+              return
+            }
+            const sec = readSecrets()
+            sec.server_mode = 'official'
+            sec.server_token = j.token
+            sec.server_uid = j.uid || (j.user && j.user.uid) || sec.server_uid
+            sec.server_email = j.email || email
+            if (j.linkSecret) sec.server_link_secret = j.linkSecret
+            if (j.frpToken) sec.frp_token = j.frpToken
+            // 对齐 applyOfficialSession:写回本账号的端口/面板地址;新账号没有端口就
+            // 清掉旧账号残留,避免旧端口串号(指到别人机器或已释放端口)
+            sec.server_panel_url = j.panelUrl || ''
+            if (Number(j.remotePort) > 0) sec.frp_remote_port = Number(j.remotePort)
+            else delete sec.frp_remote_port
+            writeSecrets(sec)
+            sendJson(res, 200, { ok: true, email: sec.server_email, uid: sec.server_uid })
+          } catch (e) {
+            sendJson(res, 502, { ok: false, error: '登录请求失败:' + String((e && e.message) || e) })
+          }
           return
         }
         if (route === '/browserctl/api/server/me') {
@@ -2152,8 +2043,7 @@ export function apply(ctx, config = {}) {
         }
         if (route === '/browserctl/api/config') {
           if (req.method === 'POST' || req.method === 'PUT') {
-            // 写入连接配置。mode/host/port/remotePort 走 query；frp_token 走 POST body
-            // （kb/23 宿主契约：当前 DSH 把原始 req 交 handler、body 未排空可读；kb/05 旧注释已过时）。
+            // 写入连接配置。注意:DSH webServer 会排空请求体,参数一律从 query 读(历史大坑)。
             const mode = (url.searchParams.get('mode') || 'official').trim()
             try {
               const sec = readSecrets()
@@ -2230,71 +2120,9 @@ export function apply(ctx, config = {}) {
           }
           return
         }
-        if (route === '/browserctl/api/config/test') {
-          // 「测试连接」(自建 frps):用探针 frpc 实际登录一次 frps,给用户一个
-          // 明确的「哪边的问题」结论,而不是让隧道起不来后自己翻日志。
-          // POST body { host, port, token }:token 留空 = 用已保存的(与保存语义一致);
-          // token 走 body 不走 query,避免进闸机 reqlog(kb/24 同款考量)。
-          if ((req.method || 'GET') !== 'POST') { sendJson(res, 405, { ok: false, error: 'POST only' }); return }
-          let body = {}
-          try { body = JSON.parse((await readRawBody(req)).toString('utf-8') || '{}') } catch { body = {} }
-          const sec = readSecrets()
-          const host = String(body.host || '').trim().replace(/^https?:\/\//, '').replace(/\/+$/, '')
-          const port = parseInt(body.port, 10) || 17000
-          const token = String(body.token || '').trim() || String(sec.frp_token || '')
-          if (!host) { sendJson(res, 400, { ok: false, error: '缺少服务器地址(host)' }); return }
-          if (!token) { sendJson(res, 400, { ok: false, error: '缺少 FRP token:请先填写,或先「保存」过一次配置' }); return }
-          if (!frpcBinaryPath()) {
-            sendJson(res, 200, { ok: false, stage: 'tool', host, port, frpcVersion: '', error: '未找到 frpc.exe:请检查插件目录(可能被安全软件隔离,先运行 fix-antivirus.bat)' })
-            return
-          }
-          const ver = frpcVersion()
-          // 第一轮:KCP(UDP),与插件真实隧道完全一致的连接方式
-          const kcp = await probeFrpsLogin({ host, port, token, protocol: 'kcp', timeoutMs: PROBE_KCP_TIMEOUT })
-          const respond = (over) => sendJson(res, 200, { ok: false, host, port, frpcVersion: ver, kcpOk: false, tcpOk: null, ...over })
-          if (kcp.stage === 'ok') {
-            respond({ ok: true, stage: 'ok', transport: 'kcp', kcpOk: true })
-            return
-          }
-          if (kcp.stage === 'tool') {
-            respond({ stage: 'tool', error: 'frpc 无法执行:' + kcp.detail + '(常见原因:安全软件拦截,先运行插件目录里的 fix-antivirus.bat)', detail: kcp.detail, logTail: kcp.logTail })
-            return
-          }
-          if (kcp.stage === 'auth') {
-            // KCP 已通、只是 token 被拒:问题明确在凭据,不需要 TCP 回退
-            respond({ stage: 'auth', transport: 'kcp', kcpOk: true, detail: kcp.detail, logTail: kcp.logTail })
-            return
-          }
-          // KCP 没通 → TCP 再探一次,定位「frps 没开 KCP」还是「整个端口不可达」
-          const tcp = await probeFrpsLogin({ host, port, token, protocol: 'tcp', timeoutMs: PROBE_TCP_TIMEOUT })
-          const bothTail = [kcp.logTail, tcp.logTail].filter(Boolean).join('\n---\n')
-          if (tcp.stage === 'ok') {
-            // TCP 能登录 = 服务器活着、token 对,唯独插件要用的 KCP(UDP)不通
-            respond({ stage: 'kcp-missing', transport: 'tcp', tcpOk: true, detail: kcp.detail || tcp.detail, logTail: bothTail })
-            return
-          }
-          if (tcp.stage === 'auth') {
-            respond({ stage: 'auth', transport: 'tcp', tcpOk: true, detail: tcp.detail, logTail: bothTail, alsoKcpMissing: kcp.stage !== 'dns' && kcp.stage !== 'refused' })
-            return
-          }
-          if (tcp.stage === 'tool') {
-            respond({ stage: 'tool', error: 'frpc 无法执行:' + tcp.detail + '(常见原因:安全软件拦截,先运行插件目录里的 fix-antivirus.bat)', detail: tcp.detail, logTail: tcp.logTail })
-            return
-          }
-          if (kcp.stage === 'protocol' && tcp.stage === 'protocol') {
-            // 两种协议都握手失败:多为 frps 版本过老 / TLS 配置与探针不一致
-            respond({ stage: 'protocol', detail: kcp.detail || tcp.detail, logTail: bothTail })
-            return
-          }
-          const stage = (kcp.stage === 'dns' || tcp.stage === 'dns') ? 'dns'
-            : (kcp.stage === 'refused' || tcp.stage === 'refused') ? 'refused'
-            : 'unreachable'
-          respond({ stage, detail: kcp.detail || tcp.detail, logTail: bothTail })
-          return
-        }
         if (route === '/browserctl/api/update-check') {
-          // 「检查更新」(2026-11-21 重构,2026-11-23 同步至正式版):版本源 = 官网 /api/plugin/version
-          // (每小时自动跟 GitHub Release),官网接口失效兜底 GitHub API;旧静态 version.json 不再读取。
+          // 「检查更新」(2026-11-21 重构):版本源 = 官网 /api/plugin/version(每小时自动跟
+          // GitHub Release),官网接口失效兜底 GitHub API;旧静态 version.json 不再读取。
           // (2026-11-04 修复保留)缺 version 字段时回退到当前版本,绝不会再显示光秃秃的 "v"。
           let rel = null
           if (updateCheckCache && Date.now() - updateCheckCache.at < 60000) {
@@ -2308,19 +2136,31 @@ export function apply(ctx, config = {}) {
             return
           }
           const latest = String(rel.latest || '').trim() || VERSION
-          // 顺带拉 App 发布信息(供面板「新版本提醒」与「关于」展示);失败不阻塞插件版本检查。
+          // 顺带拉 App 发布信息(供面板「新版本提醒」横幅与「关于」展示)。
+          // 与插件清单同源(remote.ymzcc.com/dsh-remote),自托管也走同一前缀;
+          // download_url 若是相对路径,补成完整 URL。
           let app = null
           try {
             const origin = new URL(OFFICIAL_API_BASE).origin
             const appUrl = OFFICIAL_API_BASE + '/api/app/version'
-            const aj = await fetchJson(appUrl, 5000)
-            let du = String(aj.download_url || '')
-            if (du && du.startsWith('/')) du = origin + du
-            app = {
-              enabled: !!aj.enabled,
-              latest: String(aj.latest_version_name || ''),
-              downloadUrl: du,
-              notes: String(aj.release_notes || ''),
+            const ctrl2 = new AbortController()
+            const timer2 = setTimeout(() => ctrl2.abort(), 5000)
+            let r2
+            try {
+              r2 = await fetch(appUrl, { signal: ctrl2.signal, cache: 'no-store' })
+            } finally {
+              clearTimeout(timer2)
+            }
+            if (r2.ok) {
+              const aj = await r2.json()
+              let du = String(aj.download_url || '')
+              if (du && du.startsWith('/')) du = origin + du
+              app = {
+                enabled: !!aj.enabled,
+                latest: String(aj.latest_version_name || ''),
+                downloadUrl: du,
+                notes: String(aj.release_notes || ''),
+              }
             }
           } catch {}
           sendJson(res, 200, {
@@ -2340,13 +2180,13 @@ export function apply(ctx, config = {}) {
         if (route === '/browserctl/api/update-apply') {
           // 一键自更新(POST,CSRF 保护清单内):停隧道 → 下载官网 zip → 大小校验 → Python
           // 安全解包 → 覆盖插件目录(运行态绝不覆盖) → 回 restartRequired。
-          // 仅「本地目录」安装形态;开发工作区副本/包安装/git 仓库目录一律拒绝(理由见各自文案)。
+          // 仅「本地目录」安装形态;/包安装/git 仓库目录一律拒绝(理由见各自文案)。
           if (updateApplying) {
             sendJson(res, 409, { ok: false, error: '已有一次更新在进行中,请稍候' })
             return
           }
           if (/-test$/.test(name)) {
-            sendJson(res, 403, { ok: false, error: '开发工作区副本不支持一键自更新:覆盖工作区会丢开发态,请用发布工具同步正式版' })
+            sendJson(res, 403, { ok: false, error: '不支持一键自更新:覆盖工作区会丢开发态,请用发布工具同步正式版' })
             return
           }
           const updForm = detectInstallForm()
@@ -2469,6 +2309,8 @@ export function apply(ctx, config = {}) {
           }
         }
         // ---- 工单反馈:提交/附件走网页版,本机只保留「导出诊断日志」----
+        // (2026-11-08 清理:旧 /api/ticket/list|create|detail|post|close|unread|upload|diag-logs
+        //  代理路由已删除 —— client 半只调 export-diag,其余是前端不再调用的死路由)
         if (route === '/browserctl/api/ticket/export-diag') {
           // 「自己导出日志」:把本机诊断日志(已脱敏)拼成一份 txt 写到桌面/下载目录,
           // 前端拿到完整路径后引导用户去网页版工单页上传提交。纯本地操作,不需要官方登录。
@@ -2512,6 +2354,143 @@ export function apply(ctx, config = {}) {
             + ' dshPort=' + (Number(st.dsh_port) || 0))
           if (st.last_error) parts.push('最近错误: ' + diagRedact(String(st.last_error)))
           parts.push('')
+          // ---- 2026-11-15 扩展捕捉面：系统信息 / 推送开关 / 闸机事件 / 在线会话 / 黑名单 / 配对设备 ----
+          // 之前只导 4 份日志尾部，「连不上/被踢/2FA 失败/收不到推送」类问题凭日志很难定位；
+          // 闸机把这类关键事实都落了盘（events/sessions/blacklist/devices/notifications），这里一并带上。
+          const fmtSec = (s) => {
+            const n = Number(s)
+            if (!n) return '-'
+            try { return new Date(n * 1000).toLocaleString('sv-SE') } catch { return String(s) }
+          }
+          const readJsonFile = (file) => {
+            try {
+              const v = JSON.parse(readFileSync(file, 'utf8'))
+              return v
+            } catch { return null }
+          }
+          try {
+            parts.push('---- 系统信息 ----')
+            parts.push('主机名: ' + (os.hostname() || '-'))
+            parts.push('系统: ' + os.type() + ' ' + os.release() + ' (' + os.arch() + ')')
+            const cpus = os.cpus() || []
+            parts.push('CPU: ' + ((cpus[0] && cpus[0].model) || '-') + ' ×' + cpus.length)
+            parts.push('内存: 可用 ' + Math.round(os.freemem() / 1048576) + ' MB / 共 ' + Math.round(os.totalmem() / 1048576) + ' MB')
+            parts.push('开机时长: ' + Math.round(os.uptime() / 3600) + ' 小时')
+            parts.push('插件运行时: Node ' + process.version)
+            if (Number(st.watchdog_last_respawn) > 0) parts.push('看门狗最近重拉: ' + fmtSec(st.watchdog_last_respawn))
+            if (Number(st.tunnel_ts) > 0) parts.push('隧道状态更新: ' + fmtSec(st.tunnel_ts))
+            if (st.push_enabled !== undefined) {
+              parts.push('手机推送: 总开关' + (st.push_enabled ? '开' : '关') + '；系统事件推送' + (st.push_system ? '开' : '关'))
+            }
+            if (Number(st.elevated_leftovers) > 0) parts.push('提权残留进程: ' + st.elevated_leftovers + '（下次启动会弹 UAC 清理）')
+            if (Number(st.gate_kick_seq) > 0) {
+              parts.push('闸机踢出序号: ' + st.gate_kick_seq + (st.gate_kicked_devs ? '（' + diagRedact(String(st.gate_kicked_devs)) + '）' : ''))
+            }
+            parts.push('')
+          } catch { /* 系统信息拿不到不阻塞日志导出 */ }
+          // 连通性探测：本地闸机端口(TCP) / 公网入口(HTTP) / 官方服务器(HTTP)。
+          // 判读：入口 401/403 = 在线等鉴权（正常）；502 = 隧道或闸机断；超时 = 边缘/网络问题。
+          try {
+            const fwdPort = Number(st.fwd_port) || 3080
+            const remotePort = Number(st.remote_port) || 0
+            const probeTcp = (host, port, timeoutMs) => new Promise((resolve) => {
+              let done = false
+              const t0 = Date.now()
+              const sock = net.connect({ host, port })
+              const fin = (r) => {
+                if (done) return
+                done = true
+                try { sock.destroy() } catch { /* 已断开 */ }
+                resolve(r + '（' + (Date.now() - t0) + 'ms）')
+              }
+              sock.setTimeout(timeoutMs)
+              sock.on('connect', () => fin('可达'))
+              sock.on('timeout', () => fin('超时（' + timeoutMs + 'ms 无响应）'))
+              sock.on('error', (e) => fin('失败（' + ((e && e.code) || (e && e.message) || 'error') + '）'))
+            })
+            const probeHttp = async (url, timeoutMs) => {
+              const t0 = Date.now()
+              try {
+                const r = await fetch(url, { method: 'GET', redirect: 'manual', signal: AbortSignal.timeout(timeoutMs) })
+                try { if (r.body) await r.body.cancel() } catch { /* 释放连接即可 */ }
+                return 'HTTP ' + r.status + '（' + (Date.now() - t0) + 'ms）'
+              } catch (e) {
+                const code = (e && e.cause && e.cause.code) || (e && e.code) || ''
+                const msg = (e && e.name) === 'TimeoutError' ? ('超时（' + timeoutMs + 'ms 无响应）') : (code || (e && e.message) || '失败')
+                return '失败（' + msg + '，' + (Date.now() - t0) + 'ms）'
+              }
+            }
+            parts.push('---- 连通性探测 ----')
+            const probes = [
+              probeTcp('127.0.0.1', fwdPort, 1500).then((r) => '本机闸机端口 ' + fwdPort + ': ' + r),
+              remotePort > 0
+                ? probeHttp('https://remote.ymzcc.com/p/' + remotePort + '/', 6000).then((r) => '公网入口 /p/' + remotePort + '/: ' + r)
+                : Promise.resolve('公网入口: 未分配公网端口'),
+              probeHttp(OFFICIAL_API_BASE + '/api/health', 6000).then((r) => '官方服务器 /api/health: ' + r),
+            ]
+            const results = await Promise.all(probes)
+            for (const line of results) parts.push(diagRedact(line))
+            parts.push('')
+          } catch { /* 探测失败不阻塞导出 */ }
+          // 闸机事件日志（环形 ≤60 条：验证/踢出/2FA/封禁/配对）
+          try {
+            const evs = readJsonFile(EVENTS_PATH)
+            const rows = Array.isArray(evs) ? evs.slice(-24) : []
+            parts.push('---- 闸机事件（最近 ' + rows.length + (Array.isArray(evs) ? '/' + evs.length : '') + ' 条）----')
+            if (!rows.length) parts.push('（无事件记录）')
+            for (const ev of rows) {
+              if (!ev || typeof ev !== 'object') continue
+              parts.push(fmtSec(ev.t) + '  [' + String(ev.typ || '?').slice(0, 20) + ']  ' + diagRedact(String(ev.msg || '')))
+            }
+            parts.push('')
+          } catch { }
+          // 在线会话 / 最近活跃
+          try {
+            const sess = readJsonFile(SESSIONS_PATH)
+            const rows = Array.isArray(sess) ? sess : []
+            parts.push('---- 会话记录（' + rows.length + ' 条）----')
+            if (!rows.length) parts.push('（当前无在线会话）')
+            for (const s of rows.slice(-10)) {
+              if (!s || typeof s !== 'object') continue
+              parts.push(fmtSec(s.ts || s.since) + '  ' + diagRedact(String(s.name || s.devid || s.dev || '?')).slice(0, 60) + '  IP ' + diagRedact(String(s.ip || '-')))
+            }
+            parts.push('')
+          } catch { }
+          // IP 黑名单
+          try {
+            const bl = readJsonFile(BLACKLIST_PATH)
+            const rows = Array.isArray(bl) ? bl : []
+            parts.push('---- IP 黑名单（' + rows.length + ' 条）----')
+            for (const b of rows.slice(-10)) {
+              if (!b || typeof b !== 'object') continue
+              parts.push(diagRedact(String(b.ip || '?')) + '  ' + diagRedact(String(b.reason || '')).slice(0, 80) + (b.until ? '  至 ' + fmtSec(b.until) : ''))
+            }
+            if (!rows.length) parts.push('（空）')
+            parts.push('')
+          } catch { }
+          // 已配对设备（不含设备密钥）
+          try {
+            const dv = readJsonFile(DEVICES_PATH)
+            const rows = Array.isArray(dv) ? dv.filter(x => x && typeof x === 'object') : []
+            parts.push('---- 配对设备（' + rows.length + ' 台）----')
+            if (!rows.length) parts.push('（无，重新扫码配对后出现）')
+            for (const dvc of rows.slice(-10)) {
+              parts.push((dvc.name || '未命名') + '  ' + String(dvc.kind || '-') + '  连接 ' + (Number(dvc.times) || 0) + ' 次  最近活跃 ' + fmtSec(dvc.last_seen) + (dvc.online ? '  [当前在线]' : ''))
+            }
+            parts.push('')
+          } catch { }
+          // 手机推送通知历史（最近 3 条标题，推送链路排障用）
+          try {
+            const nt = readJsonFile(path.join(CORE_DIR, 'browserctl_notifications.json'))
+            const rows = Array.isArray(nt) ? nt.filter(x => x && typeof x === 'object') : []
+            if (rows.length) {
+              parts.push('---- 推送通知历史（共 ' + rows.length + ' 条，列最近 3 条）----')
+              for (const n of rows.slice(-3)) {
+                parts.push(fmtSec(n.t) + '  [' + String(n.kind || '?') + ']  ' + diagRedact(String(n.title || '')).slice(0, 60))
+              }
+              parts.push('')
+            }
+          } catch { }
           let logCount = 0
           for (const spec of TICKET_DIAG_LOG_SPECS) {
             const r = tailLogText(spec.file, spec.max)
@@ -2599,21 +2578,26 @@ export function apply(ctx, config = {}) {
           // 面板先核对「宽容期事件归零」再点;闸机对错签名恒拒,误开也不放大权限。
           // DSH webServer 排空请求体:enforce 走查询串(?enforce=1/0),与 totp-toggle 同口径;
           // 鉴权/CSRF 已在分发入口集中处理(apiAuthorized + CSRF_PROTECTED),无需重复。
+          // 2026-11-25:透传 ?force=1(就绪度 409 后面板「仍要开启」的显式出口),
+          // 并把闸机状态码原样回传——此前一律改写成 502,前端分不清「未就绪(409
+          // 带 readiness)」和「闸机坏了」,强制通道无从谈起。
           const enforce = (url.searchParams.get('enforce') || '').trim() === '1' ? '1' : '0'
+          const force = (url.searchParams.get('force') || '').trim() === '1' ? '&force=1' : ''
           try {
-            const r = await fetch('http://127.0.0.1:' + gatePort() + '/browserctl-gate/sig-toggle?enforce=' + enforce, {
+            const r = await fetch('http://127.0.0.1:' + gatePort() + '/browserctl-gate/sig-toggle?enforce=' + enforce + force, {
               method: 'POST',
               headers: adminHeaders(),
               signal: AbortSignal.timeout(4000),
             })
             const j = await r.json()
-            sendJson(res, j && j.ok ? 200 : 502, j)
+            sendJson(res, r.status, j)
           } catch (e) {
             sendJson(res, 503, { ok: false, error: '闸机未运行' })
           }
           return
         }
         if (route === '/browserctl/api/sig-health') {
+          // 面板状态灯(防呆):一次拿到「开关是否真生效 / 已授权设备数 / 在线会话数」。
           try {
             const r = await fetch('http://127.0.0.1:' + gatePort() + '/browserctl-gate/healthz', {
               method: 'GET', headers: adminHeaders(), signal: AbortSignal.timeout(4000),
@@ -2626,6 +2610,7 @@ export function apply(ctx, config = {}) {
           return
         }
         if (route === '/browserctl/api/gate-restart') {
+          // 一键重启闸机:响应后闸机自退,看门狗 ~5s 内用新代码拉起。
           try {
             const r = await fetch('http://127.0.0.1:' + gatePort() + '/browserctl-gate/gate-restart', {
               method: 'POST', headers: adminHeaders(), signal: AbortSignal.timeout(4000),
@@ -2638,6 +2623,8 @@ export function apply(ctx, config = {}) {
           return
         }
         if (route === '/browserctl/api/revoke-all') {
+          // 一键清除所有授权:撤销全部会话 + 全部设备签名密钥 + 作废未用配对码。
+          // 危险操作,闸机侧只认本机管理员令牌;面板侧要求二次确认 + 输入框验证。
           try {
             const r = await fetch('http://127.0.0.1:' + gatePort() + '/browserctl-gate/revoke-all', {
               method: 'POST', headers: adminHeaders(), signal: AbortSignal.timeout(15000),
@@ -2687,7 +2674,7 @@ export function apply(ctx, config = {}) {
       const isLocalCall = !req.headers['x-real-ip'] && !req.headers['x-forwarded-for']
       let upstream
       try {
-        upstream = await fetch('http://127.0.0.1:' + gatePort() + url.pathname + url.search, {
+        upstream = await fetch('http://127.0.0.1:' + gatePort() + '' + url.pathname + url.search, {
           method: req.method || 'GET',
           headers: {
             'content-type': req.headers['content-type'] || 'application/json',
@@ -2727,6 +2714,7 @@ export function apply(ctx, config = {}) {
       try {
         const child = spawn(py.cmd, [...py.pre, script], {
           cwd: CORE_DIR,
+          env: { ...process.env, BC_FWD_PORT: String(gatePort()) },
           stdio: 'ignore',
           windowsHide: true, // 防 CMD 窗口弹出(win_push 是控制台程序,不隐藏会闪黑框)
         })
@@ -2748,8 +2736,10 @@ export function apply(ctx, config = {}) {
     try {
       const sec = readSecrets()
       const st = readState()
-      const ready = (sec.server_mode === 'official' && sec.server_token) ||
-        Number(sec.frp_remote_port) > 0 || Number(st.remote_port) > 0
+      // 测试版:不自动建隧道 —— 同一账号同一时刻只能占一个公网端口,
+      // 自动起来会把正式版那条顶掉。要开隧道请手动点「开始控制」。
+      const ready = (sec.server_mode === 'official' && sec.server_token) || Number(sec.frp_remote_port) > 0 || Number(st.remote_port) > 0
+      void sec; void st
       if (!ready) return undefined
       timer = setTimeout(() => {
         if (ensureRunning) return

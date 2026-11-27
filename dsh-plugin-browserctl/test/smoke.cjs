@@ -146,8 +146,8 @@ const t = (k) => (zh[k] !== undefined ? zh[k] : k)
 const Overlay = captured['shell.overlay']
 if (!Overlay) throw new Error('未捕获 shell.overlay 组件')
 
-// ---------- 逐页签渲染 ----------
-const TABS = ['connect', 'devices', 'totp', 'app', 'push', 'ban', 'log']
+// ---------- 逐页签渲染(B2:7 tab→5 tab,HOOK_OVERRIDE={3:tabId} 契约不变) ----------
+const TABS = ['connect', 'devices', 'security', 'push', 'log']
 const props = {
   useStore: (sel) => sel({ open: true }),
   actions: { open() {}, close() {}, toggle() {} },

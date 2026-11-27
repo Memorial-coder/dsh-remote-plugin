@@ -6,12 +6,21 @@
  *   bin shim(shim 内部是 execFileSync + stdio:"inherit"),沙箱内外都能跑。
  * client 半先构建到临时文件,再在 Node 里用 banner/footer 包裹(避免 Windows 下
  * 把多行 banner 塞进 CLI 参数的引号问题)。
+ *
+ * 环境变量 DSH_BUILD_OUTDIR: 覆盖输出目录(默认 lib/)。重定向目标必须是工作区内的
+ * 相对或绝对路径——沙箱禁止写 %TEMP%(esbuild 报 `Failed to write ... Access is denied`)。
  */
 import { spawnSync } from 'node:child_process'
-import { readFileSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 
 const PACKAGE_NAME = 'dsh-plugin-browserctl'
+
+// 输出目录：默认 lib/。DSH_BUILD_OUTDIR 指向临时目录时用于「产物一致性校验」——
+// docs/tools/check_plugin_artifacts.py 把 src 重建到临时目录再与入库产物逐字节比对，
+// 这样门禁既不用改动工作树，也不会把并发会话的未提交改动卷进来。
+const OUT_DIR = process.env.DSH_BUILD_OUTDIR || 'lib'
+mkdirSync(OUT_DIR, { recursive: true })
 
 // 版本号单一来源 = package.json 的 version:host 与 client 两半都靠 esbuild
 // `--define:__DSHREMOTE_VERSION__="x.y.z"` 注入,源码里不再写死版本号
@@ -87,7 +96,8 @@ const HOST_BANNER =
 run([
   'src/index.js',
   '--bundle',
-  '--outfile=lib/index.js',
+  
+  '--outfile=' + join(OUT_DIR, 'index.js'),
   '--platform=node',
   '--format=esm',
   '--target=node22',
@@ -99,7 +109,7 @@ run([
 ])
 
 // ---- client 半 (CJS + __ModuleLoader__ 包裹) ----
-const tmpOut = 'lib/.client.tmp.js'
+const tmpOut = join(OUT_DIR, '.client.tmp.js')
 run([
   'src/client.jsx',
   '--bundle',
@@ -118,6 +128,6 @@ const banner =
   `window.__ModuleLoader__.load({ id: ${JSON.stringify(PACKAGE_NAME)}, factory: (require) => {`
 const footer = 'return module.exports; } });'
 const body = readFileSync(tmpOut, 'utf8')
-writeFileSync('lib/client.js', banner + '\n' + body + '\n' + footer + '\n')
+writeFileSync(join(OUT_DIR, 'client.js'), banner + '\n' + body + '\n' + footer + '\n')
 rmSync(tmpOut)
-console.log('client wrapped -> lib/client.js')
+console.log('client wrapped -> ' + join(OUT_DIR, 'client.js'))

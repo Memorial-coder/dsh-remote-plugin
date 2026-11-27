@@ -30,6 +30,7 @@ import base64
 import hashlib
 import hmac
 import http.client
+import ipaddress
 import json
 import os
 import re
@@ -310,6 +311,187 @@ def _mask_secret(value):
     return "%s…%s(len=%d)" % (s[:4], s[-2:], len(s))
 
 
+# ---- 日志脱敏（红线 #7 的代码级强制）----------------------------------------
+# 此前「密钥不打印」只是文档约定：闸机有 60+ 处 print / 日志写入，没有必经出口。
+# 这里做一个最小但完整的脱敏层，允许所有日志路径统一调用（_redact_text）。
+# 为什么内嵌而不 import docs/tools/log_redact.py：browserctl.py 是**单文件部署单元**
+# （kit / 镜像仓直接分发这一个文件），不能依赖仓库里的其它文件。
+# 设计取自 DSH logger.ts：敏感 key 名单 + 文本正则 + **永不抛**（日志路径抛异常会
+# 直接杀进程，见 kb/06 #39 的 GBK print 事故）。
+REDACT_MASK = "***"
+
+_REDACT_QUERY_KEYS = frozenset({
+    "at", "k", "token", "access_token", "refresh_token", "g", "grant", "cookie",
+    "ws", "password", "passwd", "pwd", "secret", "code", "totp", "otp", "key",
+    "sig", "signature", "apikey", "api_key",
+})
+_REDACT_OBJ_KEYS = frozenset({
+    "totp_secret", "link_secret", "secret", "password", "passwd", "pwd", "token",
+    "access_token", "refresh_token", "cookie", "set-cookie", "authorization",
+    "x-bc-admin", "admin_token", "private_key", "frp_token", "ssh_password",
+    "dev_privkey", "pairing_code", "grant", "ws_ticket",
+})
+_REDACT_QUERY_RE = re.compile(r"([?&])([A-Za-z0-9_\-.]{1,32})=([^&#\s]*)")
+_REDACT_BEARER_RE = re.compile(r"\b(Bearer|Basic)\s+([A-Za-z0-9\-._~+/=]{6,})", re.I)
+_REDACT_COOKIE_RE = re.compile(
+    r"\b(bc-gate|bc-ws|bc-admin|dsh_token)\s*=\s*([^;\s,]{1,4096})", re.I)
+_REDACT_HEADER_RE = re.compile(
+    r"\b(Authorization|Cookie|Set-Cookie|X-BC-Admin)\s*[:=]\s*([^\r\n]{1,4096})", re.I)
+_REDACT_ASSIGN_RE = re.compile(
+    r"\b(totp_secret|link_secret|admin_token|frp_token|ssh_password|private_key)"
+    r"\s*[:=]\s*['\"]?([A-Za-z0-9+/=_\-.]{6,})['\"]?", re.I)
+# 敏感词后跟裸值（无 = 无冒号）：`bad token ABC123... in body`。
+# 只在值 ≥8 位时命中，避免误伤「token 已过期」这类中文日志。
+_REDACT_BARE_RE = re.compile(
+    r"\b(token|cookie|secret|password|passwd|ticket|credential|apikey|api_key)\b"
+    r"\s*[:=]?\s+([A-Za-z0-9+/=_\-.]{8,})", re.I)
+# 不带 ?/& 前缀的内联 key=value（日志常有「pair claim g=xxx from 1.2.3.4」）。
+# 只对**高风险的短键**生效：不把 code/key/sig 放进来，避免误伤 `status code=500`
+# 这类诊断信息；query 形式（?k= / &at=）仍走上面的全量键名表。
+_REDACT_INLINE_KEYS = frozenset({
+    "at", "k", "g", "ws", "token", "access_token", "refresh_token", "cookie",
+    "password", "passwd", "pwd", "secret", "grant", "admin_token", "apikey",
+    "api_key", "pairing_code",
+})
+_REDACT_INLINE_RE = re.compile(r"(?<![\w?&])([A-Za-z_][A-Za-z0-9_]{0,31})=([^\s&,;\"']+)")
+
+
+def _redact_query_sub(m):
+    sep, key, val = m.group(1), m.group(2), m.group(3)
+    if key.lower() in _REDACT_QUERY_KEYS and val:
+        return "%s%s=%s" % (sep, key, REDACT_MASK)
+    return m.group(0)
+
+
+def _redact_inline_sub(m):
+    key, val = m.group(1), m.group(2)
+    if key.lower() in _REDACT_INLINE_KEYS and val:
+        return "%s=%s" % (key, REDACT_MASK)
+    return m.group(0)
+
+
+def _redact_text(text, inner_path=False):
+    """日志文本脱敏。inner_path=True 时额外砍掉整段 `?query`。
+
+    永不抛：任何内部异常都退回原文本——宁可漏脱敏，也不能让日志路径杀进程。
+    """
+    try:
+        s = "" if text is None else str(text)
+    except BaseException:
+        try:
+            return type(text).__name__
+        except BaseException:
+            return "?"
+    try:
+        if not s:
+            return s
+        if inner_path:
+            s = re.sub(r"(\?|&)[^\s\"']{0,4096}", "", s)
+        s = _REDACT_QUERY_RE.sub(_redact_query_sub, s)
+        s = _REDACT_INLINE_RE.sub(_redact_inline_sub, s)
+        s = _REDACT_BEARER_RE.sub(lambda m: "%s %s" % (m.group(1), REDACT_MASK), s)
+        s = _REDACT_COOKIE_RE.sub(lambda m: "%s=%s" % (m.group(1), REDACT_MASK), s)
+        s = _REDACT_HEADER_RE.sub(lambda m: "%s: %s" % (m.group(1), REDACT_MASK), s)
+        s = _REDACT_ASSIGN_RE.sub(lambda m: "%s=%s" % (m.group(1), REDACT_MASK), s)
+        s = _REDACT_BARE_RE.sub(lambda m: "%s %s" % (m.group(1), REDACT_MASK), s)
+        return s
+    except BaseException:
+        return s
+
+
+def _redact_obj(obj, _depth=0):
+    """递归脱敏结构化日志里的敏感键（深度上限 8，防环引用）。永不抛。"""
+    try:
+        if _depth > 8:
+            return obj
+        if isinstance(obj, dict):
+            out = {}
+            for k, v in obj.items():
+                if str(k).strip().lower() in _REDACT_OBJ_KEYS and v not in (None, "", 0, False):
+                    out[k] = REDACT_MASK
+                else:
+                    out[k] = _redact_obj(v, _depth=_depth + 1)
+            return out
+        if isinstance(obj, (list, tuple)):
+            return [_redact_obj(v, _depth=_depth + 1) for v in obj]
+        if isinstance(obj, str):
+            return _redact_text(obj)
+        return obj
+    except BaseException:
+        return obj
+
+
+def _redact_exc(exc, limit=240):
+    """异常的唯一渲染出口：脱敏 + 截断（repr(exc) 可能含请求体/凭据）。"""
+    try:
+        raw = "%s: %s" % (type(exc).__name__, exc)
+    except BaseException:
+        raw = type(exc).__name__
+    return _redact_text(raw)[:max(16, int(limit))]
+
+
+# ---- 状态码语义单点（close 语义）--------------------------------------------
+# 60+ 个调用点直接把 401/403/409/429/502/503 写死，客户端判断"该做什么"只能靠
+# 猜码 + 读文案 → kb/06 反复出现「该重试的不重试、该停的一直狂重连」。
+# 这里给出唯一语义表；新增状态码必须先在此登记（自测会核对调用点用的码都已登记）。
+# 内嵌而非 import docs/tools/gate_semantics.py：browserctl.py 是单文件部署单元。
+GATE_SEMANTICS = {
+    200: {"retry": False, "backoff": "none", "terminal": False, "action": "", "why": "正常"},
+    302: {"retry": False, "backoff": "none", "terminal": False, "action": "", "why": "跳转（配对成功后进面板）"},
+    401: {"retry": False, "backoff": "none", "terminal": True,
+          "action": "重扫配对二维码或输入 2FA 验证码",
+          "why": "未通过验证（无会话/会话失效/2FA 未完成）"},
+    403: {"retry": False, "backoff": "none", "terminal": True,
+          "action": "重新配对（链接可能已失效或已过期）",
+          "why": "已认证但被拒绝（配对链接失效/权限不足/CSRF）"},
+    404: {"retry": False, "backoff": "none", "terminal": True,
+          "action": "检查地址是否正确", "why": "路径不存在"},
+    400: {"retry": False, "backoff": "none", "terminal": True,
+          "action": "按提示修正请求后重试（通常是参数缺失/格式不对）",
+          "why": "请求本身不合法，重试同样的请求不会有不同结果"},
+    413: {"retry": False, "backoff": "none", "terminal": True,
+          "action": "文件太大，换小一点的文件或压缩后再传",
+          "why": "请求体超过上限"},
+    500: {"retry": True, "backoff": "slow", "terminal": False,
+          "action": "稍后重试；反复出现请查看电脑端 browserctl_fwd.log",
+          "why": "闸机内部错误（区别于 502/503 的链路问题）"},
+    409: {"retry": False, "backoff": "none", "terminal": True,
+          "action": "按提示先处理冲突状态（如开启强制签名前先让设备拿到密钥）",
+          "why": "状态冲突：请求合法但当前状态不允许"},
+    429: {"retry": True, "backoff": "slow", "terminal": False,
+          "action": "关闭多余标签页/窗口，或等待限流窗口过去",
+          "why": "本设备额度用尽或触发限流（只影响这一台，不是全局故障）"},
+    502: {"retry": True, "backoff": "slow", "terminal": False,
+          "action": "等待几十秒后刷新；持续出现请在电脑端检查隧道",
+          "why": "上游不可达（隧道断开 / DSH 未启动）"},
+    503: {"retry": True, "backoff": "fast", "terminal": False,
+          "action": "等待几十秒自动恢复后再试",
+          "why": "暂时不可用（全局并发占满 / 隧道正在建立），会自愈"},
+    504: {"retry": True, "backoff": "slow", "terminal": False,
+          "action": "稍后重试", "why": "上游超时"},
+}
+
+
+def gate_semantic(code):
+    """取状态码语义。未登记的码 **不自动重试**（fail-closed）。
+
+    未知码自动重连只会造成重试风暴，把本就紧张的服务端资源继续打满；
+    宁可让用户看到明确提示，也不要让客户端盲目重连。
+    """
+    try:
+        c = int(code)
+    except (TypeError, ValueError):
+        c = 0
+    rec = GATE_SEMANTICS.get(c)
+    if rec is not None:
+        return dict(rec)
+    if 500 <= c < 600:
+        return {"retry": True, "backoff": "slow", "terminal": False,
+                "action": "稍后重试", "why": "服务端错误（未登记的 5xx）"}
+    return {"retry": False, "backoff": "none", "terminal": True,
+            "action": "按错误提示处理", "why": "未登记的状态码（不自动重试）"}
+
+
 _perm_warned = set()
 
 
@@ -534,6 +716,10 @@ def mint_cookie(days=COOKIE_LIFETIME_DAYS):
 # ---------------- 本地闸机(TOTP 2FA + 反代) ----------------
 
 GATE_COOKIE = "bc-gate"
+# A1(2026-11-25)cookie 滑动续期:剩余寿命低于该阈值时,在已验证响应里顺手换发
+# 新 bc-gate(同 dev 重签)。否则 30 天不开面板的设备必然掉进 401 死路——App 端
+# 以前只在打开面板时才持久化新 cookie,15s 一次的 push-poll 从不续期。
+GATE_COOKIE_RENEW_AHEAD_SEC = 15 * 86400
 GATE_PREFIX = "/browserctl-gate/"
 # 同一台机器上可以并存「正式版」和「测试副本」两份插件,它们各自拉起一个闸机进程
 # (端口由 _select_fwd_port 自动避让,互不干扰)。测试副本的插件 host 用的是
@@ -1278,6 +1464,25 @@ TEMP_APP_COOKIE_HOURS = 1
 MAX_RESPONSE_BYTES = 64 * 1024 * 1024   # 非流式响应超过此值自动改流式透传
 MAX_SSE_CONCURRENT = 32
 MAX_WS_CONCURRENT = 16
+# 按设备记账（2026-11-24）：全局计数只能防「总量打满」，防不住「一个坏客户端把
+# 额度占光」——一个失控脚本开满 WS 就能让所有人 503。这里按设备 dev 再计一份，
+# 超限只拒该设备。额度取全局的一半：一个用户常同时开多标签页/手机+电脑，
+# 按「设备」而非「连接」算才有意义，否则多开会把自己挤掉。
+MAX_WS_PER_DEV = max(2, MAX_WS_CONCURRENT // 2)
+MAX_SSE_PER_DEV = max(4, MAX_SSE_CONCURRENT // 2)
+_ws_per_dev = {}    # dev -> 当前 WS 数
+_sse_per_dev = {}   # dev -> 当前 SSE 数
+# 设备签名强制（enforce_dev_sig）的启用门槛：活跃设备里有公钥的比例。
+# 取值理由：留 5% 余量给「刚要升级但还没拿到密钥」的设备，同时不低于 90%
+# ——低于 90% 时打开开关，被锁在门外的人会明显多到需要回滚。
+# 活跃设备数门槛防止「只有 1 台设备、刚好有密钥」就判定全站就绪。
+# ⚠️ 2026-11-25：活跃 0 台 / 活跃已全部绑公钥 = 没有会被拦的对象，直接视为就绪
+# （死锁修正，见 _sig_readiness；门槛只约束「存在未绑密钥活跃设备」的情形）。
+SIG_READY_RATIO = 0.90
+SIG_READY_MIN_ACTIVE = 2
+# 进程启动时刻：给 /livez 算 uptime（存活探针只需「还活着多久」，不读盘不联网）。
+# 放在模块级而不是 gate_serve() 里，是为了让 import 本文件的诊断脚本也能读。
+_GATE_STARTED_AT = time.time()
 MAX_HEADER_BYTES = 64 * 1024
 MAX_JSON_BODY_BYTES = 1024 * 1024          # JSON 端点请求体上限(verify/kick/blacklist 都是小对象,1MB 足够)
 MAX_PROXY_BODY_BYTES = 256 * 1024 * 1024  # 反代透传上限(APK 上传走专用端点独立限 200MB,不占这里)
@@ -1293,6 +1498,13 @@ _gate_cache = {"port": None, "ts": 0.0}
 _used_codes = OrderedDict() # code -> 首次使用时间戳(有序,便于按插入序清理)
 _fail_counts = OrderedDict() # ip -> [fail_count, lock_until_ts] (有界,见 FAIL_TABLE_MAX)
 _grants = OrderedDict()     # grant -> {"exp": ts, "uses": N, "remaining": M}(可配置使用次数,默认一次性)
+# 配对幂等回执（2026-11-24）：grant 消费成功后的「谁领过」短期记录。
+# 单独存 + 单独锁 + 单独限容：_grants 是待消费队列，回执是历史事实，语义不同。
+# TTL 取 10 分钟——覆盖「弱网重试」的典型窗口，又不至于让一次性 grant 长期可重放。
+PAIR_RECEIPT_TTL = 600
+PAIR_RECEIPT_MAX = 256
+_pair_receipts = OrderedDict()   # (grant, devid) -> {"exp": ts, "kind": K, "devid": D, "at": ts}
+_pair_receipt_lock = threading.Lock()
 _sessions = {}              # dev_id -> {"ip":..., "ua":..., "ts":...}
 _kick_seq_seen = 0
 _ws_active = 0              # 当前 WS 中继数(并发上限,防线程池耗尽)
@@ -1536,6 +1748,32 @@ def gate_check_cookie(raw, link_secret):
     return dev
 
 
+def gate_cookie_remaining_sec(raw, link_secret):
+    """返回 bc-gate cookie 剩余有效秒数;签名/格式无效返回 None,已过期返回负数。
+    A1(2026-11-25)滑动续期用:只在 _gate_ok 校验通过后调用,这里仍完整验签——
+    伪造 exp 骗续期过不了 compare_digest。"""
+    if not raw:
+        return None
+    parts = raw.split(".")
+    if len(parts) != 3 or parts[0] != "v1":
+        return None
+    body, sig = parts[1], parts[2]
+    expect = _b64u(hmac.new(link_secret.encode(), body.encode(), hashlib.sha256).digest())
+    if not hmac.compare_digest(sig, expect):
+        return None
+    try:
+        pad = "=" * (-len(body) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(body + pad))
+    except Exception:
+        return None
+    if payload.get("v") != 1:
+        return None
+    exp = payload.get("exp")
+    if not isinstance(exp, (int, float)):
+        return None
+    return (float(exp) - time.time() * 1000) / 1000.0
+
+
 def gate_cookie_dev_only(raw, link_secret):
     """只校验签名与有效期,返回 dev;不要求会话仍在册。
     (用于 2FA 关闭时的设备身份识别:踢掉后仍能认出"这个设备被踢过"。)"""
@@ -1711,9 +1949,22 @@ def pair_create_long():
     return pair_create(ttl=LONG_PAIR_GRANT_TTL, max_live=LONG_PAIR_MAX_LIVE, prefix="L", kind="long_pair")
 
 
-def pair_claim(grant):
+def pair_claim(grant, devid=""):
     """消费 grant:有效则剩余次数 -1,用尽或过期即删除。返回 True 表示有效。
-    注意 _dump_grants 内部会取 _gate_lock,必须在锁外调用(否则死锁)。"""
+
+    注意 _dump_grants 内部会取 _gate_lock,必须在锁外调用(否则死锁)。
+
+    幂等回执（2026-11-24）：这是「先删后验」——手机在弱网/隧道抖动下丢掉 302
+    响应时，重试只会看到「配对链接已失效」，用户得跑到电脑前重新生成二维码
+    （kb/06 记录过这类投诉）。给同一个 devid 在 PAIR_RECEIPT_TTL 内留一条回执，
+    重试可直接拿回同一次授权结果。
+
+    安全边界（想放宽之前先读）：
+      - 回执**只对同一 devid 生效**：别人拿同一个 grant 串重放仍然被拒；
+      - 回执只换回「已授权」这个事实，不延长会话有效期、不提升任何权限；
+      - 回执 PAIR_RECEIPT_TTL 后自动过期，且不会再签发新 grant。
+    devid 为空（老客户端/浏览器无 devid）时不写回执，行为与改前完全一致。
+    """
     now = time.time()
     ok = False
     touched = False
@@ -1727,10 +1978,49 @@ def pair_claim(grant):
                 rec["remaining"] = int(rec.get("remaining", 1)) - 1
                 ok = True
                 if rec["remaining"] <= 0:
-                    _grants.pop(grant, None)      # 次数用尽:删掉
+                    _grants.pop(grant, None)      # 次数用尽:删掉（回执另存）
     if touched:
         _dump_grants()
+    # 成功消费才记回执；失败/过期不记（避免给"猜 grant"的人留下可观测差异）
+    if ok and devid:
+        _pair_receipt_put(grant, devid, (rec or {}).get("kind", "pair"))
     return ok
+
+
+def _pair_receipt_lookup(grant, devid):
+    """查「已消费 grant」的回执：同一 devid 命中则返回记录（幂等），否则 None。
+
+    独立存储（不回写 _grants）：_grants 是待消费队列，回执只是历史事实，
+    混在一起会让「剩余次数」语义变脏。
+    """
+    if not grant or not devid:
+        return None
+    now = time.time()
+    key = (str(grant)[:96], str(devid)[:64])
+    with _pair_receipt_lock:
+        rec = _pair_receipts.get(key)
+        if rec is None:
+            return None
+        if rec.get("exp", 0) <= now:
+            _pair_receipts.pop(key, None)
+            return None
+        return dict(rec)
+
+
+def _pair_receipt_put(grant, devid, kind):
+    """登记一次成功领取的回执（同 key 覆盖，只留最新）。"""
+    if not grant or not devid:
+        return
+    now = time.time()
+    key = (str(grant)[:96], str(devid)[:64])
+    with _pair_receipt_lock:
+        # 顺手清过期，防无界增长
+        for k in [k for k, v in _pair_receipts.items() if v.get("exp", 0) <= now]:
+            _pair_receipts.pop(k, None)
+        _pair_receipts[key] = {"exp": now + PAIR_RECEIPT_TTL, "kind": kind,
+                               "devid": str(devid)[:64], "at": int(now)}
+        while len(_pair_receipts) > PAIR_RECEIPT_MAX:
+            _pair_receipts.popitem(last=False)
 
 
 def pair_status(grant):
@@ -2257,6 +2547,7 @@ EVENT_CATS = {
     "pair": "pair",        # 配对成功(手机长期配对/浏览器临时配对/移出已踢名单)
     "kick": "kick",        # 踢下线(定向/全部/自愈清理)
     "ban": "ban",          # 黑名单(拦截/添加/移除)
+    "ipbl_block": "ban",   # 用户侧 IP 黑名单拦截(F-01 风控中心,闸机兜底层)
     "totp": "totp",        # 2FA 设置变更
     "devbind": "totp",     # 设备密钥绑定(与 2FA 同属「信任变更」)
     "settings": "settings",  # 设置变更(会话有效期/L1 强制开关)
@@ -2408,8 +2699,11 @@ _SIG_NONCE_TTL = 180
 # 服务器沦陷也伪造不出来 → 无签名可达它们不破坏 L1 目标;不豁免则 enforce ON
 # 后新设备永远无法配对(没有密钥=永远过不了验签=死锁,e2e 实测抓到)。
 # 签名 SW 本体在 PWA sw.js(经 /sw.js 服务,浏览器不经过 fetch handler 取它)。
+# /livez 存活探针(kb/30 §30.5):无鉴权秒回 200,泄露面已控制(不回端口/设备数/
+# 会话数/开关)——enforce ON 时若被验签 401 拦截,外部监控(1Panel/uptime)会把
+# 「闸机活着」误报成宕机(kb/31 §31.3 #5),必须豁免。
 _SIG_EXEMPT = ("/dev-bind", "/dev-boot", "/pair/claim", "/bootstrap", "/verify",
-                "/app", "/app/version")
+                "/app", "/app/version", "/livez")
 
 # 内容寻址静态资源(URL 即内容指纹)判定:与 GateHandler._cache_policy 的
 # 可缓存分类同判据(哈希文件名 / plugins?rev= 指纹),供 L1 验签豁免使用。
@@ -2561,6 +2855,79 @@ def _sig_enforced():
     return bool((read_state().get("settings") or {}).get("enforce_dev_sig"))
 
 
+def _sig_readiness():
+    """设备签名强制的「就绪度」报告——**开开关之前必须先看这个**。
+
+    为什么需要它（2026-11-24 实测）：在册 83 台设备里只有 3 台登记过 dev_pubkey
+    （约 4%）。enforce 一开，缺签名的请求一律 401 + 引导页，等于把其余 96% 的设备
+    直接锁在门外；而且不少设备是家人的手机，现场重配成本很高。
+    所以「强制」不是一个可以随手拨的开关，而是「客户端覆盖率达标后才允许拨」。
+
+    这里的判定口径：
+      - total / with_key：设备档案总数 / 有公钥的数量
+      - recent_total / recent_with_key：最近 30 天出现过的设备（"活人"口径）
+        —— 只按全量算会被几年不用的僵尸设备把比例压死，永远开不了开关
+      - ready：**活跃设备里**有公钥的比例 >= READY_MIN（且活跃设备数 >= READY_MIN_COUNT）
+    返回 dict，供面板/CLI/healthz 共同消费，避免各处各算一套。
+
+    ⚠️ 2026-11-25 修正（用户实测「永远打不开」）：护栏的本意是「别把还没有密钥的
+    设备锁在门外」，所以它只该在**存在这样的设备**时拦人。原判据写死
+    `r_total >= 2 且 ratio >= 0.9`，导致两种死锁：
+      ① 活跃设备 0 台（新机、档案被清、或只清过授权）→ 0/0 永远不达标，
+         而报错文案却是「仍有 0 台没有设备密钥」，自相矛盾；
+      ② 只有 1 台活跃设备且它**已经有**公钥（单机用户 = 唯一一台电脑）→
+         1 < 2 恒不达标，等于强制开关对单设备用户永久关闭。
+    现在先判「没有会被拦的对象」= 就绪：活跃设备为 0，或活跃设备全部已绑公钥。
+    只有「存在未绑密钥的活跃设备」时才回到比例+台数门槛。
+    """
+    rows = []
+    try:
+        raw = json.loads(DEVICES_FILE.read_text(encoding="utf-8"))
+        if isinstance(raw, list):
+            rows = [r for r in raw if isinstance(r, dict)]
+    except Exception:  # noqa: BLE001
+        rows = []
+
+    now = time.time()
+    recent_cut = now - 30 * 86400
+    total = len(rows)
+    with_key = sum(1 for r in rows if r.get("dev_pubkey"))
+
+    def _ts(v):
+        try:
+            v = float(v or 0)
+        except Exception:  # noqa: BLE001
+            return 0.0
+        # 兼容秒/毫秒两种历史写法（kb/06：时间单位混用踩过）
+        return v / 1000.0 if v > 1e11 else v
+
+    recent = [r for r in rows if _ts(r.get("last_seen")) >= recent_cut]
+    r_total = len(recent)
+    r_with = sum(1 for r in recent if r.get("dev_pubkey"))
+    ratio = (r_with / r_total) if r_total else 0.0
+
+    # 护栏只该拦「存在会被拦在门外的活跃设备」（2026-11-25 修正，见函数头）：
+    # 活跃 0 台 / 活跃已全部绑公钥 → 没有人会被拦，直接视为就绪；
+    # 否则才回到「比例 ≥ 90% 且活跃 ≥ 2」的原门槛。
+    if r_total == 0 or r_with >= r_total:
+        ready = True
+    else:
+        ready = bool(r_total >= SIG_READY_MIN_ACTIVE and ratio >= SIG_READY_RATIO)
+    remaining = max(0, r_total - r_with)
+    return {
+        "enforced": _sig_enforced(),
+        "total": total,
+        "with_key": with_key,
+        "recent_total": r_total,
+        "recent_with_key": r_with,
+        "recent_ratio": round(ratio, 4),
+        "ready": ready,
+        "remaining": remaining,
+        "min_active": SIG_READY_MIN_ACTIVE,
+        "min_ratio": SIG_READY_RATIO,
+    }
+
+
 # ---- WebSocket 握手票据(2026-11-18 审计 P0) ----
 # 浏览器 WebSocket API 不能加自定义签名头,所以 WS 握手不能走 L1 验签。
 # 但原实现直接豁免后只认 bc-gate cookie,而 link_secret 就在服务器 nginx 里:
@@ -2681,6 +3048,8 @@ def _device_revoke_key(dev):
             _dump_devices()
         except Exception:
             pass
+
+
 
 
 def _sig_nonce_take(dev, nonce, now):
@@ -2995,7 +3364,7 @@ def _push_notify(kind, title, body, cat=NOTIF_CAT_SECURITY, link=""):
 # 同 typ 在窗口内只记首条 + 一条汇总结,日志不再被单一种类冲屏。key=(typ, ip)。
 _EVENT_THROTTLE = {}
 _EVENT_THROTTLE_LOCK = threading.Lock()
-EVENT_THROTTLE = {"devsig": 60.0}
+EVENT_THROTTLE = {"devsig": 60.0, "ipbl_block": 60.0}  # ipbl_block 限频:防被封 IP 重试刷爆事件环(F-01)
 EVENT_THROTTLE_SUMMARY = 10  # 窗口内汇总条数阈值(达到才补一条「另有 N 条」)
 
 
@@ -3035,7 +3404,10 @@ def _append_event(typ, msg, cat=None):
                 rows = []
             if cat is None:
                 cat = EVENT_CATS.get(typ, "other")
-            rows.append({"t": int(now), "typ": typ, "cat": str(cat)[:20], "msg": msg[:200]})
+            # 脱敏出口：事件会进浏览器日志页签、工单诊断包与手机推送，
+            # 各调用点传进来的 msg 常拼了 IP/UA/路径（含 ?at= 管理令牌）。
+            rows.append({"t": int(now), "typ": typ, "cat": str(cat)[:20],
+                         "msg": _redact_text(msg)[:200]})
             del rows[:-_EVENTS_MAX]
             _atomic_json_write(EVENTS_FILE, rows)
     except Exception:
@@ -3193,6 +3565,50 @@ def ip_location(ip):
     with _gate_lock:
         _IP_LOC_CACHE[ip] = {"loc": loc, "ts": time.time()}
     return loc or ""
+
+
+_loc_inflight = set()
+_loc_inflight_lock = threading.Lock()
+
+
+def _spawn_loc_backfill(dev, ip):
+    """A3(2026-11-25):新设备/新 IP 的归属地查询放后台线程,不拖慢首个响应。
+    ip_location 内部是 3s 超时的网络调用,同步执行会阻塞新会话的第一次放行
+    (闸机重启后首开/新设备首开感知可达秒级)。查完回填会话与设备档案;
+    同 (dev, ip) 去重防并发重复查询;失败静默(loc 留待下次 _dump_sessions 补)。
+    锁内绝不调用的原则不变(2026-11-16 修复,py-spy 实测 45 线程堵 _gate_lock)。"""
+    key = (dev, ip)
+    with _loc_inflight_lock:
+        if key in _loc_inflight:
+            return
+        _loc_inflight.add(key)
+
+    def _work():
+        snap = {}
+        try:
+            try:
+                loc = ip_location(ip) or ""
+            except Exception:
+                loc = ""
+            with _gate_lock:
+                info = _sessions.get(dev)
+                if info is not None and loc and not info.get("loc"):
+                    info["loc"] = loc
+                snap = dict(_sessions.get(dev) or {})
+        except BaseException:
+            snap = {}
+        finally:
+            with _loc_inflight_lock:
+                _loc_inflight.discard(key)
+        if snap:
+            try:
+                _device_ensure(_device_key({"dev": dev, **snap}),
+                               {"dev": dev, **snap})
+                _dump_sessions()
+            except Exception:
+                pass
+
+    threading.Thread(target=_work, daemon=True, name="bc-loc-backfill").start()
 
 
 def _dump_sessions():
@@ -3451,6 +3867,194 @@ def _blacklist_check(ip, dev):
         if r.get("dev") == dev:
             return r.get("reason") or "被管理员拉黑"
     return None
+
+
+# ---- 用户侧 IP 黑名单(F-01「风控中心」闸机兜底层,2026-11-25)----
+# 契约单一来源: docs/notes/issue-report-20261125/f01-design.md(§2.4 拉取端点、§3.3 失败策略、
+# §6 闸机兜底实施要点)。职责:
+#   1. 守护拉取:fwd housekeeping 每 IPBL_PULL_INTERVAL(~5min)POST /api/gate/ipbl 拉
+#      本机 uid 对应 owner 的黑名单(port+linkSecret 鉴权,与 heartbeat 同款凭据体系,
+#      凭据走 body 不进 URI,规避 kb/09 F-09);
+#   2. 本地缓存:browserctl_ipbl_cache.json(运行态 json,别删别提交,模式同 blacklist,
+#      原子写 tmp+rename);
+#   3. 请求入口执行:GateHandler._dispatch 最前端(_client_ip 之后、2FA/Cookie 校验之前),
+#      命中即 403,覆盖该 uid 链接的任何路径/方法(面板页/静态资源/api/WS/gate 端点)。
+# 失败策略(设计 §3.3):拉取失败沿用上次列表(fail-closed 于数据、fail-open 于连通性),
+# 只有成功拉到空列表才清空;缓存文件损坏当作空黑名单(容器/边缘层仍在兜)。
+# 与全局黑名单(_blacklist_check,管理员用)互不干扰、判断独立;IP 口径沿用 _client_ip()
+# 只信最后一跳,本模块不做任何新的 IP 解析。
+# 生效需用户重启闸机(红线 #4,沙箱不 start/stop)。
+
+IPBL_PULL_INTERVAL = 300.0                       # 拉取节奏(设计定的 ~5min;拉取线程绝不阻塞主请求路径)
+IPBL_CACHE_FILE = HERE / "browserctl_ipbl_cache.json"
+IPBL_PULL_TIMEOUT = 8.0
+
+_ipbl_lock = threading.Lock()
+_ipbl_nets = []      # [(ip_network 对象, 原始条目 cidr 文案)],解析失败的条目跳过(不误伤)
+_ipbl_uid = ""       # 最近一次成功拉取到的 owner uid(缓存透传)
+_ipbl_pull_next = 0.0  # 下次拉取墙钟(housekeeping 节流用)
+
+_IPBL_DENY_HTML = (
+    "<!doctype html><html lang='zh-CN'><head><meta charset='utf-8'>"
+    "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+    "<title>403</title>"
+    "<style>html,body{background:#000;height:100%;margin:0;display:flex;"
+    "align-items:center;justify-content:center}"
+    "p{color:#94a3b8;font-family:-apple-system,'Segoe UI','Microsoft YaHei',sans-serif;"
+    "font-size:14px}</style></head>"
+    "<body><p>访问被拒绝:你的 IP 已被设备主人封禁。</p></body></html>"
+)
+
+
+def _ipbl_norm_addr(value):
+    """IP 字符串 → 地址对象。v4-mapped v6(::ffff:a.b.c.d)折算成 IPv4,
+    与后端 src/ipbl.js parseIp 口径一致(封 1.2.3.4 要能挡住 v4-mapped 形态)。
+    解析失败返回 None。"""
+    try:
+        addr = ipaddress.ip_address(str(value or "").strip())
+    except Exception:
+        return None
+    mapped = getattr(addr, "ipv4_mapped", None)
+    if mapped is not None:
+        return mapped
+    return addr
+
+
+def _ipbl_parse_net(cidr):
+    """黑名单条目 cidr → ip_network(strict=False,主机位不清零也接受)。
+    v4-mapped 网段折算成 IPv4 网段(与 ipbl.js parseCidr 同语义)。
+    协议族语义一致:v4 条目只匹配 v4、v6 条目只匹配 v6(折算后,不同族不相交)。
+    解析失败返回 None(脏数据跳过,不误伤)。"""
+    s = str(cidr or "").strip()
+    if not s or len(s) > 64:
+        return None
+    try:
+        net = ipaddress.ip_network(s, strict=False)
+    except Exception:
+        return None
+    if net.version == 6:
+        mapped = getattr(net.network_address, "ipv4_mapped", None)
+        if mapped is not None:
+            prefix = net.prefixlen - 96
+            if prefix < 0:
+                return None
+            try:
+                net = ipaddress.ip_network((mapped, prefix), strict=False)
+            except Exception:
+                return None
+    return net
+
+
+def _ipbl_rebuild(items):
+    """items([{id,cidr,note,ts}]) → 解析后的网络列表(锁内整体替换,请求路径无等待)。"""
+    nets = []
+    for e in items or []:
+        if not isinstance(e, dict):
+            continue
+        net = _ipbl_parse_net(e.get("cidr"))
+        if net is not None:
+            nets.append((net, str(e.get("cidr"))))
+    global _ipbl_nets
+    with _ipbl_lock:
+        _ipbl_nets = nets
+
+
+def _ipbl_hit(ip):
+    """IP 是否命中用户黑名单:命中返回条目 cidr 文案,否则 None(无名单/解析失败)。
+    请求主路径上的执行点,任何异常一律兜住不得外抛(kb/06:请求路径兜 BaseException,
+    黑名单执行失败绝不能让闸机 500)。"""
+    try:
+        with _ipbl_lock:
+            nets = _ipbl_nets
+        if not nets:
+            return None
+        addr = _ipbl_norm_addr(ip)
+        if addr is None:
+            return None
+        for net, cidr in nets:
+            if addr.version == net.version and addr in net:
+                return cidr
+    except BaseException:
+        return None
+    return None
+
+
+def _ipbl_load_cache():
+    """闸机启动时恢复上次拉取的黑名单缓存;文件损坏/缺失当作空黑名单(fail-open,
+    设计 §6.5:边缘/容器层仍在兜,闸机侧绝不因本地坏档锁死)。"""
+    global _ipbl_uid
+    try:
+        data = json.loads(IPBL_CACHE_FILE.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return
+        _ipbl_uid = str(data.get("uid") or "")
+        _ipbl_rebuild(data.get("items"))
+        with _ipbl_lock:
+            n = len(_ipbl_nets)
+        if n:
+            print("已恢复用户 IP 黑名单 %d 条(updatedAt=%s)" % (n, data.get("updatedAt") or "?"), flush=True)
+    except Exception:
+        pass
+
+
+def _ipbl_save_cache(uid, updated_at, items):
+    """缓存原子写(tmp+rename,kb/04);失败静默——内存态仍生效,下次拉取再试。"""
+    try:
+        payload = json.dumps({
+            "uid": str(uid or ""),
+            "updatedAt": int(updated_at or 0),
+            "fetchedAt": int(time.time() * 1000),
+            "items": list(items or []),
+        }, ensure_ascii=False)
+        _write_json_file_atomic(IPBL_CACHE_FILE, payload)
+    except Exception:
+        pass
+
+
+def _ipbl_pull_tick():
+    """fwd housekeeping 每 2s 调一次,内部按 IPBL_PULL_INTERVAL 节流(~5min 一拉)。
+    成功才换列表:updatedAt+items 与缓存一致就不动;失败/离线沿用上次列表
+    (连续失败不自动清空,绝不「拉取失败 = 无黑名单」,设计 §3.3)。
+    未配对/自建模式没有服务器签发的端口+密钥 → 跳过(与 heartbeat 同口径)。
+    凭据不打印、不进 URI。"""
+    global _ipbl_pull_next, _ipbl_uid
+    try:
+        st = read_state()
+        port = int(st.get("remote_port") or 0)
+        secret = st.get("link_secret")
+        if port <= 0 or not secret:
+            return
+        now = time.time()
+        if now < _ipbl_pull_next:
+            return
+        _ipbl_pull_next = now + IPBL_PULL_INTERVAL
+        req = urllib.request.Request(
+            "https://%s/dsh-remote/api/gate/ipbl" % public_host(),
+            data=json.dumps({"port": port, "secret": secret}).encode("utf-8"),
+            headers={"Content-Type": "application/json", "User-Agent": "browserctl-heartbeat/1"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=IPBL_PULL_TIMEOUT) as r:
+            data = json.loads(r.read().decode("utf-8") or "{}")
+        if not isinstance(data, dict) or not data.get("ok"):
+            return
+        items = data.get("items")
+        if not isinstance(items, list):
+            items = []
+        uid = str(data.get("uid") or "")
+        updated_at = data.get("updatedAt") or 0
+        try:
+            cached = json.loads(IPBL_CACHE_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            cached = {}
+        if (isinstance(cached, dict) and cached.get("uid") == uid
+                and cached.get("updatedAt") == updated_at and cached.get("items") == items):
+            return  # 名单没变:不重建、不重写文件(拉取周期内的常态)
+        _ipbl_rebuild(items)
+        _ipbl_uid = uid
+        _ipbl_save_cache(uid, updated_at, items)
+    except Exception:
+        pass  # 离线/官网抖动:沿用上次列表,绝不清空(fail-closed 于数据)
 
 
 def _process_kicks():
@@ -3870,8 +4474,8 @@ body{font-family:var(--font);background:var(--soft);color:var(--ink);
 display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px;
 -webkit-font-smoothing:antialiased}
 
-/* ===== 2FA 卡片(同官网登录卡:细边 + 圆角,无光晕)===== */
-.card{width:min(400px,100%);padding:34px 30px;border:1px solid var(--line-2);border-radius:18px;
+/* ===== 2FA 卡片(同官网登录卡:细边 + 圆角,无光晕;文字整体居中,与码格/按钮对齐)===== */
+.card{width:min(400px,100%);padding:34px 30px;text-align:center;border:1px solid var(--line-2);border-radius:18px;
 background:var(--bg);box-shadow:0 24px 80px rgba(0,0,0,.35)}
 h1{font-size:20px;font-weight:700;letter-spacing:-.02em;margin:0 0 4px}
 .sub{color:var(--ink-3);font-size:13px;line-height:1.6;margin:0 0 22px}
@@ -4377,12 +4981,63 @@ class GateHandler(BaseHTTPRequestHandler):
         except Exception:
             pass
 
+    def _stage_gate_cookie_renewal(self, dev):
+        """A1(2026-11-25)滑动续期:已验证请求的 bc-gate 剩余寿命不足时,
+        顺手在同响应里换发新 cookie(同 dev 重签,ip/ua 取当前请求)。
+        覆盖点=_gate_ok(面板全部路径 + 需会话的 gate 端点)与 heartbeat;
+        App 端 PushService 负责把 Set-Cookie 持久化,30 天不开面板的设备
+        不再掉进「过期→401→heal 失败→反复重载」死路(kb/06 #41 放大器)。"""
+        if not dev:
+            return
+        try:
+            st = gate_state()
+            secret = st.get("link_secret")
+            if not secret:
+                return
+            rem = gate_cookie_remaining_sec(self._gate_cookie_raw(), secret)
+            if rem is None or rem >= GATE_COOKIE_RENEW_AHEAD_SEC:
+                return
+            cookie = gate_mint_cookie(secret, dev, self._client_ip(),
+                                      (self.headers.get("User-Agent") or "")[:120])
+            self._pending_set_cookies = getattr(self, "_pending_set_cookies", [])
+            self._pending_set_cookies.append(
+                "%s=%s; Max-Age=%d; Path=/; HttpOnly; SameSite=Lax%s"
+                % (GATE_COOKIE, cookie, _gate_max_age(), self._cookie_secure()))
+        except Exception:
+            pass
+
     def send_response(self, code, message=None):
         """去掉默认 Server 指纹头(只发状态行 + Date)。"""
         self._resp_status = int(code)  # 逐请求日志记录状态码
         self.log_request(code)
         self.send_response_only(code, message)
         self.send_header("Date", self.date_time_string())
+
+    @staticmethod
+    def _semantic_headers(code):
+        """把状态码语义表翻成响应头（A4 close 语义单点）。
+
+        客户端据此判断「该不该自动重试」，不必各自硬编码状态码含义。
+        头名一律 ASCII，动作文案 URL 编码（可能含中文）。
+        任何异常都返回空列表——语义注解绝不允许影响响应本体。
+        """
+        try:
+            sem = gate_semantic(code)
+            out = [
+                ("X-Gate-Retry", "1" if sem.get("retry") else "0"),
+                ("X-Gate-Terminal", "1" if sem.get("terminal") else "0"),
+                ("X-Gate-Backoff", str(sem.get("backoff") or "none")),
+            ]
+            act = sem.get("action") or ""
+            if act:
+                try:
+                    from urllib.parse import quote as _q
+                    out.append(("X-Gate-Action", _q(act, safe="")))
+                except Exception:  # noqa: BLE001
+                    pass
+            return out
+        except BaseException:  # noqa: BLE001
+            return []
 
     def _send(self, code, body, content_type="text/html; charset=utf-8", headers=None):
         data = body.encode() if isinstance(body, str) else body
@@ -4391,6 +5046,10 @@ class GateHandler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(data)))
+        # 语义注解（A4）：所有响应都经过 _send，这里是注入「该不该重试」的唯一
+        # 正确位置——不改任何调用点、不改 body 形态，旧客户端忽略这些头即可。
+        for _k, _v in self._semantic_headers(code):
+            self.send_header(_k, _v)
         # PWA 静态资源等需要自定义缓存时,headers 显式传 Cache-Control 覆盖默认 no-store
         if not any((k or "").lower() == "cache-control" for k, _ in (headers or [])):
             self.send_header("Cache-Control", "no-store")
@@ -4417,6 +5076,28 @@ class GateHandler(BaseHTTPRequestHandler):
         ua = self.headers.get("User-Agent") or ""
         return "DshRemote/" in ua
 
+    def _pair_devid(self):
+        """取「设备标识」用于配对幂等回执。**只认显式头，绝不从 UA 猜。**
+
+        来源：`X-Dsh-Devid`（App 原生 claim 请求带上 PairingStore 的设备号）。
+
+        为什么不再从 UA 兜底（2026-11-24 实测纠正）：
+        真实 App 的 UA 段是 `DshRemote/<版本号>`（如 `DshRemote/1.0.87`），
+        不是设备号。曾经尝试「取 UA 段、纯版本号就丢弃」，结果：
+          - 真实流量永远取不到 devid → 幂等回执对生产完全不生效（功能形同虚设）；
+          - 若放宽成「版本号也接受」则更糟：**同版本的两台手机会被当成同一台**，
+            异设备可重放彼此的授权 —— 这是安全漏洞，不是易用性取舍。
+        因此这里 fail-closed：取不到就返回空串，回执不启用，
+        一次性 grant 的原有语义（用一次即失效）完全保留。
+
+        也不用 IP：同出口 IP 会让 A 的失败重试命中 B 的授权。
+        """
+        try:
+            h = (self.headers.get("X-Dsh-Devid") or "").strip()
+            return h[:64] if h else ""
+        except Exception:  # noqa: BLE001
+            return ""
+
     def _deny_unauthorized(self):
         """未通过验证时的统一拒绝响应。
         「清除 bc-gate cookie」只对确实携带了无效 cookie 的请求执行(旧凭据卡死
@@ -4429,6 +5110,19 @@ class GateHandler(BaseHTTPRequestHandler):
             headers = [("Set-Cookie",
                         "%s=deleted; Max-Age=0; Path=/" % GATE_COOKIE)]
         self._send(403 if app_ua else 200, DENIED_HTML, headers=headers)
+
+    def _ipbl_deny(self, cidr):
+        """F-01:被封 IP 访问本 uid 链接的统一拒绝响应。
+        恒 403(浏览器 HTML 拒绝页 / API JSON,与官网容器层语义一致;App 拒绝页必须
+        403,kb/06 第 5 条,不得 200 文案页/302);不发任何 Set-Cookie(不碰既有
+        bc-gate 会话链路,解封后原会话立即恢复)。"""
+        accept = self.headers.get("Accept") or ""
+        if "text/html" in accept:
+            body, ctype = _IPBL_DENY_HTML, "text/html; charset=utf-8"
+        else:
+            body = json.dumps({"ok": False, "error": "你的 IP 已被设备主人封禁"}, ensure_ascii=False)
+            ctype = "application/json; charset=utf-8"
+        self._send(403, body, ctype)
 
     def _gate_cookie_values(self):
         """Cookie 头里全部 bc-gate 值(按出现顺序;同名多值是 WebView 竞态残留)。"""
@@ -4569,16 +5263,10 @@ class GateHandler(BaseHTTPRequestHandler):
             with _devices_lock:
                 _d = _devices.get(dev_key)
                 prev_ip = (_d or {}).get("ip", "")
-        # 锁外补归属地(网络调用);查不到就留空,下次 _dump_sessions 会再补。
+        # A3(2026-11-25):归属地查询改后台线程——同步执行最长 3s,
+        # 会拖住新会话(闸机重启后首开/新设备首开)的第一次响应。
         if not _loc:
-            try:
-                _loc = ip_location(ip)
-                if _loc:
-                    with _gate_lock:
-                        if dev in _sessions:
-                            _sessions[dev]["loc"] = _loc
-            except Exception:
-                pass
+            _spawn_loc_backfill(dev, ip)
         with _gate_lock:
             _sess_snapshot = dict(_sessions.get(dev) or {})
         _device_ensure(dev_key, _sess_snapshot)
@@ -4645,6 +5333,8 @@ class GateHandler(BaseHTTPRequestHandler):
                 return False
             if not dev and not self._has_dsh_cookie():
                 return False
+            if dev:
+                self._stage_gate_cookie_renewal(dev)
             return True
         global _kick_seq_seen
         seq = st.get("gate_kick_seq", 0)
@@ -4666,6 +5356,7 @@ class GateHandler(BaseHTTPRequestHandler):
         if ban:
             _append_event("ban", "黑名单阻止 IP=%s dev=%s reason=%s" % (ip, dev, ban))
             return False
+        self._stage_gate_cookie_renewal(dev)
         return True
 
     # ---- WebSocket 原始中继 ----
@@ -4678,18 +5369,38 @@ class GateHandler(BaseHTTPRequestHandler):
         self._resp_status = 0
         self._resp_bytes = 0
         _t0 = time.time()
+        # 按设备记账：先取设备身份（cookie 解析，纯内存），再在锁内同时判定
+        # 全局与单设备额度。无 dev（未登录/匿名）只受全局约束——否则所有匿名流
+        # 会挤在同一个空 key 上互相踢。
+        try:
+            _dev = self._gate_active_dev() or ""
+        except BaseException:
+            _dev = ""
         with _gate_lock:
             if _ws_active >= MAX_WS_CONCURRENT:
                 # 可行动文案:占用是临时的(断线连接的泵线程最长 75s 超时回收),
                 # 稍后重试即可;不是配置错误,也无需改任何设置。
                 self._send(503, "WS 连接暂时占满,几十秒内自动释放,请稍后重试", "text/plain")
                 return
+            if _dev and _ws_per_dev.get(_dev, 0) >= MAX_WS_PER_DEV:
+                # 只拒这一台:提示明确到「本设备」,避免用户误以为是全局故障。
+                self._send(429, "本设备的 WS 连接数已达上限(%d),请关闭多余标签页/窗口后重试"
+                           % MAX_WS_PER_DEV, "text/plain")
+                return
             _ws_active += 1
+            if _dev:
+                _ws_per_dev[_dev] = _ws_per_dev.get(_dev, 0) + 1
         try:
             self._relay_ws_inner()
         finally:
             with _gate_lock:
                 _ws_active -= 1
+                if _dev:
+                    _n = _ws_per_dev.get(_dev, 0) - 1
+                    if _n > 0:
+                        _ws_per_dev[_dev] = _n
+                    else:
+                        _ws_per_dev.pop(_dev, None)  # 归零即删，防字典无界增长
             try:
                 _reqlog_record(self, _t0, is_ws=True)
             except Exception:
@@ -5046,6 +5757,14 @@ class GateHandler(BaseHTTPRequestHandler):
             ua = ""
         return "app" if "dshremote/" in ua else "web"
 
+    def _flush_pending_cookies(self):
+        """把本请求积攒的 Set-Cookie（bc-gate 滑动续期 / bc-ws 票据）挂到正在拼的响应上。
+        2026-11-25:304 早退与静态资源缓存命中两条快速出口不经过 _send，会漏发续期头——
+        而「第二次进来秒开」恰好走 304，导致 A1 只在偶尔的 200 上生效。所有自拼响应的
+        出口统一在 end_headers 前调用本方法。"""
+        for _c in getattr(self, "_pending_set_cookies", []):
+            self.send_header("Set-Cookie", _c)
+
     def _html_304_shortcircuit(self, extra_set_cookie):
         """面板根 / 的 If-None-Match 早退 304:命中直接应答并返回 True(不再碰 DSH)。"""
         if self.command != "GET" or extra_set_cookie:
@@ -5067,6 +5786,7 @@ class GateHandler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-cache")
         self.send_header("ETag", ent["etag"])
         self.send_header("Vary", "Accept-Encoding, User-Agent")
+        self._flush_pending_cookies()   # A1:304 快开同样续期,别让「秒开」把续期饿死
         self.end_headers()
         return True
 
@@ -5142,12 +5862,14 @@ class GateHandler(BaseHTTPRequestHandler):
                                      dict((k.lower(), v) for k, v in hit["headers"]).get("cache-control", "public"))
                     self.send_header("ETag", etag)
                     self.send_header("Vary", "Accept-Encoding")
+                    self._flush_pending_cookies()   # A1:缓存命中也续期
                     self.end_headers()
                     return
                 self.send_response(200)
                 self.send_header("Content-Length", str(len(hit["data"])))
                 for k, v in hit["headers"]:
                     self.send_header(k, v)
+                self._flush_pending_cookies()   # A1:缓存 200 也续期
                 self.end_headers()
                 self._resp_bytes = len(hit["data"])  # 逐请求日志字节数
                 try:
@@ -5278,13 +6000,25 @@ class GateHandler(BaseHTTPRequestHandler):
         rh = dict((k.lower(), v) for k, v in resp_headers)
         sse_mode = ("event-stream" in rh.get("content-type", "") and not rh.get("content-encoding"))
         global _sse_active
+        _sse_dev = ""
         if sse_mode:
+            try:
+                _sse_dev = self._gate_active_dev() or ""
+            except BaseException:
+                _sse_dev = ""
             with _gate_lock:
                 if _sse_active >= MAX_SSE_CONCURRENT:
                     _upstream_release(port, conn, reusable=False)  # 响应未消费,不可回池
                     self._send(503, "SSE 连接暂时占满,几十秒内自动释放,请稍后重试", "text/plain")
                     return
+                if _sse_dev and _sse_per_dev.get(_sse_dev, 0) >= MAX_SSE_PER_DEV:
+                    _upstream_release(port, conn, reusable=False)
+                    self._send(429, "本设备的实时连接数已达上限(%d),请关闭多余标签页/窗口后重试"
+                               % MAX_SSE_PER_DEV, "text/plain")
+                    return
                 _sse_active += 1
+                if _sse_dev:
+                    _sse_per_dev[_sse_dev] = _sse_per_dev.get(_sse_dev, 0) + 1
         # 非流式:先读全量,再按准确 Content-Length 发头(顺序不能反,否则帧错位)
         data = None
         cache_ctl = None
@@ -5346,6 +6080,7 @@ class GateHandler(BaseHTTPRequestHandler):
                     if panel_root_html or is_html_doc:
                         # App(无工具条)与浏览器(有工具条)注入的 HTML 不同,缓存条目按 UA 分开
                         self.send_header("Vary", "Accept-Encoding, User-Agent")
+                    self._flush_pending_cookies()   # A1:完整链路 304 也续期
                     self.end_headers()
                     _upstream_release(port, conn, reusable=True)
                     return
@@ -5437,6 +6172,12 @@ class GateHandler(BaseHTTPRequestHandler):
             if sse_mode:
                 with _gate_lock:
                     _sse_active = max(0, _sse_active - 1)
+                    if _sse_dev:
+                        _n = _sse_per_dev.get(_sse_dev, 0) - 1
+                        if _n > 0:
+                            _sse_per_dev[_sse_dev] = _n
+                        else:
+                            _sse_per_dev.pop(_sse_dev, None)  # 归零即删，防字典无界增长
             # 上游连接:响应体已完整消费才能回池;客户端中途断开(未排干)一律关闭
             _upstream_release(port, conn, reusable=not streaming or stream_drained)
 
@@ -5670,6 +6411,7 @@ color:#fff;text-decoration:none;font-size:14px}
             return
         # 解析 ?g=
         from urllib.parse import urlsplit, parse_qs
+        query = {}
         try:
             query = parse_qs(urlsplit(self.path).query)
             grant = (query.get("g") or [""])[0]
@@ -5682,8 +6424,21 @@ color:#fff;text-decoration:none;font-size:14px}
             _rec = _grants.get(grant)
             if _rec is not None:
                 kind = _rec.get("kind", "pair")
+        # 幂等重试（2026-11-24）：手机弱网丢响应后会重试同一个 ?g=。
+        # 命中回执 = 同一 devid 上一次真的领取成功过，直接放行，
+        # 不再报「链接已失效」把用户赶去重扫二维码（kb/06 反复出现的投诉）。
+        _devid_q = (query.get("devid") or [""])[0] or self._pair_devid()
+        _receipt = _pair_receipt_lookup(grant, _devid_q)
+        if _receipt is not None:
+            kind = _receipt.get("kind", kind)
+            _append_event("pair", "配对幂等重试命中(devid=%s…)" % str(_devid_q)[:8])
+            if kind == "long_pair":
+                self._gate_long_pair_claim()
+                return
+            self._issue_cookie_and_redirect(session_only=self._is_app_ua())
+            return
         # 先删后验:pair_claim 内部无论结果都把 grant 从表里删掉,重放无结果
-        if not grant or not pair_claim(grant):
+        if not grant or not pair_claim(grant, devid=_devid_q):
             self._send(403, self.PAIR_PAGE % ("配对链接已失效",
                                               "链接是一次性的,有效期内只能使用一次。请在电脑端重新生成配对二维码。", ""),
                        )
@@ -5777,7 +6532,8 @@ color:#fff;text-decoration:none;font-size:14px}
                              cat=NOTIF_CAT_SECURITY,
                              seen_key="pair|%s|%s" % (dev, ip))
         except BaseException as e:
-            print("[gate] 长期配对登记步骤异常(不影响下发 Cookie): %r" % (e,), flush=True)
+            print("[gate] 长期配对登记步骤异常(不影响下发 Cookie): %s"
+                  % _redact_exc(e), flush=True)
             traceback.print_exc()
         self._send(302, "redirecting…", "text/html; charset=utf-8", headers=headers)
 
@@ -5902,6 +6658,8 @@ color:#fff;text-decoration:none;font-size:14px}
                 # 否则 App 心跳会按 dev 另建一条档案,同一台手机变成两台设备。
                 _device_ensure(_device_key({"dev": dev, **_sessions.get(dev, {})}),
                                {"dev": dev, **_sessions.get(dev, {})})
+                # A1(2026-11-25):心跳是浏览器侧最规律的已验证请求,顺带续期 cookie
+                self._stage_gate_cookie_renewal(dev)
                 self._send_json(200, {"ok": True})
             else:
                 self._send_json(200, {"ok": False, "reason": "no_session"})
@@ -5949,6 +6707,11 @@ color:#fff;text-decoration:none;font-size:14px}
             return
         if path.endswith("/healthz"):
             self._gate_healthz()
+            return
+        # /livez 必须在 /healthz 之前判定（前者是后缀，追加判断开销可忽略），
+        # 且**不经过 _gate_ok() / _is_admin_call()**——见 _gate_livez 的说明。
+        if path.endswith("/livez"):
+            self._gate_livez()
             return
         if path.endswith("/push-poll"):
             self._gate_push_poll()
@@ -6442,10 +7205,28 @@ color:#fff;text-decoration:none;font-size:14px}
             except Exception:
                 q = {}
             want = (q.get("enforce") or [""])[0].strip() in ("1", "true", "on")
+            # 启用护栏：只在「活跃设备覆盖率达标」时允许打开。
+            # 关掉永远不受限（回滚必须随时可用）。--force 语义走 ?force=1，
+            # 留给「我知道有一台还没升级，先开」的明确决策。
+            if want:
+                _force = (q.get("force") or [""])[0].strip() in ("1", "true", "on")
+                _rd = _sig_readiness()
+                if not _rd["ready"] and not _force:
+                    self._send_json(409, {
+                        "ok": False,
+                        "error": "活跃设备里仍有 %d 台没有设备密钥（%d/%d，需 ≥%d%%）；"
+                                 "此时开启强制会让它们全部被拦在引导页。"
+                                 "确认要开请带 ?force=1。"
+                                 % (_rd["remaining"], _rd["recent_with_key"],
+                                    _rd["recent_total"], int(SIG_READY_RATIO * 100)),
+                        "readiness": _rd,
+                    })
+                    return
             update_state(lambda s: {**s, "settings": {**(s.get("settings") or {}),
                                                       "enforce_dev_sig": want}})
             _append_event("settings", "L1 设备签名强制已%s" % ("开启" if want else "关闭"))
-            self._send_json(200, {"ok": True, "enforce": want})
+            self._send_json(200, {"ok": True, "enforce": want,
+                                  "readiness": _sig_readiness()})
             return
         if not (self._gate_ok() or self._is_admin_call()):
             self._send_json(401, {"ok": False, "error": "未通过验证"})
@@ -6941,6 +7722,33 @@ color:#fff;text-decoration:none;font-size:14px}
             "enforce": bool((st.get("settings") or {}).get("enforce_dev_sig")),
             "devices_with_pubkey": n_pk, "sessions": len(_sessions),
             "kick_seq": st.get("gate_kick_seq") or 0,
+            # 就绪度：面板据此决定「开启强制」按钮是否可点、以及提示还差几台。
+            # 与开关端点共用 _sig_readiness()，避免两边口径漂移。
+            "sig_readiness": _sig_readiness(),
+        })
+
+    def _gate_livez(self):
+        """存活探针（**无鉴权**，专供外部监控/负载均衡/看门狗）。
+
+        与 /healthz 的分工（liveness vs readiness）：
+          - /livez 只回答「进程还活着吗」：不读盘、不联网、不查隧道，永远秒回 200。
+            任何能达到 200 的探针都证明 HTTP 线程池还在服务。
+          - /healthz 回答「现在能否正常服务」：需要会话/管理员令牌，会读设备表。
+
+        为什么不给 /livez 加鉴权：外部探针（1Panel / uptime / 手机脚本）拿不到也不该
+        拿会话 Cookie；把它做成无鉴权才能区分「进程死了」与「进程活着但隧道断了」——
+        此前两者对外都是 401，无法归因（kb/03 自检 5 步里最常误判的一步）。
+
+        泄露面控制：只回 ok/pid/uptime/版本号这类非敏感常量。**不回**端口号、
+        设备数、会话数、开关状态——那些仍只在鉴权的 /healthz 里。
+        """
+        self._send_json(200, {
+            "ok": True,
+            "pid": os.getpid(),
+            "uptime_s": int(time.time() - _GATE_STARTED_AT),
+            # 语义表随存活探针一起下发（体积很小）：客户端/诊断脚本拿一次就能
+            # 按 close 语义判断"该不该重试"，不必把状态码含义硬编码进各端。
+            "semantics": {str(k): v for k, v in sorted(GATE_SEMANTICS.items())},
         })
 
     def _gate_kick_all(self):
@@ -7196,10 +8004,13 @@ color:#fff;text-decoration:none;font-size:14px}
                 # 管理端点支持 ?at=<管理令牌>——把完整 self.path 写进 fwd.log/events
                 # 等于把凭据落盘。这里与所有日志口径统一只记路径部分。
                 _p = urllib.parse.urlsplit(self.path).path
-                print("[gate] 请求处理异常 %s %s: %r" % (self.command, _p, e), flush=True)
+                # 脱敏：异常文本可能携带请求体/凭据片段；traceback 里有局部变量，
+                # 用 _redact_exc 渲一行即可（本行以前直接用 %r 打原始异常）。
+                print("[gate] 请求处理异常 %s %s: %s"
+                      % (self.command, _p, _redact_exc(e)), flush=True)
                 traceback.print_exc()
                 _append_event("error", "请求异常 %s %s: %s"
-                              % (self.command, _p, str(e)[:120]))
+                              % (self.command, _p, _redact_exc(e, 120)))
             except BaseException:
                 pass
             if not self._responded:
@@ -7210,6 +8021,20 @@ color:#fff;text-decoration:none;font-size:14px}
 
     def _dispatch(self):
         self._pending_set_cookies = []
+        # F-01 用户侧 IP 黑名单兜底层:执行点=请求入口、_client_ip 之后、2FA/Cookie
+        # 校验之前(设计 §6.3),命中即 403,覆盖该 uid 链接的任何路径/方法(含面板页/
+        # 静态资源/api/WS/gate 端点)。全局黑名单(_blacklist_check)仍在 _gate_ok 里
+        # 独立判断,两层互不干扰;TOTP/会话链路对未命中 IP 完全不变。
+        # 任何异常一律兜住:黑名单故障绝不能让闸机 500(fail-open,边缘/容器层仍在兜)。
+        try:
+            _ipbl_ip = self._client_ip()
+            _ipbl_cidr = _ipbl_hit(_ipbl_ip)
+            if _ipbl_cidr:
+                _append_event("ipbl_block", "用户黑名单拦截 IP=%s cidr=%s" % (_ipbl_ip, _ipbl_cidr))
+                self._ipbl_deny(_ipbl_cidr)
+                return
+        except BaseException:
+            pass
         # 面板 PWA 静态资源:公网路径已由 nginx 做过 Cookie 门禁,直接返回
         if self.command in ("GET", "HEAD") and self._serve_pwa():
             return
@@ -7360,6 +8185,7 @@ def gate_serve():
     _grants_restored = _load_grants()
     if _grants_restored:
         print("已恢复 %d 条配对 grant(长期二维码继续有效)" % _grants_restored, flush=True)
+    _ipbl_load_cache()  # F-01:恢复上次拉取的用户黑名单缓存(离线也有兜底;拉取线程稍后自动刷新)
     print("browserctl 闸机: 127.0.0.1:%d (TOTP 2FA) → DSH(自动探测)" % FWD_PORT, flush=True)
 
     def housekeeping():
@@ -7369,6 +8195,7 @@ def gate_serve():
                 # 心跳(按真实流逝时间累计) + 逐请求日志批量上报：必须在本进程跑，
                 # _sessions 在这里才是活的（看门狗是独立进程、恒空）。
                 _gate_heartbeat_tick()
+                _ipbl_pull_tick()  # F-01 用户黑名单拉取(~5min 节流,失败沿用上次列表)
                 _reqlog_flush_tick()
                 _sysinfo_idle_tick()   # 状态面板关了(60s 无请求)就停掉常驻遥测采样
                 _process_kicks()
@@ -7867,7 +8694,9 @@ def _reqlog_record(self, t0, is_ws=False):
             "kind": ("ws" if is_ws else (_kind or ""))[:16],
             "ip": (self._client_ip() or "")[:64],
             "method": "WS" if is_ws else (self.command or "").upper()[:12],
-            "path": (self.path or "")[:512],
+            # 脱敏：self.path 带 query，管理端点支持 ?at=<管理令牌>、
+            # 引导链接是 ?k=、配对是 ?g=——整串落盘等于把凭据写进用量日志。
+            "path": _redact_text(self.path or "")[:512],
             "status": getattr(self, "_resp_status", 0) or 0,
             "ms": ms,
             "bytes": getattr(self, "_resp_bytes", 0) or 0,
@@ -8055,9 +8884,10 @@ def cmd_watch():
                 if lock:
                     with _ctl_release(lock):
                         st_l = read_state()  # 锁内重读:可能已被别的进程拉好
+                        _want = int(st_l.get("remote_port") or 0)
+                        _have = _last_success_port(_frpc_log_tail(max(0, _frpc_log_size() - 65536)))
                         if not (st_l.get("frpc_pid") and _pid_alive(st_l.get("frpc_pid"))):
-                            _mark_tunnel(False, "frpc 进程不存在,看门狗正在重拉",
-                                         int(st_l.get("remote_port") or 0))
+                            _mark_tunnel(False, "frpc 进程不存在,看门狗正在重拉", _want)
                             try:
                                 ensure_tunnel(st_l.get("remote_port", REMOTE_PORT))
                             except SystemExit as e:
@@ -8066,6 +8896,26 @@ def cmd_watch():
                                 print("[%s] 看门狗: 隧道重拉失败: %s" % (time.strftime("%H:%M:%S"), first), flush=True)
                             else:
                                 print("[%s] 看门狗: 重拉 frpc" % time.strftime("%H:%M:%S"), flush=True)
+                        elif _have and _want and _have != _want:
+                            # 2026-11-25 实测:frpc 进程活着,但注册的还是旧端口(claim 换端口后
+                            # 旧 frpc 没被换掉)。上面的 need 判定已经识别出「端口不一致」,
+                            # 可这里原本只有「进程不存在才重拉」一个动作分支 → 端口不一致永远
+                            # 不被修:gate 的隧道判定一直报「本机 frpc 注册 18473,服务器分配 16437」,
+                            # 面板只能让用户反复点「开始控制」,配对码/网页绑定全部 503。
+                            # 现在主动按新端口重建;ensure_tunnel 自己会先杀掉旧 frpc。
+                            _mark_tunnel(False, "隧道端口已变更(frpc 注册 %d,期望 %d),看门狗正在按新端口重建"
+                                         % (_have, _want), _want)
+                            try:
+                                _new = ensure_tunnel(_want)
+                            except SystemExit as e:
+                                first = (str(e) or "隧道重建失败").splitlines()[0][:240]
+                                print("[%s] 看门狗: 端口不一致重建失败: %s"
+                                      % (time.strftime("%H:%M:%S"), first), flush=True)
+                            else:
+                                # 打 ensure_tunnel 实际用的端口(official 模式以 secrets 为准,
+                                # 可能与 state 里那个 stale 值不同),别把日志写成期望值误导排查。
+                                print("[%s] 看门狗: 按新端口重建 frpc → %d"
+                                      % (time.strftime("%H:%M:%S"), int(_new or 0)), flush=True)
             try:
                 update_state(lambda s: {**s, "watchdog_pid": os.getpid(),
                                         "watchdog_last_respawn": time.time()})
@@ -8591,6 +9441,179 @@ def _pid_alive(pid):
         return ('"%d"' % pid) in out
     except Exception:
         return False
+
+
+# ---- 单写者仲裁（owner）-----------------------------------------------------
+# 背景（2026-11-24 实测）：工作区副本与镜像副本 frp\dsh-remote-plugin\ 会同时跑，
+# 各自拉起 fwd 并写同一份 browserctl_state.json 的 fwd_pid → 后写的覆盖先写的，
+# 插件读到「fwd_pid 指向 A，但 3080 实际被 B 监听」，于是间歇报「frpc 未运行」/
+# 「隧道异常」；两份闸机还会互相抢端口、抢 frpc 认领（kb/06 条目 1/41）。
+#
+# 为什么不能只靠 pid：Windows 会复用 pid，重启后同 pid 可能是完全不同的进程。
+# 因此 owner 身份用**三个不随进程消失的事实**共同刻画：
+#   dir   ：工作目录（哪一份副本）
+#   sha   ：browserctl.py 内容哈希前 16 位（哪一版代码）
+#   port  ：它实际监听/服务的闸机端口
+# 三者任一不同就是不同 owner。存活判定仍用 tasklist（_pid_alive），
+# 但 pid 只是「指针」，不是身份。
+OWNER_FILE = HERE / "browserctl_owner.json"
+
+
+def _self_fingerprint():
+    """当前进程的 owner 指纹（不含 pid）。"""
+    try:
+        sha = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()[:16]
+    except Exception:  # noqa: BLE001
+        sha = ""
+    return {"dir": str(HERE), "sha": sha}
+
+
+def read_owner():
+    """读 owner 记录；损坏/缺失返回 None（调用方按「无 owner」处理）。"""
+    try:
+        d = json.loads(OWNER_FILE.read_text(encoding="utf-8"))
+        return d if isinstance(d, dict) else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _owner_is_live(owner):
+    """owner 进程是否仍然活着。
+
+    判定只看「那个 pid 还在不在」+「它确实是本闸机脚本」两点：
+      - pid 存活是必要条件；
+      - 若同机可读到命令行，还要确认命令行指向 browserctl.py（防 pid 复用误判）
+        —— 拿不到命令行时（提权进程常见）退化为只看 pid 存活。
+
+    ⚠️ 这里**刻意不比较目录**：另一份副本（最典型就是镜像目录）活着正是我们要拦的
+    冲突场景。早期版本要求「目录相同」才算活，结果把「另一目录的活 owner」判成不活，
+    仲裁被直接绕过（单测用例 2 抓到）。目录差异是**冲突的证据**，不是存活的否证。
+    """
+    if not isinstance(owner, dict):
+        return False
+    try:
+        pid = int(owner.get("pid") or 0)
+    except Exception:  # noqa: BLE001
+        return False
+    if pid <= 0 or not _pid_alive(pid):
+        return False
+    # pid 复用防护：只有「能读到命令行、且明确不是 python/frpc」时才否证。
+    # 为什么这么宽：owner 记录可能是 fwd(python) 也可能是 frpc(frpc.exe)，
+    # 而提权进程常读不到命令行（空串）。早期版本要求命令行必须含
+    # "browserctl" 才判活，结果把真实 owner 判成死了 → 仲裁被静默绕过
+    # （单测用例「另一目录的活 owner」抓到）。宁可多拒一次（有 --force 兜底），
+    # 也不能漏判——漏判的后果是双写 state，比误拒严重得多。
+    try:
+        cmd = _process_commandline(pid)
+    except Exception:  # noqa: BLE001
+        cmd = ""
+    if cmd:
+        low = cmd.replace("\\", "/").lower()
+        if not ("python" in low or "frpc" in low or "browserctl" in low):
+            return False   # 明确是别的程序：pid 已被复用，旧记录作废
+    return True
+
+
+def _process_commandline(pid):
+    """尽力取某 pid 的命令行；取不到返回空串（绝不抛）。"""
+    if os.name != "nt":
+        try:
+            return Path("/proc/%d/cmdline" % int(pid)).read_bytes().replace(b"\0", b" ").decode(
+                "utf-8", "replace")
+        except Exception:  # noqa: BLE001
+            return ""
+    try:
+        ps = ("(Get-CimInstance Win32_Process -Filter 'ProcessId=%d' "
+              "-ErrorAction SilentlyContinue).CommandLine" % int(pid))
+        out = subprocess.run(["powershell", "-NoProfile", "-Command", ps],
+                             capture_output=True, text=True, errors="replace",
+                             timeout=10, creationflags=CREATE_NO_WINDOW)
+        return (out.stdout or "").strip()
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def write_owner(port, pid=None):
+    """登记闸机 owner（cmd_start 持 _ctl_lock 时调用）。
+
+    ⚠️ pid 必须是**长期存活的那个 fwd 进程**，不能是 cmd_start 自己：
+    start 是短命的 CLI，写完就退，记录立刻变「已死」，仲裁等于没做（单测抓到）。
+    """
+    fp = _self_fingerprint()
+    rec = {
+        "pid": int(pid or os.getpid()),
+        "dir": fp["dir"],
+        "sha": fp["sha"],
+        "port": int(port or 0),
+        "since": int(time.time()),
+        "host": socket.gethostname(),
+    }
+    try:
+        _atomic_json_write(OWNER_FILE, rec)
+    except Exception as e:  # noqa: BLE001
+        print("[警告] owner 记录写入失败(不影响运行): %s" % _redact_exc(e), flush=True)
+    return rec
+
+
+def clear_owner(only_pid=None):
+    """清除 owner 记录。only_pid 给定时只在记录属于该 pid 时才清（防误删接手者的）。"""
+    cur = read_owner()
+    if not isinstance(cur, dict):
+        return False
+    if only_pid is not None and int(cur.get("pid") or 0) != int(only_pid):
+        return False
+    try:
+        OWNER_FILE.unlink()
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def owner_conflict(force=False):
+    """判定本副本能否接管。返回 (ok, 说明文本)。
+
+    ok=False 时 cmd_start / cmd_stop 应直接拒绝并打印说明——**默认不抢**：
+    抢端口会让正在服务的那一份变成僵尸，用户看到的是「莫名其妙 502」。
+    --force 留给用户明确要"我就是要把另一份顶掉"的场合。
+    """
+    cur = read_owner()
+    if not isinstance(cur, dict):
+        return True, ""
+    if _owner_is_live(cur):
+        pid = cur.get("pid")
+        # 「就是自己」按**目录**判，不能按 pid 判：owner 记的是长期存活的 fwd 进程 pid，
+        # 而 cmd_start/cmd_stop 是短命 CLI，两者的 getpid() 永远不同。
+        # 早期版本要求「pid == os.getpid() 且目录相同」→ 该分支实际永不成立，
+        # 结果是「本副本的闸机还活着」时 start/stop 一律被拒（2026-11-25 实测：
+        # 面板点「开始控制」只打印冲突提示，端口不一致永远修不好，配对/网页绑定跟着失败）。
+        # 目录相同 = 本副本自己在服务：start 幂等复用/重建自己的隧道、stop 停自己的进程，
+        # 都是安全且必须的；只有「另一目录的活 owner」才需要默认拒绝（--force 才顶）。
+        # 身份看目录（哪份副本），pid 只是指针（Windows 会复用 pid）。
+        # 比较用 normcase：Windows 路径大小写不敏感（盘符/目录大小写可能随启动方式变化），
+        # 只是大小写不同不该判成两份副本。
+        if (os.path.normcase(str(cur.get("dir") or ""))
+                == os.path.normcase(str(_self_fingerprint()["dir"]))):
+            return True, ""   # 就是自己（同副本的长期 fwd），放行
+        tip = ("已有另一份闸机在运行：\n"
+               "  pid  = %s\n  目录 = %s\n  端口 = %s\n"
+               "本副本目录：%s\n"
+               "同一台机器只允许一份闸机写 state（否则互相覆盖 fwd_pid、抢端口）。\n"
+               % (pid, cur.get("dir") or "?", cur.get("port") or "?",
+                  _self_fingerprint()["dir"]))
+        if force:
+            return True, tip + "已按 --force 继续（将顶掉那一份）。"
+        return False, tip + ("请在那份目录执行 stop，或用 --force 强制接管"
+                             "（会先尝试停掉它）。")
+    # 记录在但进程已死：陈旧记录，直接接管
+    return True, ""
+
+
+def reap_stale_owner():
+    """进程已死的 owner 记录直接清掉（避免永久阻塞）。返回是否清掉了。"""
+    cur = read_owner()
+    if isinstance(cur, dict) and not _owner_is_live(cur):
+        return clear_owner(only_pid=cur.get("pid"))
+    return False
 
 
 def _live_frpc_pids():
@@ -9355,6 +10378,26 @@ def cmd_status():
           "(pid=%s)" % st.get("fwd_pid"))
     frpc_alive = bool(st.get("frpc_pid") and _pid_alive(st["frpc_pid"]))
     assigned = st.get("remote_port")
+    # 单写者仲裁状态（B5）：一眼看出「谁是当前 owner」，避免再次双副本排查。
+    _own = read_owner()
+    if isinstance(_own, dict) and _owner_is_live(_own):
+        print("闸机 owner: pid=%s 端口=%s 目录=%s" % (
+            _own.get("pid"), _own.get("port") or "?",
+            _own.get("dir") or "?"))
+        if str(_own.get("dir") or "") != _self_fingerprint()["dir"]:
+            print("           ⚠ 当前是被另一目录的副本服务（本目录若 start 会被拒绝，"
+                  "需 --force 或先停那份）")
+    elif _own:
+        print("闸机 owner: 陈旧记录（进程已退出，下次 start 会自动回收）")
+    else:
+        print("闸机 owner: 未登记")
+    # 设备签名就绪度（B1）：开启强制前必须先看这一行。
+    _rd = _sig_readiness()
+    print("设备签名强制:", "已开启" if _rd["enforced"] else "未开启",
+          "｜活跃设备 %d/%d 有密钥（%.0f%%）" % (
+              _rd["recent_with_key"], _rd["recent_total"],
+              _rd["recent_ratio"] * 100),
+          "｜%s" % ("可按需开启" if _rd["ready"] else "还差 %d 台，不建议开启" % _rd["remaining"]))
     print("frpc 隧道:", "运行中(pid=%s)" % st["frpc_pid"] if frpc_alive else "未运行",
           "→ 远端端口", assigned if assigned else "未分配(隧道未建立)")
     if "tunnel_ok" in st:
@@ -9378,9 +10421,17 @@ def cmd_status():
         print("公网入口: 未检测(端口未分配)")
 
 
-def cmd_start():
+def cmd_start(force=False):
     # 跨进程互斥:多个并发 start(按钮连点/侧边栏自动 ensure)串行化,防重复进程
     with _ctl_release(_ctl_lock()):
+        # 单写者仲裁:先清掉「进程已死」的陈旧记录,再判断是否已有活着的另一份。
+        # 注意顺序——陈旧记录必须先回收,否则一次崩溃会永久阻塞本副本启动。
+        reap_stale_owner()
+        _ok, _why = owner_conflict(force=force)
+        if not _ok:
+            raise SystemExit(_why)
+        if _why:
+            print(_why, flush=True)
         _clean_elevated_leftovers()   # 提权残留先自动用管理员权限清掉,再挑端口/起闸机
         _rotate_logs()   # 日志 14 天滚动(句柄此刻无主才能改名;失败静默,下次 start 再滚)
         _select_fwd_port()   # 3080 被占就顺延,并把结果传给 fwd/watch
@@ -9408,6 +10459,19 @@ def cmd_start():
         st = update_state(lambda s: {**s, "dsh_port": port,
                                      "cookie_name": name, "cookie_value": value,
                                      "cookie_expires": payload["expiresAt"]})
+        # 全部组件拉起后再登记 owner：冒烟失败就不该占住所有权。
+        # 端口取实际 fwd 端口（_select_fwd_port 可能顺延），它是「谁在服务」的显式事实。
+        # pid 用 state 里的 fwd_pid（长期存活的闸机进程），**不是当前 CLI 进程**。
+        _st_now = read_state()
+        _fwd_port_now = int(_st_now.get("fwd_port") or FWD_PORT)
+        _fwd_pid_now = int(_st_now.get("fwd_pid") or 0) or None
+        if _fwd_pid_now and _pid_alive(_fwd_pid_now):
+            write_owner(_fwd_port_now, pid=_fwd_pid_now)
+        else:
+            # 拿不到 fwd_pid 时不写 owner：宁可少一层仲裁，也不写一条立刻失效的
+            # 记录把下一次 start 误判成「陈旧记录」。
+            print("[提示] 未能确认 fwd 进程 pid，本次不登记 owner（单写者仲裁未生效）",
+                  flush=True)
     print()
     print("=" * 62)
     if st.get("link_secret"):
@@ -9425,8 +10489,18 @@ def cmd_start():
     print("=" * 62)
 
 
-def cmd_stop():
+def cmd_stop(force=False):
     with _ctl_release(_ctl_lock()):
+        # stop 同样做仲裁：本副本不是 owner 时，直接 stop 会**杀掉别人的进程**
+        # （state 里的 pid 可能是另一份闸机写的），且会把自己的陈旧判断写回去。
+        # 默认拒绝；--force 才允许执行（用户明确要清理整台机器）。
+        _cur_owner = read_owner()
+        _ok, _why = owner_conflict(force=force)
+        if not _ok:
+            raise SystemExit(_why + "\n（只想停本目录的进程请勿加 --force；"
+                                     "要清理整机残留可显式加 --force）")
+        if force and isinstance(_cur_owner, dict) and not _owner_is_live(_cur_owner):
+            clear_owner(only_pid=_cur_owner.get("pid"))
         st = read_state()
         leftovers = []
         pop_keys = []   # 只 pop 真正清掉的 pid 键;提权残留的键必须留在 state 里
@@ -9489,6 +10563,11 @@ def cmd_stop():
         # 其它字段(remote_port/cookie/tunnel 状态)一律以磁盘当前值为准,不回写旧快照。
         if pop_keys:
             update_state(lambda s: {k: v for k, v in s.items() if k not in pop_keys})
+        # 停干净后释放 owner；只在记录属于「本目录」时才清（--force 跨副本清理时
+        # 不能把别家刚登记的 owner 抹掉，那会让下一次 start 失去仲裁依据）。
+        _own = read_owner()
+        if isinstance(_own, dict) and str(_own.get("dir") or "") == _self_fingerprint()["dir"]:
+            clear_owner(only_pid=_own.get("pid"))
 
 
 def cmd_link(ttl=86400, uses=1):
@@ -9630,6 +10709,8 @@ def main():
                     help="引导链接可用次数,默认 1(一次性);0 = 不限次数")
     ap.add_argument("--system", default=None,
                     help="push: 系统事件推送 on|off")
+    ap.add_argument("--force", action="store_true",
+                    help="start/stop: 忽略单写者仲裁，强制接管/清理（会顶掉另一份副本）")
     ap.add_argument("action", nargs="?", default=None,
                     help="totp: enable|disable|reset|uri ; secrets: init|show ; push: on|off|status|test")
     args = ap.parse_args()
@@ -9655,11 +10736,11 @@ def main():
     elif args.command == "watch":
         cmd_watch()
     elif args.command == "start":
-        cmd_start()
+        cmd_start(force=args.force)
     elif args.command == "status":
         cmd_status()
     elif args.command == "stop":
-        cmd_stop()
+        cmd_stop(force=args.force)
     elif args.command == "pair":
         cmd_pair()
     elif args.command == "link":

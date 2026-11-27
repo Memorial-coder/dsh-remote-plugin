@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-browserctl",
-  "version": "1.0.87",
+  "version": "1.0.32",
   "private": true,
   "type": "module",
   "description": "DSH 远程助手(DshRemote): 把 DeepSeek 助手 Web 面板安全穿透到手机与外网, 侧边栏一键开启",
@@ -49,7 +49,8 @@
   },
   "scripts": {
     "build": "node build.mjs",
-    "test": "node test/smoke.cjs && node test/layout.cjs && node test/tunnel-ready.mjs"
+    "test": "node test/smoke.cjs && node test/layout.cjs && node test/tunnel-ready.mjs",
+    "verify:artifacts": "python ../docs/tools/check_plugin_artifacts.py --root .."
   },
   "devDependencies": {
     "esbuild": "0.27.2",
