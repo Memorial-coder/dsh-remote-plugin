@@ -1119,6 +1119,54 @@ var css='#dshSysMask{position:fixed;inset:0;z-index:2147483000;background:rgba(0
  +'background:#4a9eff;color:#fff;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit}'
  +'#dshSysMask .rf.on{opacity:.55}'
  +'#dshSysMask .rf.ok{background:#34C759}'
+  /* 「重新加载页面」按钮(2026-11-27):次级灰底,与主刷新按钮并排 */
+  +'#dshSysMask .rp{flex:0 0 auto;height:36px;padding:0 14px;border:0;border-radius:10px;'
+  +'background:rgba(255,255,255,.14);color:#fff;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit}'
+  +'#dshSysMask .rp.on{opacity:.55}'
+  /* 分区页签(2026-11-27):状态/用量/文件 三视图切换 */
+  +'#dshSysMask .tabs{display:flex;gap:6px;margin:8px 0 2px}'
+  +'#dshSysMask .tabs button{flex:1;height:34px;border:0;border-radius:10px;background:rgba(255,255,255,.07);'
+  +'color:rgba(255,255,255,.6);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit}'
+  +'#dshSysMask .tabs button.on{background:rgba(74,158,255,.28);color:#fff}'
+  +'#dshSysMask .ubd,#dshSysMask .fbd{display:none}'
+  +'#dshSysMask.t-u .bd,#dshSysMask.t-f .bd{display:none}'
+  +'#dshSysMask.t-u .ubd{display:block}#dshSysMask.t-f .fbd{display:block}'
+  /* 用量区:日期档切换 chips + 模型 Top 列表行 + 7 天趋势复用 .br/.bar */
+  +'#dshSysMask .chips{display:flex;gap:6px;margin:6px 0 4px}'
+  +'#dshSysMask .chips button{flex:1;height:30px;border:0;border-radius:9px;background:rgba(255,255,255,.07);'
+  +'color:rgba(255,255,255,.55);font-size:12px;font-weight:600;cursor:pointer;font-family:inherit}'
+  +'#dshSysMask .chips button.on{background:rgba(74,158,255,.28);color:#fff}'
+  +'#dshSysMask .mrow{display:flex;align-items:center;gap:8px;min-height:36px;font-size:12.5px;'
+  +'border-bottom:1px solid rgba(255,255,255,.06)}'
+  +'#dshSysMask .mrow:last-child{border-bottom:0}'
+  +'#dshSysMask .mrow .mn{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#fff;font-weight:600}'
+  +'#dshSysMask .mrow .ms{flex:0 0 auto;color:rgba(255,255,255,.5);font-size:11px;white-space:nowrap}'
+  /* 取文件区:面包屑 + 目录列表行(目录/文件一体,文件是下载链接) */
+  +'#dshSysMask .crumb{display:flex;flex-wrap:wrap;gap:2px;margin:6px 0 4px;font-size:12px;min-width:0}'
+  +'#dshSysMask .crumb a,#dshSysMask .crumb span{color:rgba(255,255,255,.5);text-decoration:none;'
+  +'padding:2px 5px;border-radius:6px;word-break:break-all}'
+  +'#dshSysMask .crumb a{color:#4a9eff}'
+  +'#dshSysMask .frow{display:flex;align-items:center;gap:8px;min-height:38px;font-size:13px;'
+  +'border-bottom:1px solid rgba(255,255,255,.06);color:#fff;text-decoration:none;-webkit-tap-highlight-color:transparent}'
+  +'#dshSysMask .frow:last-child{border-bottom:0}'
+  +'#dshSysMask .frow .fn{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
+  +'#dshSysMask .frow .fm{flex:0 0 auto;font-size:11px;color:rgba(255,255,255,.4);white-space:nowrap}'
+  +'#dshSysMask .frow .fd{flex:0 0 auto;width:18px;text-align:center;color:#4a9eff;font-weight:700}'
+  +'#dshSysMask .frow .fd.f{color:rgba(255,255,255,.35);font-weight:400}'
+  +'#dshSysMask .fgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:6px 0 4px}'
+  +'#dshSysMask .fgrid a{display:flex;align-items:center;justify-content:center;height:38px;border-radius:10px;'
+  +'background:rgba(255,255,255,.06);color:#fff;font-size:12px;font-weight:600;text-decoration:none;'
+  +'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 8px;-webkit-tap-highlight-color:transparent}'
+  +'#dshSysMask .frow.dir .fn{color:#4a9eff;font-weight:600}'
+  /* 文件选择器(2026-11-27):标题行/主目录徽标/当前段/右箭头/底部动作条 */
+  +'#dshSysMask .fbtitle{font-size:13px;font-weight:700;margin:6px 0 2px}'
+  +'#dshSysMask .fbhome{color:#4a9eff;font-weight:600;cursor:pointer;padding:2px 5px}'
+  +'#dshSysMask .crumb .cur{color:#fff;font-weight:600}'
+  +'#dshSysMask .fc{flex:0 0 auto;color:rgba(255,255,255,.35);font-size:16px;line-height:1;padding:0 2px}'
+  +'#dshSysMask .frow.fback .fn{color:rgba(255,255,255,.65)}'
+  +'#dshSysMask .fbar{display:flex;gap:8px;margin-top:12px}'
+  +'#dshSysMask .fbar button{flex:1;height:36px;border:0;border-radius:10px;background:rgba(255,255,255,.1);'
+  +'color:#fff;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit}'
  /* 横屏(2026-11-20 用户反馈「可以再优化优化」):全宽贴底改为居中卡片+内容双栏——
     宽屏下 kv 行不再被拉到整屏两端,同屏可见内容翻倍;竖屏样式完全不变 */
  +'@media (orientation:landscape) and (min-width:640px){'
@@ -1139,6 +1187,23 @@ var css='#dshSysMask{position:fixed;inset:0;z-index:2147483000;background:rgba(0
  +'}';
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){
   return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+/* 2026-11-27 统一请求基座:与下载 Pill 同口径(origin+pathname),不管页面 URL
+   带不带尾斜杠都能落到正确的闸机前缀;根治「面板页面在测试闸机、接口被答到
+   别的隧道」的逃逸问题。所有 sysinfo/用量/文件请求与下载链接都走 GBASE。 */
+var GBASE = location.origin + location.pathname + (location.pathname.slice(-1)==='/'?'':'/');
+/* 所有 fetch 过 fetchJson:先 text 再 JSON.parse,非 JSON 应答(旧闸机/走错隧道
+   的纯文本 404 等)给人话报错,绝不裸抛 Unexpected token */
+function fetchJson(url){
+  return fetch(url,{cache:'no-store'}).then(function(r){
+    return r.text().then(function(t){
+      var j=null;
+      try{ j=JSON.parse(t); }catch(e){}
+      if(j===null||typeof j!=='object')
+        throw new Error('闸机版本较旧或请求未到达本机闸机(HTTP '+r.status+')：请点「重新加载页面」，若仍不行请同步正式闸机');
+      return j;
+    });
+  });
+}
 function fmtRate(n){ if(n==null||!isFinite(n)) return '—';
   if(n>=1048576) return (n/1048576).toFixed(1)+' MB/s';
   if(n>=1024) return (n/1024).toFixed(1)+' KB/s'; return Math.round(n)+' B/s'; }
@@ -1158,7 +1223,8 @@ function mini(l1,l2){ return '<div class="mini"><b>'+esc(l1)+'</b> · '+l2+'</di
 function section(t,inner){ return '<div class="sec">'+esc(t)+'</div>'+inner; }
 function wrap(c,inner){ return '<div class="w '+c+'">'+inner+'</div>'; }
 
-var mask=null, bodyEl=null, latEl=null, rfBtn=null;
+var mask=null, bodyEl=null, latEl=null, rfBtn=null, rpBtn=null, ubdEl=null, fbdEl=null;
+var tab='sys', uRange='day', fb={path:null};
 function ensure(){
   if (mask && mask.isConnected) return;
   if (!mask){
@@ -1166,16 +1232,47 @@ function ensure(){
     mask.innerHTML='<div class="sheet">'
      +'<div class="head"><div class="dot"></div><div class="name">主机状态</div>'
      +'<div class="lat">延迟 —</div><button class="x" type="button">✕</button></div>'
+     /* 2026-11-27:状态/用量/文件 三页签(用量=dsh-all-usage,取文件=电脑文件浏览下载) */
+     +'<div class="tabs"><button class="tb on" data-t="sys" type="button">状态</button>'
+     +'<button class="tb" data-t="u" type="button">用量</button>'
+     +'<button class="tb" data-t="f" type="button">取文件</button></div>'
      +'<div class="bd"></div>'
+     +'<div class="ubd"></div>'
+     +'<div class="fbd"></div>'
      +'<div class="foot"><div class="hint">数据来自这台电脑上的闸机服务（实时采样）；面板打开期间每 1 秒自动同步。网络只统计经闸机的远程消耗，不是整机网卡流量。</div>'
+     +'<button class="rp" type="button">重新加载页面</button>'
      +'<button class="rf" type="button">刷新</button></div>'
      +'</div>';
     var st=document.createElement('style'); st.textContent=css; mask.appendChild(st);
     document.documentElement.appendChild(mask);
     bodyEl=mask.querySelector('.bd'); latEl=mask.querySelector('.lat'); rfBtn=mask.querySelector('.rf');
+    rpBtn=mask.querySelector('.rp'); ubdEl=mask.querySelector('.ubd'); fbdEl=mask.querySelector('.fbd');
     mask.addEventListener('click',function(e){ if(e.target===mask) closeP(); });
     mask.querySelector('.x').addEventListener('click',closeP);
-    rfBtn.addEventListener('click',function(){ loadSys(); });
+    /* 刷新按钮按当前页签分发:状态=遥测,用量=usage 接口,取文件=当前目录重列 */
+    rfBtn.addEventListener('click',function(){
+      if(tab==='u') loadUsage(true); else if(tab==='f') fbGo(fb.path,true); else loadSys(true);
+    });
+    rpBtn.addEventListener('click',hardReload);
+    Array.prototype.forEach.call(mask.querySelectorAll('.tb'),function(b){
+      b.addEventListener('click',function(){ setTab(b.getAttribute('data-t')); });
+    });
+    /* 取文件视图统一事件委托:底部动作条(data-fb)+面包屑/常用位置/目录行(data-p) */
+    fbdEl.addEventListener('click',function(e){
+      var fbBtn=(e.target&&e.target.closest)?e.target.closest('button[data-fb]'):null;
+      if(fbBtn){
+        e.preventDefault();
+        var act=fbBtn.getAttribute('data-fb');
+        if(act==='root') fbGo(null,false);
+        else if(act==='close') closeP();
+        return;
+      }
+      var a=(e.target&&e.target.closest)?e.target.closest('a[data-p]'):null;
+      if(!a) return;
+      e.preventDefault();
+      var p=a.getAttribute('data-p');
+      fbGo(p===''?null:p,false);
+    });
     new MutationObserver(function(){
       if(!mask.isConnected){ document.documentElement.appendChild(mask); }
     }).observe(document.documentElement,{childList:true});
@@ -1187,8 +1284,30 @@ function closeP(){ opened=false; if(mask) mask.classList.remove('open');
 function openP(){ ensure(); opened=true; mask.classList.add('open');
   loadSys(true); if(timer) clearInterval(timer);
   /* 自动同步静默化(2026-11-18 用户反馈:右下角按钮每秒闪,难看但又要刷新):
-     定时器不带 manual 标记 → 按钮文字/颜色完全不动,数据照常每秒更新 */
-  timer=setInterval(function(){ if(opened) loadSys(false); },1000); }
+     定时器不带 manual 标记 → 按钮文字/颜色完全不动,数据照常每秒更新。
+     2026-11-27:只有「状态」页签在跑秒级轮询;用量/取文件页签按需手动/进入时拉取 */
+  timer=setInterval(function(){ if(opened&&tab==='sys') loadSys(false); },1000); }
+
+/* ---- 页签切换(2026-11-27) ---- */
+function setTab(t){
+  if(!mask) return;
+  if(t!=='u'&&t!=='f') t='sys';
+  tab=t;
+  mask.classList.remove('t-u','t-f');
+  if(t==='u') mask.classList.add('t-u');
+  if(t==='f') mask.classList.add('t-f');
+  Array.prototype.forEach.call(mask.querySelectorAll('.tb'),function(b){
+    b.className='tb'+(b.getAttribute('data-t')===t?' on':'');
+  });
+  if(t==='sys'){
+    if(opened&&!timer) timer=setInterval(function(){ if(opened&&tab==='sys') loadSys(false); },1000);
+    loadSys(false);
+  } else {
+    if(timer){ clearInterval(timer); timer=null; }
+  }
+  if(t==='u'&&!ubdEl.childNodes.length) loadUsage(false);
+  if(t==='f'&&!fbdEl.dataset.inited) fbGo(null,false);
+}
 
 function renderSys(d,lat){
   var g=d||{}; var memP=(g.memTotal&&g.memFree!=null)?share(g.memTotal-g.memFree,g.memTotal):null;
@@ -1244,9 +1363,9 @@ function renderSys(d,lat){
   var lnk=(g.link||{});
   var tun=lnk.tunnelOk?('<span class="good">正常'+(lnk.remotePort?(' · 公网端口 '+esc(lnk.remotePort)):'')+'</span>')
     :('<span class="bad">'+esc(lnk.tunnelError?('未连接 · '+lnk.tunnelError):'未连接')+'</span>');
-  var s4=kv('系统',esc(g.os||'—'))
-   +kv('开机时长',g.boot?esc(fmtUptime((Date.now()-Date.parse(g.boot))/1000)):'—')
-   +kv('进程数',g.procs==null?'—':Math.round(g.procs))
+  /* 2026-11-27 用户要求:去掉「系统」「进程数」两行(不想暴露系统名/进程规模),
+     其余状态行保留 */
+  var s4=kv('开机时长',g.boot?esc(fmtUptime((Date.now()-Date.parse(g.boot))/1000)):'—')
    +kv('显卡专用内存',g.gpuMem==null?'—':esc(fmtBytes(g.gpuMem)))
    +kv('隧道',tun)
    +kv('闸机运行时长',esc(fmtUptime(lnk.gateUptime)))
@@ -1267,8 +1386,8 @@ function loadSys(manual){
   if (busy) return; busy=true;
   if (manual) setBtn('刷新中…','on'); /* 只有手点才变状态,自动同步不闪 */
   var t0=performance.now();
-  fetch('browserctl-gate/sysinfo',{cache:'no-store'})
-   .then(function(r){ var lat=Math.round(performance.now()-t0); return r.json().then(function(j){ return {j:j,lat:lat}; }); })
+  fetchJson(GBASE+'browserctl-gate/sysinfo')
+   .then(function(j){ var lat=Math.round(performance.now()-t0); return {j:j,lat:lat}; })
    .then(function(o){
      var j=o.j||{};
      if (!j.ok) throw new Error(j.error||'闸机返回失败');
@@ -1282,6 +1401,193 @@ function loadSys(manual){
    })
    .then(function(){ busy=false; });
 }
+/* ---- 「重新加载页面」(2026-11-27):治 WebView 用旧缓存一直转圈。
+   三步:清 CacheStorage → 用 cache:'reload' 强刷根页 HTTP 缓存条目 → reload。
+   不动闸机根页 ETag 策略(kb/07 §7.7),只在页面侧把缓存垫干净 */
+function hardReload(){
+  if(!rpBtn) return;
+  rpBtn.textContent='刷新中…'; rpBtn.classList.add('on');
+  var go=function(){ setTimeout(function(){ try{ location.reload(); }catch(e){} },60); };
+  var prep;
+  try{
+    prep=(window.caches&&caches.keys)
+      ?caches.keys().then(function(ks){
+        return Promise.all(ks.map(function(k){ return caches.delete(k); }));
+      }).catch(function(){})
+      :Promise.resolve();
+  }catch(e){ prep=Promise.resolve(); }
+  prep.then(function(){
+    try{ return fetch(location.href,{cache:'reload',credentials:'same-origin'}); }catch(e){}
+  }).catch(function(){}).then(go,go);
+}
+
+/* ---- 用量统计(2026-11-27):数据来自 DSH 上的 dsh-all-usage 插件。
+   面板与 DSH Web 同源,相对路径 fetch 经闸机反代直达 /api/all-usage/query;
+   闸机把 Host/Origin 改写回环(kb/08 H-06),正好满足插件的本机信任校验。 ---- */
+function pad2(n){ return (n<10?'0':'')+n; }
+function dayText(d){ return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate()); }
+function fmtTok(n){ if(n==null||!isFinite(n)) return '—';
+  if(n>=1e9) return (n/1e9).toFixed(2)+'B';
+  if(n>=1e6) return (n/1e6).toFixed(2)+'M';
+  if(n>=1e3) return (n/1e3).toFixed(1)+'K';
+  return String(Math.round(n)); }
+function fmtCost(c){ if(!c||!c.total) return '—';
+  var v=parseFloat(c.total); if(!isFinite(v)) return '—';
+  return ((c.currency||'USD')==='USD'?'$':'')+v.toFixed(v>=1?2:4); }
+function loadUsage(manual){
+  if(!ubdEl) return;
+  if(ubdEl._busy) return; ubdEl._busy=true;
+  if(manual) setBtn('刷新中…','on');
+  var now=new Date(), today=dayText(now), start=today;
+  if(uRange==='month') start=today.slice(0,8)+'01';
+  else if(uRange==='week') start=dayText(new Date(now.getTime()-6*86400000));
+  var t0=performance.now();
+  fetchJson(GBASE+'api/all-usage/query?start='+start+'&end='+today)
+   .then(function(j){
+     /* 插件 200 响应是聚合对象本身,没有 ok 字段(实测 55690 回环);400 才带 {ok:false,message} */
+     if(j.ok===false||!j.totals) throw new Error(j.message||j.error||'用量接口不可用');
+     renderUsage(j);
+     if(manual){ setBtn('已更新','ok'); setTimeout(function(){ if(!ubdEl._busy) setBtn('刷新',''); },1200); }
+   })
+   .catch(function(e){
+     ubdEl.innerHTML='<div class="kv"><b class="bad">读取失败：'+esc(e&&e.message||e)+'</b></div>';
+     if(manual) setBtn('刷新','');
+   })
+   .then(function(){ ubdEl._busy=false; });
+}
+function renderUsage(j){
+  var t=j.totals||{}, c=t.cost||{};
+  var cells='<div class="cell"><b>'+esc(fmtTok(t.input))+'</b><span>输入</span></div>'
+   +'<div class="cell"><b>'+esc(fmtTok(t.output))+'</b><span>输出</span></div>'
+   +'<div class="cell"><b>'+esc(fmtCost(c))+'</b><span>花费</span></div>'
+   +'<div class="cell"><b>'+(t.calls==null?'—':Math.round(t.calls))+'</b><span>调用</span></div>';
+  var s1=kv('对话轮数',t.turns==null?'—':Math.round(t.turns))
+   +kv('会话数',t.sessions==null?'—':Math.round(t.sessions))
+   +kv('缓存读 tokens',esc(fmtTok(t.cacheRead)))
+   +kv('缓存写 tokens',esc(fmtTok(t.cacheWrite)))
+   +kv('推理 tokens',esc(fmtTok(t.reasoning)))
+   +kv('计价 / 未计价调用',c.pricedCalls!=null?(Math.round(c.pricedCalls)+' / '+Math.round(c.unpricedCalls||0)):'—');
+  var ms=(j.perModel||[]).slice().sort(function(a,b){
+    var ca=parseFloat(a&&a.cost&&a.cost.total)||0, cb=parseFloat(b&&b.cost&&b.cost.total)||0;
+    return cb-ca;
+  }).slice(0,5);
+  var wM='';
+  if(ms.length){
+    var s2='';
+    ms.forEach(function(m){
+      var nm=(m&&(m.model||m.requestedModel))||(m&&m.identityKey)||'?';
+      s2+='<div class="mrow"><span class="mn">'+esc(nm)+'</span>'
+       +'<span class="ms">'+(m.calls!=null?Math.round(m.calls)+'次 · ':'')
+       +esc(fmtTok(m.input))+'入 '+esc(fmtTok(m.output))+'出 · '+esc(fmtCost(m.cost))+'</span></div>';
+    });
+    wM=section('模型 Top '+ms.length,s2);
+  }
+  /* 近 7 天曲线图(2026-11-27 用户指定「曲线图、插件趋势线那种」):query 响应自带
+     近 52 周 heatmap,取末尾 7 天,输入/输出两条折线+数据点+日期轴 */
+  var hm=(j.heatmap||[]).slice(-7), wH='';
+  if(hm.length>=2){
+    var vIn=hm.map(function(d){ var tk=d.tokens||{}; return tk.input||0; });
+    var vOut=hm.map(function(d){ var tk=d.tokens||{}; return tk.output||0; });
+    var mx=Math.max.apply(null,vIn.concat(vOut,[1]));
+    var W=320,H=96,P=10,step=(W-2*P)/(hm.length-1);
+    function pt(v,i){ var x=P+i*step, y=H-18-(H-30)*(v/mx); return x.toFixed(1)+','+y.toFixed(1); }
+    function line(vs,col){ return '<polyline points="'+vs.map(pt).join(' ')
+      +'" fill="none" stroke="'+col+'" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>'; }
+    function dots(vs,col){ return vs.map(function(v,i){
+      var xy=pt(v,i).split(',');
+      return '<circle cx="'+xy[0]+'" cy="'+xy[1]+'" r="2.6" fill="'+col+'"/>'; }).join(''); }
+    var axis=hm.map(function(d,i){
+      return '<text x="'+(P+i*step).toFixed(1)+'" y="'+(H-4)+'" font-size="9" '
+       +'fill="rgba(255,255,255,.45)" text-anchor="middle">'+esc(d.date.slice(5))+'</text>'; }).join('');
+    wH=section('近 7 天趋势',
+      '<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;height:auto;display:block">'
+      +line(vIn,'#4a9eff')+line(vOut,'#34C759')+dots(vIn,'#4a9eff')+dots(vOut,'#34C759')+axis+'</svg>'
+      +'<div class="mini"><b style="color:#4a9eff">— 输入</b> · <b style="color:#34C759">— 输出</b> · 峰值 '
+      +esc(fmtTok(mx))+' tokens/日</div>');
+  }
+  var chips='<div class="chips">'
+   +'<button data-r="day" type="button"'+(uRange==='day'?' class="on"':'')+'>今日</button>'
+   +'<button data-r="week" type="button"'+(uRange==='week'?' class="on"':'')+'>近 7 天</button>'
+   +'<button data-r="month" type="button"'+(uRange==='month'?' class="on"':'')+'>本月</button>'
+   +'</div>';
+  ubdEl.innerHTML=chips+'<div class="grid">'+cells+'</div>'+wrap('u',section('合计',s1)+wM+wH);
+  Array.prototype.forEach.call(ubdEl.querySelectorAll('.chips button'),function(b){
+    b.addEventListener('click',function(){
+      var r=b.getAttribute('data-r');
+      if(r&&r!==uRange){ uRange=r; loadUsage(false); }
+    });
+  });
+}
+
+/* ---- 取文件(2026-11-27):浏览电脑目录,点文件即下载。
+   列表走 browserctl-gate/files/list(闸机端与下载同一套安全闸:
+   凭据名单/敏感根硬拒绝);下载复用现成的 browserctl-gate/file?path=,
+   App 的 setDownloadListener(v1.0.45+)接住落盘。 ---- */
+function fmtMtime(ts){ if(!ts) return '';
+  var d=new Date(ts*1000);
+  return pad2(d.getMonth()+1)+'-'+pad2(d.getDate())+' '+pad2(d.getHours())+':'+pad2(d.getMinutes()); }
+function fbGo(p,manual){
+  if(!fbdEl) return;
+  if(fbdEl._busy) return; fbdEl._busy=true;
+  fb.path=p;
+  fbdEl.dataset.inited='1';
+  if(manual) setBtn('刷新中…','on');
+  if(!fbdEl.childNodes.length) fbdEl.innerHTML='<div class="kv"><em>读取中…</em></div>';
+  fetchJson(GBASE+'browserctl-gate/files/list'+(p?('?path='+encodeURIComponent(p)):''))
+   .then(function(j){
+     if(!j.ok) throw new Error(j.error||'读取失败');
+     renderFb(j,p);
+     if(manual){ setBtn('已更新','ok'); setTimeout(function(){ if(!fbdEl._busy) setBtn('刷新',''); },1200); }
+   })
+   .catch(function(e){
+     fbdEl.innerHTML='<div class="kv"><b class="bad">'+esc(e&&e.message||e)+'</b></div>';
+     if(manual) setBtn('刷新','');
+   })
+   .then(function(){ fbdEl._busy=false; });
+}
+function renderFb(j,p){
+  /* 图形化文件选择器(2026-11-27 用户要求,参考 DSH「选择工作区目录」弹窗):
+     路径条(主目录/面包屑)+目录列表(文件夹带右箭头、文件带大小日期)+底部动作条 */
+  if(!p){
+    var chips='', dv='';
+    (j.roots||[]).forEach(function(r){ chips+='<a href="#" data-p="'+esc(r.path)+'">'+esc(r.name)+'</a>'; });
+    (j.drives||[]).forEach(function(d){ dv+='<a href="#" data-p="'+esc(d)+'">'+esc(d)+'</a>'; });
+    fbdEl.innerHTML='<div class="fbtitle">选择要下载的文件</div>'
+     +'<div class="sec">常用位置</div><div class="fgrid">'+chips+'</div>'
+     +'<div class="sec">磁盘</div><div class="fgrid">'+dv+'</div>'
+     +'<div class="fbar"><button data-fb="root" type="button">根目录</button>'
+     +'<button data-fb="close" type="button">关闭面板</button></div>';
+    return;
+  }
+  var crumbs='<span class="fbhome" data-p="">主目录</span>';
+  (j.crumbs||[]).forEach(function(c,i){
+    crumbs+=(i<(j.crumbs||[]).length-1)
+      ?'<a href="#" data-p="'+esc(c.path)+'">'+esc(c.label)+'</a>'
+      :'<span class="cur">'+esc(c.label)+'</span>';
+  });
+  var rows='<a class="frow fback" href="#" data-p="'+esc(j.parent||'')+'">'
+   +'<span class="fc">‹</span><span class="fn">上一级</span></a>';
+  var n=0;
+  (j.items||[]).forEach(function(it){
+    if(!it||!it.name) return;
+    n++;
+    if(it.dir){
+      rows+='<a class="frow dir" href="#" data-p="'+esc(it.path)+'">'
+       +'<span class="fn">'+esc(it.name)+'</span>'
+       +'<span class="fm">'+esc(fmtMtime(it.mtime))+'</span><span class="fc">›</span></a>';
+    } else {
+      rows+='<a class="frow" href="'+GBASE+'browserctl-gate/file?path='+encodeURIComponent(it.path)+'">'
+       +'<span class="fn">'+esc(it.name)+'</span>'
+       +'<span class="fm">'+esc(fmtBytes(it.size))+' · '+esc(fmtMtime(it.mtime))+'</span></a>';
+    }
+  });
+  if(!n) rows+='<div class="kv"><em>空目录</em></div>';
+  if(j.truncated) rows+='<div class="kv"><em>目录太大，只列出前 '+n+' 项</em></div>';
+  fbdEl.innerHTML='<div class="crumb">'+crumbs+'</div>'+rows
+   +'<div class="fbar"><button data-fb="root" type="button">根目录</button>'
+   +'<button data-fb="close" type="button">关闭面板</button></div>';
+}
+
 window.__dshSysToggle=function(){ if(opened) closeP(); else openP(); };
 }catch(e){}
 })();"""
@@ -2314,6 +2620,9 @@ _DL_DENY_BASENAMES = {
 }
 _DL_DENY_EXTS = {".jks", ".keystore", ".p12", ".pfx", ".pem", ".key", ".env"}
 _DL_DENY_STEMS = {"id_rsa", "id_ed25519", "id_ecdsa"}
+# 「取文件」目录列表上限(2026-11-27):单次最多返回的条目数,超出带 truncated 标记,
+# 防超大目录(node_modules 等)把闸机线程和手机渲染一起拖死。
+_FILES_LIST_MAX = 2000
 
 
 def _download_denied(path):
@@ -6681,6 +6990,10 @@ color:#fff;text-decoration:none;font-size:14px}
             # 主机遥测:CPU/内存/磁盘。需已通过 2FA(硬件信息不公开)。
             self._gate_sysinfo()
             return
+        if path.endswith("/files/list"):
+            # 远控端「取文件」目录浏览(2026-11-27):与下载端点同锁同安全闸
+            self._gate_files_list()
+            return
         if path.endswith("/dev-bind"):
             # L1 密钥分发:已验证会话换取本设备 dev_key(豁免签名,见 _SIG_EXEMPT)
             self._gate_dev_bind()
@@ -6789,7 +7102,13 @@ color:#fff;text-decoration:none;font-size:14px}
         if path.rstrip("/") in (GATE_PREFIX.rstrip("/"), "/browserctl-test-gate"):
             self._send(200, GATE_HTML)
             return
-        self._send(404, "not found", "text/plain")
+        # 2026-11-27:兜底 404 改 JSON+埋点。真机「取文件」报 Unexpected token 'o',
+        # "not found" = 新面板页面与旧闸机的纯文本 404 来自不同代码版本的闸机
+        # (请求逃逸到别的隧道)。①改 JSON 让新面板报人话;②记事件,复现即知
+        # 什么路径打到了哪台(只到鉴权墙之后,扫描器噪音进不来,不刷爆环形日志)。
+        _append_event("gate404", "未匹配闸机路由 %s %s" % (self.command, path[:120]))
+        self._send_json(404, {"ok": False,
+                              "error": "闸机无此接口(版本较旧或请求走错隧道)"})
 
     # ---- 消息推送 ----
 
@@ -6910,6 +7229,105 @@ color:#fff;text-decoration:none;font-size:14px}
             self._send_json(401, {"ok": False, "error": "未通过验证"})
             return
         self._send_json(200, {"ok": True, "sysinfo": _gate_sysinfo_data()})
+
+    def _gate_files_list(self):
+        """远控端「取文件」目录浏览(2026-11-27):App 状态面板「取文件」页签用。
+
+        鉴权:必须已通过 2FA/会话(_gate_ok) —— 与下载端点 /file 同一把锁。
+        不带 ?path= → 返回快速根(常用目录 + 本副本目录 + 各盘符),供首屏点选;
+        ?path=<绝对路径> → 列该目录(文件名/大小/修改时间/是否目录/完整路径)。
+        安全闸(2026-11-27 用户拍板「全盘可浏览」的边界):
+        - 浏览目标必须过 _path_in_denied_roots(家目录点目录/AppData/Windows/
+          Program Files 硬拒绝),不过与「不存在」同口径 404,不暴露原因;
+        - 逐条目再过同一道闸 + _download_denied(凭据/密钥族文件不在列表露出;
+          下载端点 /file 还会再拦一次,这里先隐掉更干净);
+        - 单次最多 _FILES_LIST_MAX 条,超出带 truncated 标记。
+        下载本身仍走 /file?path= 的既有安全闸,这里只负责"看得见"。"""
+        if not self._gate_ok():
+            self._send_json(401, {"ok": False, "error": "未通过验证"})
+            return
+        from urllib.parse import urlsplit, parse_qs
+        q = parse_qs(urlsplit(self.path).query)
+        raw = (q.get("path") or [""])[0].strip()
+        # 入口埋点(2026-11-27):之前只在拒绝时记,真机复现「请求逃逸」时看不到
+        # 正常请求落到哪台;现在每次列目录都留痕(events 环形 60 条,够用)。
+        _append_event("files_ls", "列目录 path=%s" % (raw[:120] or "<快速根>"))
+        if not raw:
+            roots, drives = [], []
+            home = Path.home()
+            for nm, label in (("Desktop", "桌面"), ("Downloads", "下载"),
+                              ("Documents", "文档"), ("Videos", "视频"),
+                              ("Pictures", "图片"), ("Music", "音乐")):
+                p = home / nm
+                try:
+                    if p.is_dir():
+                        roots.append({"path": str(p), "name": label})
+                except OSError:
+                    pass
+            roots.append({"path": str(HERE), "name": "工作区"})
+            for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
+                d = c + ":\\"
+                try:
+                    if os.path.isdir(d):
+                        drives.append(d)
+                except OSError:
+                    pass
+            self._send_json(200, {"ok": True, "roots": roots, "drives": drives})
+            return
+        try:
+            p = Path(raw)
+            if not p.is_absolute():
+                raise ValueError(raw)
+            rp = p.resolve()
+            is_dir = rp.is_dir()
+        except (OSError, ValueError):
+            rp, is_dir = None, False
+        if not is_dir or _path_in_denied_roots(rp):
+            # 与下载端点同口径:不区分「不存在」与「被拒绝」
+            _append_event("files_ls", "目录未放行或不存在 path=%s" % raw[:120])
+            self._send_json(404, {"ok": False, "error": "目录不存在或不可浏览"})
+            return
+        try:
+            entries = []
+            for e in rp.iterdir():
+                try:
+                    entries.append((e.is_dir(), e))
+                except OSError:
+                    continue
+            entries.sort(key=lambda x: (not x[0], x[1].name.lower()))
+        except OSError:
+            self._send_json(403, {"ok": False, "error": "无法读取该目录"})
+            return
+        items, truncated, shown = [], False, 0
+        for isd, e in entries:
+            if shown >= _FILES_LIST_MAX:
+                truncated = True
+                break
+            try:
+                # 凭据文件与敏感根下的条目不在列表露出(下载层还会再拦一次)
+                if _download_denied(e) or _path_in_denied_roots(e):
+                    continue
+                st = e.stat()
+            except OSError:
+                continue
+            items.append({"name": e.name, "path": str(e), "dir": isd,
+                          "size": None if isd else st.st_size,
+                          "mtime": int(st.st_mtime)})
+            shown += 1
+        crumbs = []
+        par = rp
+        while True:
+            crumbs.append({"path": str(par),
+                           "label": par.name or (str(par).rstrip("\\") or str(par))})
+            pp = par.parent
+            if pp == par:
+                break
+            par = pp
+        crumbs.reverse()
+        self._send_json(200, {"ok": True, "path": str(rp),
+                              "parent": (str(rp.parent) if rp.parent != rp else None),
+                              "crumbs": crumbs,
+                              "items": items, "truncated": truncated})
 
     def _gate_session_days(self):
         """会话有效期(C2):GET 读(需会话验证),POST 改(仅本机管理员,query ?days=N,1-365)。
