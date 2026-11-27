@@ -33,7 +33,7 @@ var import_dsh_client_ui_primitives6 = require("@deepseek-ai/dsh-client-ui-primi
 var NS = "browserctl";
 var IS_TEST = /-test$/.test(NS);
 var STYLE_ID = NS + "/styles";
-var VERSION = true ? "1.0.32" : "dev";
+var VERSION = true ? "1.0.87" : "dev";
 var ABOUT_LINKS = {
   website: "https://remote.ymzcc.com/dsh-remote/",
   github: "https://github.com/Memorial-coder/dsh-remote-plugin",

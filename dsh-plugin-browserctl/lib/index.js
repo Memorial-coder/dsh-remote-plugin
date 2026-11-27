@@ -4625,7 +4625,7 @@ function adminHeaders() {
   }
   return {};
 }
-var VERSION = true ? "1.0.32" : "dev";
+var VERSION = true ? "1.0.87" : "dev";
 var sessionTunnel = false;
 var ensureRunning = null;
 var lastEnsureError = "";
