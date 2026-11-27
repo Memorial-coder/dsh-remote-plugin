@@ -70,8 +70,6 @@ export function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
   // B2 新增 hooks(追加链尾,hook#3=tab 契约不动):
   // 连接页「扫码连接」卡的分段切换:'temp'=临时码(useQr 60s 一次性) / 'long'=长期码(pair-long 7 天)
   const [pairSeg, setPairSeg] = useState('temp')
-  // 「配对设置(次数/换码)」折叠行
-  const [pairSetOpen, setPairSetOpen] = useState(false)
   // 停止控制两段式 armed 确认(B2 破坏性动作确认补齐):false → 点一次进确认态 → 再点执行
   const [stopConfirm, setStopConfirm] = useState(false)
   // B2 头部收敛:「设置」弹层三分区(通用配置/关于与更新/协议与隐私)的开关 + 协议文档态
@@ -91,7 +89,7 @@ export function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
   }
   const panel = useRef(null)
   const bellRef = useRef(null) // 通知中心铃铛锚点:下拉弹层按它实测坐标做 fixed 定位
-  const { data, error, expiresAt, status, retrying, refresh } = useQr(open, reloadToken, uses)
+  const { data, error, expiresAt, status, retrying } = useQr(open, reloadToken, uses)
   const left = useCountdown(expiresAt)
   const run = async (label, fn) => {
     if (busy) return
@@ -488,18 +486,11 @@ export function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
         <div className="dshBrowserCtlTabBody">
           {tab === 'connect' && (
             <>
-              {/* ---- 卡 1:扫码连接(P1;分段切换 临时码/长期码) ---- */}
+              {/* ---- 卡 1:扫码连接 ----
+                  卡头整行已删(2026-11-27 用户反馈:「扫码连接」标题先删、表头占空间整行也删;
+                  倒计时/次数状态在二维码下方本就有一份)。body 自补 12px 上边距顶替原卡头。 */}
               <div className="dshBrowserCtlCard">
-                <div className="dshBrowserCtlCardHead" style={{ cursor: 'default' }}>
-                  {Svg.link}
-                  <span>{t('connScanTitle')}</span>
-                  <span className="dshBrowserCtlCardStat" style={{ color: 'var(--dsw-alias-label-tertiary,#8b8f98)' }}>
-                    {pairSeg === 'temp'
-                      ? (left > 0 ? t('pairLeft') + ' ' + left + 's' : (data && data.once ? t('pairExpired') : ''))
-                      : t('appReady')}
-                  </span>
-                </div>
-                <div className="dshBrowserCtlCardBody dshBrowserCtlCardBodyTall" data-open="true">
+                <div className="dshBrowserCtlCardBody dshBrowserCtlCardBodyTall" data-open="true" style={{ paddingTop: 12 }}>
                   {/* 分段切换:临时码(useQr pair,60s 一次性)/ 长期码(pair-long,7 天)。
                       两个 grant 的 pair-status 轮询不能合并成一次请求(host 无聚合端点):
                       临时码由 useQr 的 1.5s 轮询负责(跨 tab 常跑红线),长期码只在
@@ -620,6 +611,27 @@ export function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
                   <Button variant="secondary" size="sm" disabled={gating} onClick={refreshAll}>
                     {busy === 'refresh' ? t('refresh') + '…' : t('refresh')}
                   </Button>
+                  {/* 扫码次数(2026-11-27 用户反馈:挪进动作条行、挨着刷新二维码;「换一个码」按钮删除)。
+                      次数作用于临时码(pair grant);条件与原折叠行同口径(grant 存在与登录)。 */}
+                  {data && data.grant && !(cfgMode === 'official' && !acctMe) && (
+                    <>
+                      <span style={{ fontSize: 12, color: 'var(--dsw-alias-label-tertiary,#8b8f98)', whiteSpace: 'nowrap', alignSelf: 'center' }}>{t('pairUsesLabel')}</span>
+                      <select
+                        value={uses}
+                        disabled={gating}
+                        onChange={e => setUses(parseInt(e.target.value, 10) || 1)}
+                        style={{
+                          fontSize: 12, padding: '2px 4px', borderRadius: 6,
+                          border: '1px solid rgba(128,128,128,.35)', background: 'transparent',
+                          color: 'inherit', flex: 'none', alignSelf: 'center',
+                        }}
+                      >
+                        {[1, 2, 3, 5, 10].map(n => (
+                          <option key={n} value={n}>{n === 1 ? t('pairUsesOne') : n + ' ' + t('pairUsesTimes')}</option>
+                        ))}
+                      </select>
+                    </>
+                  )}
                   {data && data.panel && !(cfgMode === 'official' && !acctMe) && (
                     <Button variant="primary" size="sm" disabled={gating} onClick={openPanelChain}>
                       {busy === 'open'
@@ -650,47 +662,7 @@ export function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
                   )}
                 </div>
               </div>
-              {/* ---- 折叠行:配对设置(次数 / 换码)——chevron 分隔行,展开不加框 ---- */}
-              {data && data.grant && !(cfgMode === 'official' && !acctMe) && (
-                <>
-                  <button
-                    type="button"
-                    className="dshBrowserCtlCardHead dshBrowserCtlFoldBtn"
-                    data-open={pairSetOpen ? 'true' : 'false'}
-                    onClick={() => setPairSetOpen(o => !o)}
-                  >
-                    <span aria-hidden="true" style={{ display: 'inline-flex', flex: 'none', color: 'var(--dsw-alias-label-tertiary,#8b8f98)', transform: pairSetOpen ? 'rotate(90deg)' : 'none', transition: 'transform .15s ease' }}>
-                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                        <path d="M4 2.5 7.5 6 4 9.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>
-                    </span>
-                    <span style={{ fontSize: 13, fontWeight: 500 }}>{t('pairSettingsTitle')}</span>
-                    <span className="dshBrowserCtlCardStat" style={{ fontWeight: 400 }}>
-                      {uses === 1 ? t('pairUsesOne') : uses + ' ' + t('pairUsesTimes')}
-                    </span>
-                  </button>
-                  {pairSetOpen && (
-                    <div className="dshBrowserCtlUrlRow" style={{ gap: 6 }}>
-                      <span style={{ fontSize: 12, color: 'var(--dsw-alias-label-tertiary,#8b8f98)', whiteSpace: 'nowrap' }}>{t('pairUsesLabel')}</span>
-                      <select
-                        value={uses}
-                        disabled={gating}
-                        onChange={e => setUses(parseInt(e.target.value, 10) || 1)}
-                        style={{
-                          fontSize: 12, padding: '2px 4px', borderRadius: 6,
-                          border: '1px solid rgba(128,128,128,.35)', background: 'transparent',
-                          color: 'inherit', flex: 'none',
-                        }}
-                      >
-                        {[1, 2, 3, 5, 10].map(n => (
-                          <option key={n} value={n}>{n === 1 ? t('pairUsesOne') : n + ' ' + t('pairUsesTimes')}</option>
-                        ))}
-                      </select>
-                      <Button variant="ghost" size="sm" disabled={gating} onClick={refresh}>{t('pairSwap')}</Button>
-                    </div>
-                  )}
-                </>
-              )}
+
               <IosGuideCard t={t} />
               {elevNeed && canElevate && (
                 <div style={{

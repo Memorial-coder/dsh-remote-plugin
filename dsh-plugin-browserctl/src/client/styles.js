@@ -335,10 +335,16 @@ export const css = `
 /* 卡体内部折叠行(签名卡「设备凭证」/推送卡「手动发送 ▼」):复用 CardHead 骨架 */
 .dshBrowserCtlFoldBtn {
   width: 100%;
-  padding: 6px 0;
+  padding: 6px 8px;
   gap: 6px;
+  /* 高亮带自带圆角(2026-11-27 用户反馈 P6):手机 tap 后 :hover 常驻,方角带很扎眼。
+     卡内行不再吃「被卡片 overflow:hidden 裁齐」豁免——行在卡片中部时四角是自己的方角。
+     左右 -8px 出血被 padding 8px 抵消:高亮带内缩到距卡缘 8px,文字仍对齐 body 原 16px 边距。 */
+  border-radius: 8px;
+  margin: 0 -8px;
 }
-/* 展开态的折叠分区标题(设备凭据/配对设置/手动发送/高级)与下方内容之间同样加一道
+/* 独立在面板上的折叠行已不存在(iOS 引导 2026-11-27 升为标准卡片,FoldFree 删除) */
+/* 展开态的折叠分区标题(设备凭据/手动发送/高级)与下方内容之间同样加一道
    浅细分割线(2026-11-27 用户反馈②,同 InsetHead 口径,复用 dsw-alias-border-l1);
    收起态下方无内容,不加线,避免孤线。 */
 .dshBrowserCtlFoldBtn[data-open='true'] {

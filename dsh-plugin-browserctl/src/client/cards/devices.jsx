@@ -184,7 +184,10 @@ export function DevicesSection({ t, reloadToken, onRefresh, disabled }) {
         ok = !!(r && r.ok)
       } else {
         for (const d of devs) {
-          const r = await kickViaGate({ dev: d, onKicked: devs.length === 1 ? onRefresh : undefined })
+          // purge:1(2026-11-27):手动清理(踢下线/解除配对)连档案 husk 一起删——否则安全卡
+          // 设备凭证列表只增不减(kb/06 #43),设备页清了、凭证页还留着。远程面板无管理令牌
+          // 自动降级为普通 kick(P4 口径,与签名卡 revoke/一键去重同一通道);全部踢下线不删档。
+          const r = await kickViaGate({ dev: d, purge: 1, onKicked: devs.length === 1 ? onRefresh : undefined })
           if (!(r && r.ok)) ok = false
         }
         if (devs.length > 1) onRefresh()   // 整组踢:最后统一补拉一次

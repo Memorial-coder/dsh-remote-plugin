@@ -25,6 +25,10 @@ const sigDevices = [
   { dev: 'dmo-mac', name: 'MacBook Pro 14', kind: 'app', ip: '203.0.113.7', online: true, last_seen: NOW() - 45, has_pubkey: true, has_key: true },
   { dev: 'dmo-iphone', name: 'iPhone 15', kind: 'app', ip: '103.236.91.8', online: true, last_seen: NOW() - 90, has_pubkey: true, has_key: true },
   { dev: 'dmo-browser', name: 'Chrome 130 · Windows', kind: 'web', ip: '61.144.9.5', online: false, last_seen: NOW() - 7200, has_pubkey: true, has_key: false },
+  // P6 演示:同机换网后留下的同名不同 IP 已解除授权旧档(husk)——第二层去重的展示与删除候选
+  { dev: 'dmo-win-old1', name: 'Chrome 130 · Windows', kind: 'app', ip: '223.104.3.9', online: false, last_seen: NOW() - 86400, has_pubkey: false, has_key: false },
+  { dev: 'dmo-win-old2', name: 'Chrome 130 · Windows', kind: 'web', ip: '112.10.4.77', online: false, last_seen: NOW() - 2 * 86400, has_pubkey: false, has_key: false },
+  { dev: 'dmo-iphone-old1', name: 'iPhone 15', kind: 'app', ip: '223.104.3.9', online: false, last_seen: NOW() - 3 * 86400, has_pubkey: false, has_key: false },
 ]
 
 const events = [

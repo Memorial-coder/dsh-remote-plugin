@@ -33,7 +33,7 @@ var import_dsh_client_ui_primitives6 = require("@deepseek-ai/dsh-client-ui-primi
 var NS = "browserctl";
 var IS_TEST = /-test$/.test(NS);
 var STYLE_ID = NS + "/styles";
-var VERSION = true ? "1.0.87" : "dev";
+var VERSION = true ? "1.0.88" : "dev";
 var ABOUT_LINKS = {
   website: "https://remote.ymzcc.com/dsh-remote/",
   github: "https://github.com/Memorial-coder/dsh-remote-plugin",
@@ -437,10 +437,16 @@ var css = `
 /* \u5361\u4F53\u5185\u90E8\u6298\u53E0\u884C(\u7B7E\u540D\u5361\u300C\u8BBE\u5907\u51ED\u8BC1\u300D/\u63A8\u9001\u5361\u300C\u624B\u52A8\u53D1\u9001 \u25BC\u300D):\u590D\u7528 CardHead \u9AA8\u67B6 */
 .dshBrowserCtlFoldBtn {
   width: 100%;
-  padding: 6px 0;
+  padding: 6px 8px;
   gap: 6px;
+  /* \u9AD8\u4EAE\u5E26\u81EA\u5E26\u5706\u89D2(2026-11-27 \u7528\u6237\u53CD\u9988 P6):\u624B\u673A tap \u540E :hover \u5E38\u9A7B,\u65B9\u89D2\u5E26\u5F88\u624E\u773C\u3002
+     \u5361\u5185\u884C\u4E0D\u518D\u5403\u300C\u88AB\u5361\u7247 overflow:hidden \u88C1\u9F50\u300D\u8C41\u514D\u2014\u2014\u884C\u5728\u5361\u7247\u4E2D\u90E8\u65F6\u56DB\u89D2\u662F\u81EA\u5DF1\u7684\u65B9\u89D2\u3002
+     \u5DE6\u53F3 -8px \u51FA\u8840\u88AB padding 8px \u62B5\u6D88:\u9AD8\u4EAE\u5E26\u5185\u7F29\u5230\u8DDD\u5361\u7F18 8px,\u6587\u5B57\u4ECD\u5BF9\u9F50 body \u539F 16px \u8FB9\u8DDD\u3002 */
+  border-radius: 8px;
+  margin: 0 -8px;
 }
-/* \u5C55\u5F00\u6001\u7684\u6298\u53E0\u5206\u533A\u6807\u9898(\u8BBE\u5907\u51ED\u636E/\u914D\u5BF9\u8BBE\u7F6E/\u624B\u52A8\u53D1\u9001/\u9AD8\u7EA7)\u4E0E\u4E0B\u65B9\u5185\u5BB9\u4E4B\u95F4\u540C\u6837\u52A0\u4E00\u9053
+/* \u72EC\u7ACB\u5728\u9762\u677F\u4E0A\u7684\u6298\u53E0\u884C\u5DF2\u4E0D\u5B58\u5728(iOS \u5F15\u5BFC 2026-11-27 \u5347\u4E3A\u6807\u51C6\u5361\u7247,FoldFree \u5220\u9664) */
+/* \u5C55\u5F00\u6001\u7684\u6298\u53E0\u5206\u533A\u6807\u9898(\u8BBE\u5907\u51ED\u636E/\u624B\u52A8\u53D1\u9001/\u9AD8\u7EA7)\u4E0E\u4E0B\u65B9\u5185\u5BB9\u4E4B\u95F4\u540C\u6837\u52A0\u4E00\u9053
    \u6D45\u7EC6\u5206\u5272\u7EBF(2026-11-27 \u7528\u6237\u53CD\u9988\u2461,\u540C InsetHead \u53E3\u5F84,\u590D\u7528 dsw-alias-border-l1);
    \u6536\u8D77\u6001\u4E0B\u65B9\u65E0\u5185\u5BB9,\u4E0D\u52A0\u7EBF,\u907F\u514D\u5B64\u7EBF\u3002 */
 .dshBrowserCtlFoldBtn[data-open='true'] {
@@ -2663,7 +2669,7 @@ function DevicesSection({ t, reloadToken, onRefresh, disabled }) {
         ok = !!(r && r.ok);
       } else {
         for (const d of devs) {
-          const r = await kickViaGate({ dev: d, onKicked: devs.length === 1 ? onRefresh : void 0 });
+          const r = await kickViaGate({ dev: d, purge: 1, onKicked: devs.length === 1 ? onRefresh : void 0 });
           if (!(r && r.ok)) ok = false;
         }
         if (devs.length > 1) onRefresh();
@@ -3103,22 +3109,22 @@ function IosGuideCard({ t }) {
   const [open, setOpen] = (0, import_react6.useState)(false);
   const [copied, setCopied] = useToast(1600);
   const site = ABOUT_LINKS.website;
-  return /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)(import_jsx_runtime6.Fragment, { children: [
+  return /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "dshBrowserCtlCard", children: [
     /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)(
       "button",
       {
         type: "button",
-        className: "dshBrowserCtlCardHead dshBrowserCtlFoldBtn",
+        className: "dshBrowserCtlCardHead",
         "data-open": open ? "true" : "false",
         onClick: () => setOpen((o) => !o),
         children: [
           /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { "aria-hidden": "true", style: { display: "inline-flex", flex: "none", color: "var(--dsw-alias-label-tertiary,#8b8f98)", transform: open ? "rotate(90deg)" : "none", transition: "transform .15s ease" }, children: /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("svg", { width: "12", height: "12", viewBox: "0 0 12 12", fill: "none", children: /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("path", { d: "M4 2.5 7.5 6 4 9.5", stroke: "currentColor", strokeWidth: "1.4", strokeLinecap: "round", strokeLinejoin: "round" }) }) }),
-          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { style: { fontSize: 13, fontWeight: 500 }, children: t("linkTitle") }),
+          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { children: t("linkTitle") }),
           /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "dshBrowserCtlCardStat", style: { fontWeight: 400, color: "var(--dsw-alias-label-tertiary,#8b8f98)" }, children: t("linkWebTag") })
         ]
       }
     ),
-    open && /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { style: { display: "flex", flexDirection: "column", gap: 8, padding: "0 2px 4px" }, children: [
+    open && /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "dshBrowserCtlCardBody", "data-open": "true", children: [
       /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "dshBrowserCtlCardDesc", children: t("linkSubtitle") }),
       /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "dshBrowserCtlUrlRow", style: { gap: 8 }, children: [
         /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { className: "dshBrowserCtlUrl", title: site, children: site }),
@@ -3442,52 +3448,69 @@ function SigEnforceCard({ t, reloadToken }) {
       setActing("");
     }
   }
-  const dups = (() => {
+  const dedupePlan = (() => {
     const list = data && data.device_list || [];
-    const groups = {};
-    list.forEach((d) => {
-      const k = (d.name || "") + "|" + (d.ip || "");
-      (groups[k] = groups[k] || []).push(d);
-    });
-    const out = [];
-    Object.keys(groups).forEach((k) => {
-      const g = groups[k];
-      if (g.length < 2) return;
-      const keep = g.slice().sort((a, b) => (b.has_pubkey ? 1 : 0) - (a.has_pubkey ? 1 : 0) || (b.last_seen || 0) - (a.last_seen || 0))[0];
-      g.forEach((d) => {
-        if (d.dev !== keep.dev) out.push(d.dev);
-      });
-    });
-    return out;
-  })();
-  const mergedDevs = (() => {
-    const list = data && data.device_list || [];
-    const groups = /* @__PURE__ */ new Map();
+    const byFace = (a, b) => (b.has_pubkey ? 1 : 0) - (a.has_pubkey ? 1 : 0) || (b.last_seen || 0) - (a.last_seen || 0);
+    const isHusk = (d) => !d.has_pubkey && !d.has_key && !d.online;
+    const ipGroups = /* @__PURE__ */ new Map();
     for (const d of list) {
       const k = (d.name || "") + "|" + (d.ip || "");
-      if (!groups.has(k)) groups.set(k, []);
-      groups.get(k).push(d);
+      if (!ipGroups.has(k)) ipGroups.set(k, []);
+      ipGroups.get(k).push(d);
     }
-    const out = [];
-    for (const g of groups.values()) {
-      const face = g.slice().sort((a, b) => (b.has_pubkey ? 1 : 0) - (a.has_pubkey ? 1 : 0) || (b.last_seen || 0) - (a.last_seen || 0))[0];
-      out.push({ ...face, _dupN: g.length });
+    const faces = [];
+    for (const g of ipGroups.values()) {
+      const face = g.slice().sort(byFace)[0];
+      faces.push({ ...face, _dupN: g.length, _members: g });
     }
-    return out;
+    const nameGroups = /* @__PURE__ */ new Map();
+    for (const f of faces) {
+      const k = f.name || "";
+      if (!nameGroups.has(k)) nameGroups.set(k, []);
+      nameGroups.get(k).push(f);
+    }
+    const absorbed = /* @__PURE__ */ new Set();
+    const huskPurge = [];
+    for (const g of nameGroups.values()) {
+      if (g.length < 2) continue;
+      const realFaces = g.filter((f) => f._members.some((m) => !isHusk(m)));
+      if (realFaces.length > 1) continue;
+      const face = realFaces.length === 1 ? realFaces[0] : g.slice().sort(byFace)[0];
+      for (const f of g) {
+        if (f.dev === face.dev) continue;
+        if (f._members.some((m) => !isHusk(m))) continue;
+        absorbed.add(f.dev);
+        f._members.forEach((m) => {
+          if (m.dev !== face.dev) huskPurge.push(m.dev);
+        });
+        face._dupN += f._dupN;
+      }
+    }
+    const mergedDevs = faces.filter((f) => !absorbed.has(f.dev));
+    const dups = [];
+    for (const g of ipGroups.values()) {
+      if (g.length < 2) continue;
+      const face = g.slice().sort(byFace)[0];
+      g.forEach((d) => {
+        if (d.dev !== face.dev) dups.push(d.dev);
+      });
+    }
+    const purgeDevs = [.../* @__PURE__ */ new Set([...dups, ...huskPurge])];
+    return { mergedDevs, purgeDevs };
   })();
   async function dedupe() {
-    if (acting || !dups.length) return;
+    if (acting || !dedupePlan.purgeDevs.length) return;
     setActing("dedupe");
     setMsg("");
     setDedupeConfirm(false);
     let delN = 0;
     try {
-      for (const dev of dups) {
+      for (const dev of dedupePlan.purgeDevs) {
         const r = await kickViaGate({ dev, purge: 1 });
         const j = r && r.ok ? await r.json().catch(() => ({})) : null;
         if (j && j.ok && j.purged) delN += 1;
       }
-      setMsg(delN === dups.length ? t("sigDedupeDone").replace("{n}", String(delN)) : t("sigDedupePart").replace("{ok}", String(delN)).replace("{n}", String(dups.length)));
+      setMsg(delN === dedupePlan.purgeDevs.length ? t("sigDedupeDone").replace("{n}", String(delN)) : t("sigDedupePart").replace("{ok}", String(delN)).replace("{n}", String(dedupePlan.purgeDevs.length)));
       await refetch();
     } catch (e) {
       setMsg(t("sigFail2"));
@@ -3558,7 +3581,7 @@ function SigEnforceCard({ t, reloadToken }) {
           /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: "dshBrowserCtlCardStat", style: { fontWeight: 400, color: "var(--dsw-alias-label-tertiary,#8b8f98)" }, children: t("sigDevsHint") })
         ] }),
         devsOpen && /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "dshBrowserCtlSigDevs", children: [
-          mergedDevs.map((d) => /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { style: { display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", border: "1px solid var(--dsw-alias-separator,#2a2c33)", borderRadius: 8 }, children: [
+          dedupePlan.mergedDevs.map((d) => /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { style: { display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", border: "1px solid var(--dsw-alias-separator,#2a2c33)", borderRadius: 8 }, children: [
             /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { style: { flex: 1, minWidth: 0 }, children: [
               /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { style: { display: "flex", alignItems: "center", gap: 6, minWidth: 0 }, children: [
                 /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("span", { style: { fontSize: 12, color: "var(--dsw-alias-label-primary,#e7e9ee)", flex: "0 1 auto", minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }, children: [
@@ -3578,11 +3601,11 @@ function SigEnforceCard({ t, reloadToken }) {
             /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { style: { fontSize: 10, padding: "1px 6px", borderRadius: 999, flexShrink: 0, background: d.has_pubkey ? "rgba(52,179,113,.16)" : d.has_key ? "rgba(61,126,255,.14)" : "rgba(229,101,92,.14)", color: d.has_pubkey ? "#34b371" : d.has_key ? "#3d7eff" : "#e5655c" }, children: d.has_pubkey ? t("sigHasPub") : d.has_key ? t("sigHasKeyB") : t("sigRevokedBadge") }),
             /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(Button, { variant: "ghost", size: "sm", className: "dshBrowserCtlBtnDangerSoft", disabled: !!acting, onClick: () => revoke(d.dev), children: acting === d.dev ? t("sigRevoking") : t("sigRevoke") })
           ] }, d.dev)),
-          dups.length > 0 && (dedupeConfirm ? /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "dshBrowserCtlActions", role: "alertdialog", "aria-label": t("sigDedupeYes"), children: [
-            /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { style: { margin: 0, fontSize: 12, lineHeight: "17px", color: "var(--dsw-alias-state-warning-primary,#c78d33)" }, children: t("sigDedupeHint").replace("{n}", String(dups.length)) }),
+          dedupePlan.purgeDevs.length > 0 && (dedupeConfirm ? /* @__PURE__ */ (0, import_jsx_runtime9.jsxs)("div", { className: "dshBrowserCtlActions", role: "alertdialog", "aria-label": t("sigDedupeYes"), children: [
+            /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { style: { margin: 0, fontSize: 12, lineHeight: "17px", color: "var(--dsw-alias-state-warning-primary,#c78d33)" }, children: t("sigDedupeHint").replace("{n}", String(dedupePlan.purgeDevs.length)) }),
             /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(Button, { variant: "primary", size: "sm", disabled: !!acting, onClick: dedupe, children: t("sigDedupeYes") }),
             /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(Button, { variant: "secondary", size: "sm", disabled: !!acting, onClick: () => setDedupeConfirm(false), children: t("sigCancel") })
-          ] }) : /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("div", { style: { display: "flex", justifyContent: "center", paddingTop: 2 }, children: /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(Button, { variant: "secondary", size: "sm", disabled: !!acting, onClick: () => setDedupeConfirm(true), children: t("sigDedupe").replace("{n}", String(dups.length)) }) })),
+          ] }) : /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("div", { style: { display: "flex", justifyContent: "center", paddingTop: 2 }, children: /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(Button, { variant: "secondary", size: "sm", disabled: !!acting, onClick: () => setDedupeConfirm(true), children: t("sigDedupe").replace("{n}", String(dedupePlan.purgeDevs.length)) }) })),
           msg && /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { style: { margin: 0, fontSize: 12, textAlign: "center", color: "var(--dsw-alias-state-success-primary,#34b371)" }, children: msg })
         ] })
       ] }),
@@ -5207,7 +5230,6 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
   const pluginUpdatePending = !!(updateInfo && updateInfo.hasUpdate && updateInfo.latest && lsGet("dsh_plugin_upd_dismiss_" + updateInfo.latest) !== "1");
   const [updPromptClosed, setUpdPromptClosed] = (0, import_react18.useState)("");
   const [pairSeg, setPairSeg] = (0, import_react18.useState)("temp");
-  const [pairSetOpen, setPairSetOpen] = (0, import_react18.useState)(false);
   const [stopConfirm, setStopConfirm] = (0, import_react18.useState)(false);
   const [settingsOpen, setSettingsOpen] = (0, import_react18.useState)(false);
   const [legalDoc, setLegalDoc] = (0, import_react18.useState)(null);
@@ -5222,7 +5244,7 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
   };
   const panel = (0, import_react18.useRef)(null);
   const bellRef = (0, import_react18.useRef)(null);
-  const { data, error, expiresAt, status, retrying, refresh } = useQr(open, reloadToken, uses);
+  const { data, error, expiresAt, status, retrying } = useQr(open, reloadToken, uses);
   const left = useCountdown(expiresAt);
   const run = async (label, fn) => {
     if (busy) return;
@@ -5614,71 +5636,82 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
       )) }),
       /* @__PURE__ */ (0, import_jsx_runtime18.jsxs)("div", { className: "dshBrowserCtlTabBody", children: [
         tab === "connect" && /* @__PURE__ */ (0, import_jsx_runtime18.jsxs)(import_jsx_runtime18.Fragment, { children: [
-          /* @__PURE__ */ (0, import_jsx_runtime18.jsxs)("div", { className: "dshBrowserCtlCard", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime18.jsxs)("div", { className: "dshBrowserCtlCardHead", style: { cursor: "default" }, children: [
-              Svg.link,
-              /* @__PURE__ */ (0, import_jsx_runtime18.jsx)("span", { children: t("connScanTitle") }),
-              /* @__PURE__ */ (0, import_jsx_runtime18.jsx)("span", { className: "dshBrowserCtlCardStat", style: { color: "var(--dsw-alias-label-tertiary,#8b8f98)" }, children: pairSeg === "temp" ? left > 0 ? t("pairLeft") + " " + left + "s" : data && data.once ? t("pairExpired") : "" : t("appReady") })
-            ] }),
-            /* @__PURE__ */ (0, import_jsx_runtime18.jsxs)("div", { className: "dshBrowserCtlCardBody dshBrowserCtlCardBodyTall", "data-open": "true", children: [
-              /* @__PURE__ */ (0, import_jsx_runtime18.jsx)("div", { style: { display: "flex", background: "var(--dsw-alias-bg-layer-1,rgba(255,255,255,0.05))", borderRadius: 9, padding: 3, gap: 3 }, children: [["temp", t("pairSegTemp")], ["long", t("pairSegLong")]].map(([id, label]) => /* @__PURE__ */ (0, import_jsx_runtime18.jsx)(
-                "button",
-                {
-                  type: "button",
-                  onClick: () => setPairSeg(id),
-                  style: {
-                    flex: 1,
-                    border: "none",
-                    /* 选中态圆角 = 容器 radius 9 − padding 3 = 6px(styles.js .dshBrowserCtlTab 同口径) */
-                    borderRadius: 6,
-                    padding: "6px 0",
-                    fontSize: 12,
-                    fontWeight: pairSeg === id ? 600 : 500,
-                    cursor: "pointer",
-                    background: pairSeg === id ? "var(--dsw-alias-bg-layer-3,#333947)" : "transparent",
-                    color: pairSeg === id ? "var(--dsw-alias-label-primary,inherit)" : "var(--dsw-alias-label-tertiary,#8b8f98)"
-                  },
-                  children: label
-                },
-                id
-              )) }),
-              pairSeg === "temp" ? data && data.svg ? cfgMode === "official" && !acctMe ? /* @__PURE__ */ (0, import_jsx_runtime18.jsx)("div", { className: "dshBrowserCtlQrBox", style: { height: 128, display: "flex", alignItems: "center", justifyContent: "center" }, children: /* @__PURE__ */ (0, import_jsx_runtime18.jsx)("span", { style: { color: "#666", fontSize: 12, padding: "0 14px", textAlign: "center" }, children: t("loginRequiredDesc") }) }) : /* @__PURE__ */ (0, import_jsx_runtime18.jsxs)("div", { children: [
-                /* @__PURE__ */ (0, import_jsx_runtime18.jsx)("div", { className: "dshBrowserCtlQrBox", children: /* @__PURE__ */ (0, import_jsx_runtime18.jsx)("img", { alt: t("qrAlt"), src: "data:image/svg+xml;charset=utf-8," + encodeURIComponent(data.svg) }) }),
-                /* @__PURE__ */ (0, import_jsx_runtime18.jsx)("p", { style: {
-                  margin: "4px 0 0",
+          /* @__PURE__ */ (0, import_jsx_runtime18.jsx)("div", { className: "dshBrowserCtlCard", children: /* @__PURE__ */ (0, import_jsx_runtime18.jsxs)("div", { className: "dshBrowserCtlCardBody dshBrowserCtlCardBodyTall", "data-open": "true", style: { paddingTop: 12 }, children: [
+            /* @__PURE__ */ (0, import_jsx_runtime18.jsx)("div", { style: { display: "flex", background: "var(--dsw-alias-bg-layer-1,rgba(255,255,255,0.05))", borderRadius: 9, padding: 3, gap: 3 }, children: [["temp", t("pairSegTemp")], ["long", t("pairSegLong")]].map(([id, label]) => /* @__PURE__ */ (0, import_jsx_runtime18.jsx)(
+              "button",
+              {
+                type: "button",
+                onClick: () => setPairSeg(id),
+                style: {
+                  flex: 1,
+                  border: "none",
+                  /* 选中态圆角 = 容器 radius 9 − padding 3 = 6px(styles.js .dshBrowserCtlTab 同口径) */
+                  borderRadius: 6,
+                  padding: "6px 0",
                   fontSize: 12,
-                  textAlign: "center",
-                  color: left > 0 ? "var(--dsw-alias-label-tertiary,#8b8f98)" : "var(--dsw-alias-state-error-primary,#e5655c)"
-                }, children: left > 0 ? /* @__PURE__ */ (0, import_jsx_runtime18.jsxs)("span", { children: [
-                  status && status.uses > 1 ? /* @__PURE__ */ (0, import_jsx_runtime18.jsxs)("span", { style: { color: "var(--dsw-alias-label-secondary,#666)" }, children: [
-                    t("pairUses"),
-                    " ",
-                    status.remaining,
-                    "/",
-                    status.uses,
-                    " \xB7 "
-                  ] }) : /* @__PURE__ */ (0, import_jsx_runtime18.jsxs)("span", { children: [
-                    t("pairOnce"),
-                    " \xB7 "
-                  ] }),
-                  /* @__PURE__ */ (0, import_jsx_runtime18.jsxs)("span", { style: { color: left <= 10 ? "var(--dsw-alias-state-error-primary,#e5655c)" : "inherit" }, children: [
-                    t("pairLeft"),
-                    " ",
-                    left,
-                    "s"
-                  ] })
-                ] }) : data.once ? /* @__PURE__ */ (0, import_jsx_runtime18.jsx)("span", { children: t("pairExpired") }) : /* @__PURE__ */ (0, import_jsx_runtime18.jsx)("span", { style: { color: "var(--dsw-alias-label-tertiary,#8b8f98)" }, children: t("pairStatic") }) }),
-                data.once ? /* @__PURE__ */ (0, import_jsx_runtime18.jsx)("p", { style: { margin: "4px 0 0", fontSize: 11, textAlign: "center", color: "var(--dsw-alias-label-tertiary,#8b8f98)" }, children: t("pairAppTempNote") }) : null
-              ] }) : /* @__PURE__ */ (0, import_jsx_runtime18.jsx)("div", { className: "dshBrowserCtlQrBox", style: { height: 128 }, children: busy === "start" ? /* @__PURE__ */ (0, import_jsx_runtime18.jsxs)("span", { className: "dshBrowserCtlQrLoading", children: [
-                /* @__PURE__ */ (0, import_jsx_runtime18.jsx)("span", { className: "dshBrowserCtlSpinner", "aria-hidden": "true" }),
-                t("starting")
-              ] }) : retrying ? (
-                // 隧道正在自愈:自动轮询中,二维码一就绪就会出现,不需要用户再点一次
-                /* @__PURE__ */ (0, import_jsx_runtime18.jsxs)("span", { className: "dshBrowserCtlQrLoading", children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime18.jsx)("span", { className: "dshBrowserCtlSpinner", "aria-hidden": "true" }),
-                  t("statusTunnelBuilding")
+                  fontWeight: pairSeg === id ? 600 : 500,
+                  cursor: "pointer",
+                  background: pairSeg === id ? "var(--dsw-alias-bg-layer-3,#333947)" : "transparent",
+                  color: pairSeg === id ? "var(--dsw-alias-label-primary,inherit)" : "var(--dsw-alias-label-tertiary,#8b8f98)"
+                },
+                children: label
+              },
+              id
+            )) }),
+            pairSeg === "temp" ? data && data.svg ? cfgMode === "official" && !acctMe ? /* @__PURE__ */ (0, import_jsx_runtime18.jsx)("div", { className: "dshBrowserCtlQrBox", style: { height: 128, display: "flex", alignItems: "center", justifyContent: "center" }, children: /* @__PURE__ */ (0, import_jsx_runtime18.jsx)("span", { style: { color: "#666", fontSize: 12, padding: "0 14px", textAlign: "center" }, children: t("loginRequiredDesc") }) }) : /* @__PURE__ */ (0, import_jsx_runtime18.jsxs)("div", { children: [
+              /* @__PURE__ */ (0, import_jsx_runtime18.jsx)("div", { className: "dshBrowserCtlQrBox", children: /* @__PURE__ */ (0, import_jsx_runtime18.jsx)("img", { alt: t("qrAlt"), src: "data:image/svg+xml;charset=utf-8," + encodeURIComponent(data.svg) }) }),
+              /* @__PURE__ */ (0, import_jsx_runtime18.jsx)("p", { style: {
+                margin: "4px 0 0",
+                fontSize: 12,
+                textAlign: "center",
+                color: left > 0 ? "var(--dsw-alias-label-tertiary,#8b8f98)" : "var(--dsw-alias-state-error-primary,#e5655c)"
+              }, children: left > 0 ? /* @__PURE__ */ (0, import_jsx_runtime18.jsxs)("span", { children: [
+                status && status.uses > 1 ? /* @__PURE__ */ (0, import_jsx_runtime18.jsxs)("span", { style: { color: "var(--dsw-alias-label-secondary,#666)" }, children: [
+                  t("pairUses"),
+                  " ",
+                  status.remaining,
+                  "/",
+                  status.uses,
+                  " \xB7 "
+                ] }) : /* @__PURE__ */ (0, import_jsx_runtime18.jsxs)("span", { children: [
+                  t("pairOnce"),
+                  " \xB7 "
+                ] }),
+                /* @__PURE__ */ (0, import_jsx_runtime18.jsxs)("span", { style: { color: left <= 10 ? "var(--dsw-alias-state-error-primary,#e5655c)" : "inherit" }, children: [
+                  t("pairLeft"),
+                  " ",
+                  left,
+                  "s"
                 ] })
-              ) : startErr ? /* @__PURE__ */ (0, import_jsx_runtime18.jsxs)("span", { style: {
+              ] }) : data.once ? /* @__PURE__ */ (0, import_jsx_runtime18.jsx)("span", { children: t("pairExpired") }) : /* @__PURE__ */ (0, import_jsx_runtime18.jsx)("span", { style: { color: "var(--dsw-alias-label-tertiary,#8b8f98)" }, children: t("pairStatic") }) }),
+              data.once ? /* @__PURE__ */ (0, import_jsx_runtime18.jsx)("p", { style: { margin: "4px 0 0", fontSize: 11, textAlign: "center", color: "var(--dsw-alias-label-tertiary,#8b8f98)" }, children: t("pairAppTempNote") }) : null
+            ] }) : /* @__PURE__ */ (0, import_jsx_runtime18.jsx)("div", { className: "dshBrowserCtlQrBox", style: { height: 128 }, children: busy === "start" ? /* @__PURE__ */ (0, import_jsx_runtime18.jsxs)("span", { className: "dshBrowserCtlQrLoading", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime18.jsx)("span", { className: "dshBrowserCtlSpinner", "aria-hidden": "true" }),
+              t("starting")
+            ] }) : retrying ? (
+              // 隧道正在自愈:自动轮询中,二维码一就绪就会出现,不需要用户再点一次
+              /* @__PURE__ */ (0, import_jsx_runtime18.jsxs)("span", { className: "dshBrowserCtlQrLoading", children: [
+                /* @__PURE__ */ (0, import_jsx_runtime18.jsx)("span", { className: "dshBrowserCtlSpinner", "aria-hidden": "true" }),
+                t("statusTunnelBuilding")
+              ] })
+            ) : startErr ? /* @__PURE__ */ (0, import_jsx_runtime18.jsxs)("span", { style: {
+              color: "var(--dsw-alias-state-error-primary,#e5655c)",
+              fontSize: 11,
+              padding: "0 12px",
+              textAlign: "left",
+              whiteSpace: "pre-wrap",
+              overflowY: "auto",
+              maxHeight: 120,
+              lineHeight: 1.5,
+              display: "block"
+            }, children: [
+              t("startFailed"),
+              "\n",
+              startErr
+            ] }) : error ? (
+              // 二维码/配对接口失败(最常见:frp 隧道未连通,host 半直接回 503)时
+              // 把原因原文显示在二维码位置,而不是只显示一句"没有可用链接"让用户猜。
+              /* @__PURE__ */ (0, import_jsx_runtime18.jsx)("span", { style: {
                 color: "var(--dsw-alias-state-error-primary,#e5655c)",
                 fontSize: 11,
                 padding: "0 12px",
@@ -5688,34 +5721,16 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
                 maxHeight: 120,
                 lineHeight: 1.5,
                 display: "block"
-              }, children: [
-                t("startFailed"),
-                "\n",
-                startErr
-              ] }) : error ? (
-                // 二维码/配对接口失败(最常见:frp 隧道未连通,host 半直接回 503)时
-                // 把原因原文显示在二维码位置,而不是只显示一句"没有可用链接"让用户猜。
-                /* @__PURE__ */ (0, import_jsx_runtime18.jsx)("span", { style: {
-                  color: "var(--dsw-alias-state-error-primary,#e5655c)",
-                  fontSize: 11,
-                  padding: "0 12px",
-                  textAlign: "left",
-                  whiteSpace: "pre-wrap",
-                  overflowY: "auto",
-                  maxHeight: 120,
-                  lineHeight: 1.5,
-                  display: "block"
-                }, children: error })
-              ) : /* @__PURE__ */ (0, import_jsx_runtime18.jsx)("span", { style: { color: "#666", fontSize: 12, padding: "0 14px", textAlign: "center" }, children: t("statusLoading") }) }) : /* @__PURE__ */ (0, import_jsx_runtime18.jsx)(PairLongSegment, { t, reloadToken }),
-              pairSeg === "temp" && data && !(cfgMode === "official" && !acctMe) && /* @__PURE__ */ (0, import_jsx_runtime18.jsxs)("div", { className: "dshBrowserCtlUrlRow", children: [
-                /* @__PURE__ */ (0, import_jsx_runtime18.jsx)("div", { className: "dshBrowserCtlUrl", title: data.url, children: data.url }),
-                /* @__PURE__ */ (0, import_jsx_runtime18.jsx)(Button, { variant: "ghost", size: "sm", onClick: () => {
-                  navigator.clipboard?.writeText(data.url).then(() => setCopied(true)).catch(() => {
-                  });
-                }, children: copied ? t("copied") : t("copyLink") })
-              ] })
+              }, children: error })
+            ) : /* @__PURE__ */ (0, import_jsx_runtime18.jsx)("span", { style: { color: "#666", fontSize: 12, padding: "0 14px", textAlign: "center" }, children: t("statusLoading") }) }) : /* @__PURE__ */ (0, import_jsx_runtime18.jsx)(PairLongSegment, { t, reloadToken }),
+            pairSeg === "temp" && data && !(cfgMode === "official" && !acctMe) && /* @__PURE__ */ (0, import_jsx_runtime18.jsxs)("div", { className: "dshBrowserCtlUrlRow", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime18.jsx)("div", { className: "dshBrowserCtlUrl", title: data.url, children: data.url }),
+              /* @__PURE__ */ (0, import_jsx_runtime18.jsx)(Button, { variant: "ghost", size: "sm", onClick: () => {
+                navigator.clipboard?.writeText(data.url).then(() => setCopied(true)).catch(() => {
+                });
+              }, children: copied ? t("copied") : t("copyLink") })
             ] })
-          ] }),
+          ] }) }),
           /* @__PURE__ */ (0, import_jsx_runtime18.jsx)("div", { className: "dshBrowserCtlCard", style: { padding: 12 }, children: /* @__PURE__ */ (0, import_jsx_runtime18.jsxs)("div", { className: "dshBrowserCtlActions", children: [
             !data && /* @__PURE__ */ (0, import_jsx_runtime18.jsx)(Button, { variant: "primary", size: "sm", disabled: gating, onClick: startChain, children: busy === "start" ? /* @__PURE__ */ (0, import_jsx_runtime18.jsxs)(import_jsx_runtime18.Fragment, { children: [
               /* @__PURE__ */ (0, import_jsx_runtime18.jsx)("span", { className: "dshBrowserCtlSpinner", "aria-hidden": "true" }),
@@ -5723,6 +5738,28 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
               t("starting")
             ] }) : t("startCtl") }),
             /* @__PURE__ */ (0, import_jsx_runtime18.jsx)(Button, { variant: "secondary", size: "sm", disabled: gating, onClick: refreshAll, children: busy === "refresh" ? t("refresh") + "\u2026" : t("refresh") }),
+            data && data.grant && !(cfgMode === "official" && !acctMe) && /* @__PURE__ */ (0, import_jsx_runtime18.jsxs)(import_jsx_runtime18.Fragment, { children: [
+              /* @__PURE__ */ (0, import_jsx_runtime18.jsx)("span", { style: { fontSize: 12, color: "var(--dsw-alias-label-tertiary,#8b8f98)", whiteSpace: "nowrap", alignSelf: "center" }, children: t("pairUsesLabel") }),
+              /* @__PURE__ */ (0, import_jsx_runtime18.jsx)(
+                "select",
+                {
+                  value: uses,
+                  disabled: gating,
+                  onChange: (e) => setUses(parseInt(e.target.value, 10) || 1),
+                  style: {
+                    fontSize: 12,
+                    padding: "2px 4px",
+                    borderRadius: 6,
+                    border: "1px solid rgba(128,128,128,.35)",
+                    background: "transparent",
+                    color: "inherit",
+                    flex: "none",
+                    alignSelf: "center"
+                  },
+                  children: [1, 2, 3, 5, 10].map((n) => /* @__PURE__ */ (0, import_jsx_runtime18.jsx)("option", { value: n, children: n === 1 ? t("pairUsesOne") : n + " " + t("pairUsesTimes") }, n))
+                }
+              )
+            ] }),
             data && data.panel && !(cfgMode === "official" && !acctMe) && /* @__PURE__ */ (0, import_jsx_runtime18.jsx)(Button, { variant: "primary", size: "sm", disabled: gating, onClick: openPanelChain, children: busy === "open" ? /* @__PURE__ */ (0, import_jsx_runtime18.jsxs)(import_jsx_runtime18.Fragment, { children: [
               /* @__PURE__ */ (0, import_jsx_runtime18.jsx)("span", { className: "dshBrowserCtlSpinner", "aria-hidden": "true" }),
               " ",
@@ -5752,44 +5789,6 @@ function BrowserCtlOverlay({ useStore, actions, t, initialTab }) {
               }
             )
           ] }) }),
-          data && data.grant && !(cfgMode === "official" && !acctMe) && /* @__PURE__ */ (0, import_jsx_runtime18.jsxs)(import_jsx_runtime18.Fragment, { children: [
-            /* @__PURE__ */ (0, import_jsx_runtime18.jsxs)(
-              "button",
-              {
-                type: "button",
-                className: "dshBrowserCtlCardHead dshBrowserCtlFoldBtn",
-                "data-open": pairSetOpen ? "true" : "false",
-                onClick: () => setPairSetOpen((o) => !o),
-                children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime18.jsx)("span", { "aria-hidden": "true", style: { display: "inline-flex", flex: "none", color: "var(--dsw-alias-label-tertiary,#8b8f98)", transform: pairSetOpen ? "rotate(90deg)" : "none", transition: "transform .15s ease" }, children: /* @__PURE__ */ (0, import_jsx_runtime18.jsx)("svg", { width: "12", height: "12", viewBox: "0 0 12 12", fill: "none", children: /* @__PURE__ */ (0, import_jsx_runtime18.jsx)("path", { d: "M4 2.5 7.5 6 4 9.5", stroke: "currentColor", strokeWidth: "1.4", strokeLinecap: "round", strokeLinejoin: "round" }) }) }),
-                  /* @__PURE__ */ (0, import_jsx_runtime18.jsx)("span", { style: { fontSize: 13, fontWeight: 500 }, children: t("pairSettingsTitle") }),
-                  /* @__PURE__ */ (0, import_jsx_runtime18.jsx)("span", { className: "dshBrowserCtlCardStat", style: { fontWeight: 400 }, children: uses === 1 ? t("pairUsesOne") : uses + " " + t("pairUsesTimes") })
-                ]
-              }
-            ),
-            pairSetOpen && /* @__PURE__ */ (0, import_jsx_runtime18.jsxs)("div", { className: "dshBrowserCtlUrlRow", style: { gap: 6 }, children: [
-              /* @__PURE__ */ (0, import_jsx_runtime18.jsx)("span", { style: { fontSize: 12, color: "var(--dsw-alias-label-tertiary,#8b8f98)", whiteSpace: "nowrap" }, children: t("pairUsesLabel") }),
-              /* @__PURE__ */ (0, import_jsx_runtime18.jsx)(
-                "select",
-                {
-                  value: uses,
-                  disabled: gating,
-                  onChange: (e) => setUses(parseInt(e.target.value, 10) || 1),
-                  style: {
-                    fontSize: 12,
-                    padding: "2px 4px",
-                    borderRadius: 6,
-                    border: "1px solid rgba(128,128,128,.35)",
-                    background: "transparent",
-                    color: "inherit",
-                    flex: "none"
-                  },
-                  children: [1, 2, 3, 5, 10].map((n) => /* @__PURE__ */ (0, import_jsx_runtime18.jsx)("option", { value: n, children: n === 1 ? t("pairUsesOne") : n + " " + t("pairUsesTimes") }, n))
-                }
-              ),
-              /* @__PURE__ */ (0, import_jsx_runtime18.jsx)(Button, { variant: "ghost", size: "sm", disabled: gating, onClick: refresh, children: t("pairSwap") })
-            ] })
-          ] }),
           /* @__PURE__ */ (0, import_jsx_runtime18.jsx)(IosGuideCard, { t }),
           elevNeed && canElevate && /* @__PURE__ */ (0, import_jsx_runtime18.jsxs)("div", { style: {
             display: "flex",
@@ -6214,7 +6213,7 @@ var zh_default = {
     sigCounts: "\u8BBE\u5907 {d} \xB7 \u6301\u5BC6\u94A5 {k} \xB7 \u6301\u516C\u94A5 {p}",
     sigDedupe: "\u4E00\u952E\u53BB\u91CD({n})",
     sigDedupeDone: "\u5DF2\u5220\u9664 {n} \u53F0\u91CD\u590D\u6863\u6848",
-    sigDedupeHint: "\u540C\u673A\u91CD\u590D\u6863\u6848 {n} \u53F0:\u5220\u9664\u591A\u4F59\u6863\u6848(\u5E76\u505C\u6B62\u5176\u6388\u6743),\u53EA\u4FDD\u7559\u6700\u65B0\u4E00\u53F0",
+    sigDedupeHint: "\u91CD\u590D\u65E7\u6863 {n} \u53F0:\u5220\u9664\u591A\u4F59\u65E7\u6863(\u5E76\u505C\u6B62\u5176\u6388\u6743),\u6BCF\u53F0\u53EA\u4FDD\u7559\u6700\u65B0/\u5DF2\u6388\u6743\u7684\u4E00\u6761;\u540C\u673A\u6362\u7F51\u540E\u540C\u540D\u4E0D\u540C IP \u7684\u5DF2\u89E3\u9664\u6388\u6743\u65E7\u6863\u4E5F\u7B97\u91CD\u590D",
     sigDedupePart: "\u5DF2\u5220\u9664 {ok}/{n} \u53F0,\u5176\u4F59\u53EA\u505C\u6B62\u6388\u6743(\u5220\u6863\u9700\u65B0\u7248\u95F8\u673A+\u672C\u673A\u9762\u677F)",
     sigDedupeYes: "\u786E\u8BA4\u53BB\u91CD",
     sigDevs: "\u8BBE\u5907\u51ED\u8BC1",
@@ -6623,7 +6622,7 @@ var en_default = {
     sigCounts: "Devices {d} \xB7 With key {k} \xB7 With pubkey {p}",
     sigDedupe: "Dedupe ({n})",
     sigDedupeDone: "Removed {n} duplicate records",
-    sigDedupeHint: "{n} duplicate records of the same device: delete the extras (and revoke them), keep the latest",
+    sigDedupeHint: "{n} stale duplicate records: the extras will be purged (and revoked), keeping the newest/authorized one per device; same-name revoked records from different IPs count too",
     sigDedupePart: "Removed {ok}/{n}; the rest were only revoked (deletion needs the new gate + local panel)",
     sigDedupeYes: "Confirm dedupe",
     sigDevs: "Device credentials",

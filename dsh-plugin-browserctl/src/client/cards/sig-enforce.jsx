@@ -136,56 +136,80 @@ export function SigEnforceCard({ t, reloadToken }) {
       } else setMsg(t('sigFail2'))
     } catch (e) { setMsg(t('sigFail2')) } finally { setActing('') }
   }
-  const dups = (() => {
+  // P6 去重两层(2026-11-27 用户反馈「手动去重没做」):
+  // 第一层(P5 口径):名称+IP 归并同机重复档案。
+  // 第二层(新增):同机换网后 IP 会变,「同名不同 IP」的已解除授权旧档(husk)永远凑不齐
+  // 名称+IP 键 → 展示归并与「一键去重」按钮都不出现,列表越积越多。按「设备名」再归并
+  // 一层:组内真实设备(有公钥/有密钥/在线)≤1 时,husk 旧档展示层并入 face 行(徽标计数),
+  // 并列为删除候选;组内 ≥2 台真实设备同名(UA 名撞车,如两台同型号 iPhone)→ 整组不动,
+  // 绝不误并误删。真删档仍走 kickViaGate purge 契约逐台核对 purged(P4/kb/06 #43)。
+  const dedupePlan = (() => {
     const list = (data && data.device_list) || []
-    const groups = {}
-    list.forEach(d => { const k = (d.name || '') + '|' + (d.ip || ''); (groups[k] = groups[k] || []).push(d) })
-    const out = []
-    Object.keys(groups).forEach(k => {
-      const g = groups[k]
-      if (g.length < 2) return
-      const keep = g.slice().sort((a, b) => ((b.has_pubkey ? 1 : 0) - (a.has_pubkey ? 1 : 0)) || ((b.last_seen || 0) - (a.last_seen || 0)))[0]
-      g.forEach(d => { if (d.dev !== keep.dev) out.push(d.dev) })
-    })
-    return out
-  })()
-  // P5 展示层自动去重(2026-11-27 用户反馈③):按 名称+IP 身份键归并同机重复档案
-  // (kb/06 #43:踢出+重配对每次发新 dev id,husk 只增不减),列表只渲染每组保留行
-  // (优先有公钥/最新一条),合并行带「重复 N 条」徽标;真删档仍走「一键去重」
-  // (kick purge 契约,P4,逐台核对 purged 响应)。纯渲染层归并,不改闸机语义。
-  const mergedDevs = (() => {
-    const list = (data && data.device_list) || []
-    const groups = new Map()
+    const byFace = (a, b) => ((b.has_pubkey ? 1 : 0) - (a.has_pubkey ? 1 : 0)) || ((b.last_seen || 0) - (a.last_seen || 0))
+    const isHusk = d => !d.has_pubkey && !d.has_key && !d.online
+    // 第一层:同名+同 IP
+    const ipGroups = new Map()
     for (const d of list) {
       const k = (d.name || '') + '|' + (d.ip || '')
-      if (!groups.has(k)) groups.set(k, [])
-      groups.get(k).push(d)
+      if (!ipGroups.has(k)) ipGroups.set(k, [])
+      ipGroups.get(k).push(d)
     }
-    const out = []
-    for (const g of groups.values()) {
-      const face = g.slice().sort((a, b) => ((b.has_pubkey ? 1 : 0) - (a.has_pubkey ? 1 : 0)) || ((b.last_seen || 0) - (a.last_seen || 0)))[0]
-      out.push({ ...face, _dupN: g.length })
+    const faces = []
+    for (const g of ipGroups.values()) {
+      const face = g.slice().sort(byFace)[0]
+      faces.push({ ...face, _dupN: g.length, _members: g })
     }
-    return out
+    // 第二层:同名 husk 旧档跨 IP 并入 face
+    const nameGroups = new Map()
+    for (const f of faces) {
+      const k = f.name || ''
+      if (!nameGroups.has(k)) nameGroups.set(k, [])
+      nameGroups.get(k).push(f)
+    }
+    const absorbed = new Set()
+    const huskPurge = []
+    for (const g of nameGroups.values()) {
+      if (g.length < 2) continue
+      const realFaces = g.filter(f => f._members.some(m => !isHusk(m)))
+      if (realFaces.length > 1) continue
+      const face = realFaces.length === 1 ? realFaces[0] : g.slice().sort(byFace)[0]
+      for (const f of g) {
+        if (f.dev === face.dev) continue
+        if (f._members.some(m => !isHusk(m))) continue
+        absorbed.add(f.dev)
+        f._members.forEach(m => { if (m.dev !== face.dev) huskPurge.push(m.dev) })
+        face._dupN += f._dupN
+      }
+    }
+    const mergedDevs = faces.filter(f => !absorbed.has(f.dev))
+    // 删除候选 = 旧键(同名+同 IP,除保留行)+ 新增的同名 husk 旧档,按 dev 去重
+    const dups = []
+    for (const g of ipGroups.values()) {
+      if (g.length < 2) continue
+      const face = g.slice().sort(byFace)[0]
+      g.forEach(d => { if (d.dev !== face.dev) dups.push(d.dev) })
+    }
+    const purgeDevs = [...new Set([...dups, ...huskPurge])]
+    return { mergedDevs, purgeDevs }
   })()
   async function dedupe() {
-    if (acting || !dups.length) return
+    if (acting || !dedupePlan.purgeDevs.length) return
     setActing('dedupe'); setMsg(''); setDedupeConfirm(false)
     // 2026-11-24 去重修正:闸机 kick 只踢会话+作废密钥,档案 husk 留在注册表,
     // 去重后列表不变(「去重无用」)。改为带 purge:1 请求删档,并逐台核对响应:
     // 只有 purged=true 才算删掉;闸机未升级/非本机面板只 stop 授权时如实报差值。
     let delN = 0
     try {
-      for (const dev of dups) {
+      for (const dev of dedupePlan.purgeDevs) {
         // kick 双通道统一走 kickViaGate,带 purge:1 删档(闸机 kick 只踢会话+作废密钥,
         // 档案 husk 留在注册表;purge 需新版闸机才真删,响应 purged=false 如实报差值)
         const r = await kickViaGate({ dev, purge: 1 })
         const j = (r && r.ok) ? await r.json().catch(() => ({})) : null
         if (j && j.ok && j.purged) delN += 1
       }
-      setMsg(delN === dups.length
+      setMsg(delN === dedupePlan.purgeDevs.length
         ? t('sigDedupeDone').replace('{n}', String(delN))
-        : t('sigDedupePart').replace('{ok}', String(delN)).replace('{n}', String(dups.length)))
+        : t('sigDedupePart').replace('{ok}', String(delN)).replace('{n}', String(dedupePlan.purgeDevs.length)))
       await refetch()
     } catch (e) { setMsg(t('sigFail2')) } finally { setActing('') }
   }
@@ -266,7 +290,7 @@ export function SigEnforceCard({ t, reloadToken }) {
             </button>
             {devsOpen && (
               <div className="dshBrowserCtlSigDevs">
-                {mergedDevs.map(d => (
+                {dedupePlan.mergedDevs.map(d => (
                   <div key={d.dev} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', border: '1px solid var(--dsw-alias-separator,#2a2c33)', borderRadius: 8 }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
@@ -289,17 +313,17 @@ export function SigEnforceCard({ t, reloadToken }) {
                     <Button variant="ghost" size="sm" className="dshBrowserCtlBtnDangerSoft" disabled={!!acting} onClick={() => revoke(d.dev)}>{acting === d.dev ? t('sigRevoking') : t('sigRevoke')}</Button>
                   </div>
                 ))}
-                {dups.length > 0 && (
+                {dedupePlan.purgeDevs.length > 0 && (
                   dedupeConfirm ? (
                     <div className="dshBrowserCtlActions" role="alertdialog" aria-label={t('sigDedupeYes')}>
-                      <p style={{ margin: 0, fontSize: 12, lineHeight: '17px', color: 'var(--dsw-alias-state-warning-primary,#c78d33)' }}>{t('sigDedupeHint').replace('{n}', String(dups.length))}</p>
+                      <p style={{ margin: 0, fontSize: 12, lineHeight: '17px', color: 'var(--dsw-alias-state-warning-primary,#c78d33)' }}>{t('sigDedupeHint').replace('{n}', String(dedupePlan.purgeDevs.length))}</p>
                       <Button variant="primary" size="sm" disabled={!!acting} onClick={dedupe}>{t('sigDedupeYes')}</Button>
                       <Button variant="secondary" size="sm" disabled={!!acting} onClick={() => setDedupeConfirm(false)}>{t('sigCancel')}</Button>
                     </div>
                   ) : (
                     <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 2 }}>
                       <Button variant="secondary" size="sm" disabled={!!acting} onClick={() => setDedupeConfirm(true)}>
-                        {t('sigDedupe').replace('{n}', String(dups.length))}
+                        {t('sigDedupe').replace('{n}', String(dedupePlan.purgeDevs.length))}
                       </Button>
                     </div>
                   )

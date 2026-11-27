@@ -1,5 +1,7 @@
-// ---------- iOS / 无 App 设备网页绑定引导(B2 折叠行版,对照 P1) ----------
-// 从「独立卡片」降级为「chevron 分隔行」:展开后直接是行,不加框(mockup P7 口径)。
+// ---------- iOS / 无 App 设备网页绑定引导(2026-11-27 用户反馈:升为标准卡片) ----------
+// 沿革:曾是「面板上的裸折叠行」(chevron 分隔行,不加框)——hover 高亮带通到面板
+// 边缘、四角自己露方,用户拍板「和上面似的套一个框」→ 升为标准卡片(Card 折叠头 +
+// CardBody),与连接页其它卡片同构,裸行专用的 FoldFree 修饰类随之删除。
 // 逻辑零改动:2026-11-17 起不再生成 PWA 引导链接,无 App 设备走「官网 + 长期码」绑定。
 
 import { useState } from 'react'
@@ -8,14 +10,14 @@ import { useToast } from '../hooks.js'
 import { Button } from '../ui.jsx'
 
 export function IosGuideCard({ t }) {
-  const [open, setOpen] = useState(false) // 默认收起(P1 折叠行口径)
+  const [open, setOpen] = useState(false) // 默认收起
   const [copied, setCopied] = useToast(1600) // B1 useToast
   const site = ABOUT_LINKS.website
   return (
-    <>
+    <div className="dshBrowserCtlCard">
       <button
         type="button"
-        className="dshBrowserCtlCardHead dshBrowserCtlFoldBtn"
+        className="dshBrowserCtlCardHead"
         data-open={open ? 'true' : 'false'}
         onClick={() => setOpen(o => !o)}
       >
@@ -24,11 +26,11 @@ export function IosGuideCard({ t }) {
             <path d="M4 2.5 7.5 6 4 9.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </span>
-        <span style={{ fontSize: 13, fontWeight: 500 }}>{t('linkTitle')}</span>
+        <span>{t('linkTitle')}</span>
         <span className="dshBrowserCtlCardStat" style={{ fontWeight: 400, color: 'var(--dsw-alias-label-tertiary,#8b8f98)' }}>{t('linkWebTag')}</span>
       </button>
       {open && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '0 2px 4px' }}>
+        <div className="dshBrowserCtlCardBody" data-open="true">
           <p className="dshBrowserCtlCardDesc">{t('linkSubtitle')}</p>
           <div className="dshBrowserCtlUrlRow" style={{ gap: 8 }}>
             <div className="dshBrowserCtlUrl" title={site}>{site}</div>
@@ -49,6 +51,6 @@ export function IosGuideCard({ t }) {
           <p className="dshBrowserCtlCardDesc">{t('linkNote')}</p>
         </div>
       )}
-    </>
+    </div>
   )
 }

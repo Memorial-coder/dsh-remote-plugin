@@ -281,7 +281,7 @@ export default {
   "sigCounts": "设备 {d} · 持密钥 {k} · 持公钥 {p}",
   "sigDedupe": "一键去重({n})",
   "sigDedupeDone": "已删除 {n} 台重复档案",
-  "sigDedupeHint": "同机重复档案 {n} 台:删除多余档案(并停止其授权),只保留最新一台",
+  "sigDedupeHint": "重复旧档 {n} 台:删除多余旧档(并停止其授权),每台只保留最新/已授权的一条;同机换网后同名不同 IP 的已解除授权旧档也算重复",
   "sigDedupePart": "已删除 {ok}/{n} 台,其余只停止授权(删档需新版闸机+本机面板)",
   "sigDedupeYes": "确认去重",
   "sigDevs": "设备凭证",

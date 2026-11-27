@@ -286,7 +286,7 @@
     "sigCounts": "Devices {d} · With key {k} · With pubkey {p}",
     "sigDedupe": "Dedupe ({n})",
     "sigDedupeDone": "Removed {n} duplicate records",
-    "sigDedupeHint": "{n} duplicate records of the same device: delete the extras (and revoke them), keep the latest",
+    "sigDedupeHint": "{n} stale duplicate records: the extras will be purged (and revoked), keeping the newest/authorized one per device; same-name revoked records from different IPs count too",
     "sigDedupePart": "Removed {ok}/{n}; the rest were only revoked (deletion needs the new gate + local panel)",
     "sigDedupeYes": "Confirm dedupe",
     "sigDevs": "Device credentials",
